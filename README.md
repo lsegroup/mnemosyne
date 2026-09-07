@@ -24,7 +24,8 @@ npm run build
 # one-time: build the index from the corpus
 node packages/server/dist/bin/mnemosyne.js reindex --repo .
 
-# shared HTTP server (MCP at /mcp, REST at /)
+# shared HTTP server: serves http://127.0.0.1:40000/mnemosyne
+#   MCP at  /mnemosyne/mcp    REST under  /mnemosyne/
 MNEMOSYNE_BEARER_TOKEN=secret npm run serve
 
 # or per-user, editor-spawned:
@@ -36,14 +37,15 @@ node packages/server/dist/bin/mnemosyne.js serve --stdio --repo .
 MCP-capable client (Claude Code, Continue, Cline, ...):
 
 ```jsonc
-// HTTP (shared)
-{ "mcpServers": { "mnemosyne": { "url": "http://host:7077/mcp",
+// HTTP (shared) — one :40000 endpoint, path-routed per service
+{ "mcpServers": { "mnemosyne": { "url": "http://host:40000/mnemosyne/mcp",
                                  "headers": { "Authorization": "Bearer secret" } } } }
 // stdio (local)
 { "mcpServers": { "mnemosyne": { "command": "mnemosyne", "args": ["serve", "--stdio"] } } }
 ```
 
-Non-MCP client: `POST /search` to pull nodes into the prompt, `POST /nodes` to write back.
+Non-MCP client: `POST /mnemosyne/search` to pull nodes into the prompt,
+`POST /mnemosyne/nodes` to write back.
 
 ## Tools
 

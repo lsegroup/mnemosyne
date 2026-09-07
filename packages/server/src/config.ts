@@ -38,6 +38,13 @@ export interface MnemosyneConfig {
   http: {
     host: string;
     port: number;
+    /**
+     * Path prefix every route mounts under (MCP at `<basePath>/mcp`, REST at
+     * `<basePath>/search` etc). Lets one `:40000` endpoint carry several MCP
+     * services side by side — `/codegraph`, `/mnemosyne`, ... — routed by path
+     * instead of one port per service.
+     */
+    basePath: string;
     /** shared bearer token; when unset, HTTP mode refuses to start */
     bearerToken?: string;
   };
@@ -51,6 +58,13 @@ function bool(v: string | undefined, dflt: boolean): boolean {
 function int(v: string | undefined, dflt: number): number {
   const n = v === undefined ? NaN : Number.parseInt(v, 10);
   return Number.isFinite(n) ? n : dflt;
+}
+
+/** '' or '/' -> ''; otherwise ensure exactly one leading slash and no trailing slash. */
+function normalizeBasePath(v: string): string {
+  const trimmed = v.trim().replace(/\/+$/, '');
+  if (trimmed === '' || trimmed === '/') return '';
+  return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
 }
 
 /** Build config from environment, with a repo dir override (CLI --repo). */
@@ -85,7 +99,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, repoOverride?: 
     },
     http: {
       host: env.MNEMOSYNE_HTTP_HOST ?? '127.0.0.1',
-      port: int(env.MNEMOSYNE_HTTP_PORT, 7077),
+      port: int(env.MNEMOSYNE_HTTP_PORT, 40000),
+      basePath: normalizeBasePath(env.MNEMOSYNE_BASE_PATH ?? '/mnemosyne'),
       bearerToken: env.MNEMOSYNE_BEARER_TOKEN,
     },
   };

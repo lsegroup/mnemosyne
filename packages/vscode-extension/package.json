@@ -17,8 +17,8 @@
       "properties": {
         "mnemosyne.serverUrl": {
           "type": "string",
-          "default": "http://127.0.0.1:7077",
-          "description": "Base URL of the mnemosyne HTTP server."
+          "default": "http://127.0.0.1:40000/mnemosyne",
+          "description": "Base URL of the mnemosyne HTTP server, including its path prefix (e.g. http://host:40000/mnemosyne)."
         },
         "mnemosyne.bearerToken": {
           "type": "string",

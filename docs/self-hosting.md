@@ -33,15 +33,36 @@ One instance that every editor and the central AI point at:
 ```bash
 export MNEMOSYNE_REPO=/srv/mnemosyne
 export MNEMOSYNE_BEARER_TOKEN="$(openssl rand -hex 32)"
-export MNEMOSYNE_HTTP_HOST=127.0.0.1     # bind localhost; reverse-proxy for TLS
-export MNEMOSYNE_HTTP_PORT=7077
+export MNEMOSYNE_HTTP_HOST=127.0.0.1     # bind localhost; front it with the box's proxy
+export MNEMOSYNE_HTTP_PORT=40000
+export MNEMOSYNE_BASE_PATH=/mnemosyne
 node packages/server/dist/bin/mnemosyne.js serve --http
 ```
 
-- MCP (Streamable HTTP) at `POST/GET/DELETE /mcp`
-- REST at `/search`, `/nodes`, `/nodes/:id`, `/nodes/:id/history`, `/link`, `/link-code`,
-  `/neighbors`, `/reindex`, `/ask`
-- `/health` is the only unauthenticated route
+Serves `http://127.0.0.1:40000/mnemosyne`:
+
+- MCP (Streamable HTTP) at `POST/GET/DELETE /mnemosyne/mcp`
+- REST under `/mnemosyne/` — `search`, `nodes`, `nodes/:id`, `nodes/:id/history`, `link`,
+  `link-code`, `neighbors`, `reindex`, `ask`
+- `/mnemosyne/health` is the only unauthenticated route
+
+### One endpoint, many services
+
+`MNEMOSYNE_BASE_PATH` exists so a single `:40000` MCP endpoint carries several services
+routed by path rather than one port per service. Put each behind the box's existing proxy:
+
+```nginx
+# one listener; each MCP service keeps its own clean prefix
+location /codegraph/ { proxy_pass http://127.0.0.1:41000/codegraph/; }
+location /mnemosyne/ { proxy_pass http://127.0.0.1:40000/mnemosyne/; }
+proxy_http_version 1.1;                 # Streamable HTTP needs keep-alive
+proxy_set_header Connection "";
+proxy_buffering off;                    # don't buffer the MCP event stream
+```
+
+The firewall then exposes one port, not one per tool. If two services must share the exact
+same local port, move one to its own local port (as above) and let the proxy present them
+under the same host.
 
 ### systemd unit
 
@@ -53,7 +74,8 @@ After=network.target
 [Service]
 Environment=MNEMOSYNE_REPO=/srv/mnemosyne
 Environment=MNEMOSYNE_BEARER_TOKEN=...
-Environment=MNEMOSYNE_HTTP_PORT=7077
+Environment=MNEMOSYNE_HTTP_PORT=40000
+Environment=MNEMOSYNE_BASE_PATH=/mnemosyne
 ExecStart=/usr/bin/node /opt/mnemosyne/packages/server/dist/bin/mnemosyne.js serve --http
 Restart=on-failure
 DynamicUser=yes

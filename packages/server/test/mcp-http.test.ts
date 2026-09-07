@@ -43,7 +43,7 @@ beforeAll(async () => {
   await new Promise<void>((resolve) => {
     http = app.listen(0, '127.0.0.1', resolve);
   });
-  baseUrl = `http://127.0.0.1:${(http.address() as AddressInfo).port}`;
+  baseUrl = `http://127.0.0.1:${(http.address() as AddressInfo).port}${cfg.http.basePath}`;
 });
 
 afterAll(async () => {
@@ -96,6 +96,12 @@ describe('MCP over Streamable HTTP', () => {
   it('serves REST /health without auth and /search with auth', async () => {
     const health = await (await fetch(`${baseUrl}/health`)).json();
     expect(health.ok).toBe(true);
+    expect(health.service).toBe('mnemosyne');
+
+    // everything is under the base path; nothing is served at the root
+    const root = new URL(baseUrl);
+    const bare = await fetch(`${root.protocol}//${root.host}/health`);
+    expect(bare.status).toBe(404);
 
     const unauth = await fetch(`${baseUrl}/search`, {
       method: 'POST',

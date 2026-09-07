@@ -1,4 +1,4 @@
-import express, { type NextFunction, type Request, type Response } from 'express';
+import express, { Router, type NextFunction, type Request, type Response } from 'express';
 import { randomUUID } from 'node:crypto';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -33,11 +33,16 @@ export function createHttpApp(cfg: MnemosyneConfig, svc: MnemosyneService) {
   const byName = new Map(tools.map((t) => [t.name, t]));
   const llm = resolveLLM(cfg);
 
-  app.get('/health', (_req, res) => {
-    res.json({ ok: true, embedder: svc.embedderId, llm: llm?.id ?? null });
+  // Everything mounts under basePath so a single :40000 endpoint can host
+  // /codegraph, /mnemosyne and other MCP services side by side, routed by path.
+  const api = Router();
+  app.use(cfg.http.basePath || '/', api);
+
+  api.get('/health', (_req, res) => {
+    res.json({ ok: true, service: 'mnemosyne', embedder: svc.embedderId, llm: llm?.id ?? null });
   });
 
-  app.use(bearer(cfg.http.bearerToken));
+  api.use(bearer(cfg.http.bearerToken));
 
   // --- REST: one route per tool, plus a couple of conveniences ----------
   const call = (name: string) => async (req: Request, res: Response) => {
@@ -49,31 +54,31 @@ export function createHttpApp(cfg: MnemosyneConfig, svc: MnemosyneService) {
     }
   };
 
-  app.post('/search', call('search_memory'));
-  app.get('/nodes/:id', async (req, res) => {
+  api.post('/search', call('search_memory'));
+  api.get('/nodes/:id', async (req, res) => {
     try {
       res.json(await byName.get('get_node')!.handler({ id: req.params.id }));
     } catch (err) {
       res.status(404).json({ error: (err as Error).message });
     }
   });
-  app.get('/nodes/:id/history', async (req, res) => {
+  api.get('/nodes/:id/history', async (req, res) => {
     res.json(await byName.get('get_node_history')!.handler({ id: req.params.id }));
   });
-  app.post('/nodes', call('create_node'));
-  app.patch('/nodes/:id', async (req, res) => {
+  api.post('/nodes', call('create_node'));
+  api.patch('/nodes/:id', async (req, res) => {
     try {
       res.json(await byName.get('update_node')!.handler({ id: req.params.id, ...req.body }));
     } catch (err) {
       res.status(400).json({ error: (err as Error).message });
     }
   });
-  app.post('/link', call('link_nodes'));
-  app.post('/link-code', call('link_node_to_code'));
-  app.post('/neighbors', call('neighbors'));
-  app.post('/reindex', call('reindex'));
+  api.post('/link', call('link_nodes'));
+  api.post('/link-code', call('link_node_to_code'));
+  api.post('/neighbors', call('neighbors'));
+  api.post('/reindex', call('reindex'));
 
-  app.post('/ask', async (req, res) => {
+  api.post('/ask', async (req, res) => {
     if (!llm) {
       res.status(501).json({ error: 'no LLM configured (set MNEMOSYNE_LLM_BASE_URL)' });
       return;
@@ -88,7 +93,7 @@ export function createHttpApp(cfg: MnemosyneConfig, svc: MnemosyneService) {
   // --- MCP over Streamable HTTP (session-per-client) --------------------
   const transports = new Map<string, StreamableHTTPServerTransport>();
 
-  app.post('/mcp', async (req: Request, res: Response) => {
+  api.post('/mcp', async (req: Request, res: Response) => {
     const sid = req.header('mcp-session-id');
     let transport = sid ? transports.get(sid) : undefined;
 
@@ -125,8 +130,8 @@ export function createHttpApp(cfg: MnemosyneConfig, svc: MnemosyneService) {
     }
     await transport.handleRequest(req, res);
   };
-  app.get('/mcp', bySession);
-  app.delete('/mcp', bySession);
+  api.get('/mcp', bySession);
+  api.delete('/mcp', bySession);
 
   return app;
 }

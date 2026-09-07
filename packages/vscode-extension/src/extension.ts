@@ -7,7 +7,7 @@ import { captureCommand } from './capture.js';
 function makeClient(): MnemosyneClient {
   const cfg = vscode.workspace.getConfiguration('mnemosyne');
   return new MnemosyneClient(
-    cfg.get<string>('serverUrl', 'http://127.0.0.1:7077'),
+    cfg.get<string>('serverUrl', 'http://127.0.0.1:40000/mnemosyne').replace(/\/$/, ''),
     cfg.get<string>('bearerToken', ''),
   );
 }

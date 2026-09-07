@@ -32,9 +32,10 @@ program
       process.stderr.write(`mnemosyne: stdio MCP ready (repo ${cfg.repoDir}, embedder ${svc.embedderId})\n`);
     } else {
       const app = createHttpApp(cfg, svc);
+      const base = `http://${cfg.http.host}:${cfg.http.port}${cfg.http.basePath}`;
       app.listen(cfg.http.port, cfg.http.host, () => {
         process.stdout.write(
-          `mnemosyne: http://${cfg.http.host}:${cfg.http.port}  (MCP at /mcp, REST at /, embedder ${svc.embedderId})\n`,
+          `mnemosyne: ${base}  (MCP at ${base}/mcp, REST under ${base}/, embedder ${svc.embedderId})\n`,
         );
       });
     }
