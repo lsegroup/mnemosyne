@@ -1,0 +1,67 @@
+{
+  "name": "mnemosyne-vscode",
+  "displayName": "mnemosyne",
+  "description": "Browse and capture team memory nodes; MCP-capable AI extensions connect to the mnemosyne server directly.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "mnemosyne",
+      "properties": {
+        "mnemosyne.serverUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:7077",
+          "description": "Base URL of the mnemosyne HTTP server."
+        },
+        "mnemosyne.bearerToken": {
+          "type": "string",
+          "default": "",
+          "description": "Bearer token for the mnemosyne HTTP server."
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "mnemosyne", "title": "mnemosyne", "icon": "$(book)" }
+      ]
+    },
+    "views": {
+      "mnemosyne": [{ "id": "mnemosyne.nodes", "name": "Memory" }]
+    },
+    "commands": [
+      { "command": "mnemosyne.capture", "title": "mnemosyne: Capture memory from selection" },
+      { "command": "mnemosyne.refresh", "title": "mnemosyne: Refresh", "icon": "$(refresh)" },
+      { "command": "mnemosyne.openNode", "title": "mnemosyne: Open node" }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "mnemosyne.refresh", "when": "view == mnemosyne.nodes", "group": "navigation" }
+      ],
+      "editor/context": [
+        { "command": "mnemosyne.capture", "group": "9_cutcopypaste" }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsc --noEmit && node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "package": "vsce package --no-dependencies -o mnemosyne.vsix",
+    "test": "node -e \"process.stdout.write('no extension unit tests yet\\n')\""
+  },
+  "dependencies": {
+    "@mnemosyne/core": "0.1.0"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.2.1",
+    "esbuild": "^0.24.2"
+  }
+}

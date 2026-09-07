@@ -1,0 +1,33 @@
+{
+  "name": "mnemosyne-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-hosted AI team-memory: a git-backed graph of memory nodes, served over MCP + REST.",
+  "license": "MIT",
+  "workspaces": [
+    "packages/core",
+    "packages/server",
+    "packages/vscode-extension"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "eslint packages",
+    "format": "prettier --write \"packages/**/*.{ts,json,md}\" \"*.{json,md}\"",
+    "reindex": "node packages/server/dist/bin/mnemosyne.js reindex",
+    "serve": "node packages/server/dist/bin/mnemosyne.js serve --http"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "eslint": "^9.17.0",
+    "prettier": "^3.4.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.19.1",
+    "vitest": "^2.1.8"
+  }
+}

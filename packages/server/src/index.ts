@@ -1,0 +1,11 @@
+export { loadConfig, type MnemosyneConfig } from './config.js';
+export { MnemosyneService } from './service.js';
+export type { CreateNodeInput, UpdateNodePatch, WriteResult } from './service.js';
+export { SqliteBackend } from './sqlite-backend.js';
+export { NodeRepo } from './repo.js';
+export { GitOps, type HistoryEntry } from './git.js';
+export { buildTools, type ToolDef } from './tools.js';
+export { createMcpServer } from './mcp.js';
+export { createHttpApp } from './http.js';
+export { resolveEmbedder, resolveLLM } from './embedding.js';
+export { OpenAICompatibleEmbedder, OpenAICompatibleLLM } from './adapters/openai.js';

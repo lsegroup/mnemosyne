@@ -1,0 +1,25 @@
+{
+  "name": "@mnemosyne/core",
+  "version": "0.1.0",
+  "description": "mnemosyne core: memory-node schema, markdown (de)serialization, search/embedder/LLM interfaces, graph traversal, rank fusion.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run --root .",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "gray-matter": "^4.0.3",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}

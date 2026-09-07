@@ -1,0 +1,38 @@
+{
+  "name": "mnemosyne",
+  "version": "0.1.0",
+  "description": "mnemosyne server: embedded SQLite (FTS5 + sqlite-vec) memory index, served over MCP (stdio + HTTP) and REST.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "mnemosyne": "./dist/bin/mnemosyne.js"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run --root .",
+    "dev": "tsx src/bin/mnemosyne.ts",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.13.1",
+    "@mnemosyne/core": "0.1.0",
+    "better-sqlite3": "^11.7.0",
+    "commander": "^12.1.0",
+    "express": "^4.21.2",
+    "simple-git": "^3.27.0",
+    "sqlite-vec": "^0.1.7-alpha.2",
+    "zod": "^3.24.1"
+  },
+  "optionalDependencies": {
+    "fastembed": "^1.14.4"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/express": "^4.17.21",
+    "tsx": "^4.19.2",
+    "vitest": "^2.1.8"
+  }
+}

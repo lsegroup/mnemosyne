@@ -1,0 +1,27 @@
+# build output
+dist/
+*.tsbuildinfo
+
+# deps
+node_modules/
+
+# mnemosyne local index cache (rebuildable from nodes/)
+.mnemosyne/
+
+# vscode extension package artifacts
+*.vsix
+
+# codegraph index (per-machine)
+.codegraph/
+
+# env
+.env
+.env.*
+!.env.example
+
+# os / editor
+.DS_Store
+*.log
+
+# fastembed model cache
+local_cache/
