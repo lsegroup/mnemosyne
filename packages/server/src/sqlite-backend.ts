@@ -41,6 +41,7 @@ export class SqliteBackend implements SearchBackend {
     this.db.pragma('journal_mode = WAL');
     sqliteVec.load(this.db);
     this.migrate();
+    this.prepareStatements();
   }
 
   private migrate(): void {
@@ -76,58 +77,87 @@ export class SqliteBackend implements SearchBackend {
       .run(String(this.dimensions));
   }
 
-  private upsertStmt = () =>
-    this.db.transaction((node: MemoryNode, embedding: Float32Array) => {
-      this.db
-        .prepare(
-          `INSERT OR REPLACE INTO nodes (id, json, project, type, status, updated_at)
-           VALUES (@id, @json, @project, @type, @status, @updated_at)`,
-        )
-        .run({
-          id: node.id,
-          json: JSON.stringify(node),
-          project: node.project,
-          type: node.type,
-          status: node.status,
-          updated_at: node.updated_at ?? null,
-        });
+  // Prepared once (in prepareStatements(), called from the constructor after
+  // migrate()) and reused: re-preparing a Statement on every call (as this
+  // used to do, once per node on every reindex) creates enough short-lived
+  // native Statement/transaction objects to trip a GC-timing race between
+  // better-sqlite3 and the sqlite-vec native extension on process exit
+  // (SIGABRT, assertion in node::RemoveEnvironmentCleanupHook).
+  private upsertNodeStmt!: Database.Statement;
+  private deleteFtsStmt!: Database.Statement;
+  private insertFtsStmt!: Database.Statement;
+  private deleteVecStmt!: Database.Statement;
+  private insertVecStmt!: Database.Statement;
+  private deleteNodeStmt!: Database.Statement;
+  private upsertTx!: Database.Transaction<(node: MemoryNode, embedding: Float32Array) => void>;
+  private removeTx!: Database.Transaction<(nodeId: string) => void>;
+  private getNodeStmt!: Database.Statement;
+  private idsStmt!: Database.Statement;
+  private ftsSearchStmt!: Database.Statement;
+  private vecSearchStmt!: Database.Statement;
 
-      this.db.prepare(`DELETE FROM nodes_fts WHERE id = ?`).run(node.id);
-      this.db
-        .prepare(`INSERT INTO nodes_fts (id, title, body, components) VALUES (?, ?, ?, ?)`)
-        .run(node.id, node.title, node.body, node.components.join(' '));
+  private prepareStatements(): void {
+    this.upsertNodeStmt = this.db.prepare(
+      `INSERT OR REPLACE INTO nodes (id, json, project, type, status, updated_at)
+       VALUES (@id, @json, @project, @type, @status, @updated_at)`,
+    );
+    this.deleteFtsStmt = this.db.prepare(`DELETE FROM nodes_fts WHERE id = ?`);
+    this.insertFtsStmt = this.db.prepare(
+      `INSERT INTO nodes_fts (id, title, body, components) VALUES (?, ?, ?, ?)`,
+    );
+    this.deleteVecStmt = this.db.prepare(`DELETE FROM nodes_vec WHERE id = ?`);
+    this.insertVecStmt = this.db.prepare(`INSERT INTO nodes_vec (id, embedding) VALUES (?, ?)`);
+    this.deleteNodeStmt = this.db.prepare(`DELETE FROM nodes WHERE id = ?`);
 
-      this.db.prepare(`DELETE FROM nodes_vec WHERE id = ?`).run(node.id);
-      this.db
-        .prepare(`INSERT INTO nodes_vec (id, embedding) VALUES (?, ?)`)
-        .run(node.id, toBlob(embedding));
+    this.upsertTx = this.db.transaction((node: MemoryNode, embedding: Float32Array) => {
+      this.upsertNodeStmt.run({
+        id: node.id,
+        json: JSON.stringify(node),
+        project: node.project,
+        type: node.type,
+        status: node.status,
+        updated_at: node.updated_at ?? null,
+      });
+      this.deleteFtsStmt.run(node.id);
+      this.insertFtsStmt.run(node.id, node.title, node.body, node.components.join(' '));
+      this.deleteVecStmt.run(node.id);
+      this.insertVecStmt.run(node.id, toBlob(embedding));
     });
+
+    this.removeTx = this.db.transaction((nodeId: string) => {
+      this.deleteNodeStmt.run(nodeId);
+      this.deleteFtsStmt.run(nodeId);
+      this.deleteVecStmt.run(nodeId);
+    });
+
+    this.getNodeStmt = this.db.prepare(`SELECT json FROM nodes WHERE id = ?`);
+    this.idsStmt = this.db.prepare(`SELECT id FROM nodes`);
+    this.ftsSearchStmt = this.db.prepare(
+      `SELECT id FROM nodes_fts WHERE nodes_fts MATCH ? ORDER BY bm25(nodes_fts) LIMIT ?`,
+    );
+    this.vecSearchStmt = this.db.prepare(
+      `SELECT id, distance FROM nodes_vec WHERE embedding MATCH ? AND k = ? ORDER BY distance`,
+    );
+  }
 
   async upsert(node: MemoryNode, embedding: Float32Array): Promise<void> {
     if (embedding.length !== this.dimensions) {
       throw new Error(`embedding length ${embedding.length} != index dim ${this.dimensions}`);
     }
-    this.upsertStmt()(node, embedding);
+    this.upsertTx(node, embedding);
   }
 
   async remove(id: string): Promise<void> {
-    const tx = this.db.transaction((nodeId: string) => {
-      this.db.prepare(`DELETE FROM nodes WHERE id = ?`).run(nodeId);
-      this.db.prepare(`DELETE FROM nodes_fts WHERE id = ?`).run(nodeId);
-      this.db.prepare(`DELETE FROM nodes_vec WHERE id = ?`).run(nodeId);
-    });
-    tx(id);
+    this.removeTx(id);
   }
 
   async get(id: string): Promise<MemoryNode | null> {
-    const row = this.db.prepare(`SELECT json FROM nodes WHERE id = ?`).get(id) as
-      | { json: string }
-      | undefined;
+    const row = this.getNodeStmt.get(id) as { json: string } | undefined;
     return row ? (JSON.parse(row.json) as MemoryNode) : null;
   }
 
   async ids(): Promise<string[]> {
-    return (this.db.prepare(`SELECT id FROM nodes`).all() as { id: string }[]).map((r) => r.id);
+    return (this.idsStmt.all() as { id: string }[]).map((r) => r.id);
   }
 
   async clear(): Promise<void> {
@@ -151,11 +181,7 @@ export class SqliteBackend implements SearchBackend {
     if (mode !== 'semantic') {
       const expr = ftsExpr(q.query);
       if (expr) {
-        const rows = this.db
-          .prepare(
-            `SELECT id FROM nodes_fts WHERE nodes_fts MATCH ? ORDER BY bm25(nodes_fts) LIMIT ?`,
-          )
-          .all(expr, FTS_LIMIT) as { id: string }[];
+        const rows = this.ftsSearchStmt.all(expr, FTS_LIMIT) as { id: string }[];
         textIds.push(...rows.map((r) => r.id));
       }
     }
@@ -163,13 +189,10 @@ export class SqliteBackend implements SearchBackend {
     const semanticIds: string[] = [];
     const semScore = new Map<string, number>();
     if (mode !== 'text' && queryEmbedding) {
-      const rows = this.db
-        .prepare(
-          `SELECT id, distance FROM nodes_vec
-           WHERE embedding MATCH ? AND k = ?
-           ORDER BY distance`,
-        )
-        .all(toBlob(queryEmbedding), VEC_LIMIT) as { id: string; distance: number }[];
+      const rows = this.vecSearchStmt.all(toBlob(queryEmbedding), VEC_LIMIT) as {
+        id: string;
+        distance: number;
+      }[];
       for (const r of rows) {
         semanticIds.push(r.id);
         semScore.set(r.id, 1 / (1 + r.distance));
