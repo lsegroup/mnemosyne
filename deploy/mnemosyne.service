@@ -1,0 +1,16 @@
+[Unit]
+Description=mnemosyne — self-hosted AI team memory (HTTP)
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/mnemosyne.env
+WorkingDirectory=__INSTALL_DIR__
+ExecStart=/usr/bin/node __INSTALL_DIR__/packages/server/dist/bin/mnemosyne.js serve --http
+Restart=on-failure
+RestartSec=5
+User=__RUN_USER__
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
