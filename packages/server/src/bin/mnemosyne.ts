@@ -51,6 +51,7 @@ program
     const { count, embedder } = await svc.reindex();
     await svc.close();
     process.stdout.write(`reindexed ${count} nodes with ${embedder}\n`);
+    process.exit(0); // avoid GC-triggered better-sqlite3/sqlite-vec teardown race on exit
   });
 
 program
@@ -76,6 +77,7 @@ program
     await svc.reindex();
     await svc.close();
     process.stdout.write(`imported ${ok}/${files.length} files\n`);
+    process.exit(0); // avoid GC-triggered better-sqlite3/sqlite-vec teardown race on exit
   });
 
 program
