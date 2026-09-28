@@ -30,8 +30,14 @@ else
   cd "$INSTALL_DIR"
 fi
 
+# The pipeline already compiled packages/*/dist with devDependencies
+# available — unpack that instead of building here. This box is RAM-starved
+# and `npm ci --omit=dev` (below) strips out typescript, so there is no tsc
+# to build with on-box anyway.
+tar xzf /tmp/mnemosyne-dist.tar.gz -C "$INSTALL_DIR"
+rm -f /tmp/mnemosyne-dist.tar.gz
+
 npm ci --omit=dev --no-audit --no-fund
-npm run build --workspace packages/core --workspace packages/server
 
 sudo tee /etc/mnemosyne.env > /dev/null <<EOF
 MNEMOSYNE_REPO=$INSTALL_DIR
