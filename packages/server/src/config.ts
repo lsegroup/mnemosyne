@@ -45,7 +45,7 @@ export interface MnemosyneConfig {
      * instead of one port per service.
      */
     basePath: string;
-    /** shared bearer token; when unset, HTTP mode refuses to start */
+    /** optional shared bearer token; when unset, HTTP mode runs unauthenticated */
     bearerToken?: string;
   };
 }

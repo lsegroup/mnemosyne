@@ -12,8 +12,7 @@ ENVIRONMENT="$3"
 INSTALL_DIR="$4"
 SERVICE_NAME="$5"
 GIT_URL="$6"
-BEARER_TOKEN="$7"
-HTTP_PORT="${8:-40001}"
+HTTP_PORT="${7:-40001}"
 RUN_USER="$(whoami)"
 
 echo "==> Deploying mnemosyne to ${SERVER_NAME} (${DATACENTER}/${ENVIRONMENT}) at ${INSTALL_DIR}"
@@ -44,7 +43,8 @@ MNEMOSYNE_REPO=$INSTALL_DIR
 MNEMOSYNE_HTTP_HOST=127.0.0.1
 MNEMOSYNE_HTTP_PORT=$HTTP_PORT
 MNEMOSYNE_BASE_PATH=/mnemosyne
-MNEMOSYNE_BEARER_TOKEN=$BEARER_TOKEN
+# No MNEMOSYNE_BEARER_TOKEN: internal network only, matches the sibling
+# CodeGraph MCP server on this same box, which also runs unauthenticated.
 MNEMOSYNE_EMBED_BACKEND=hash
 MNEMOSYNE_EMBED_DIM=256
 MNEMOSYNE_GIT_PUSH=false
@@ -70,7 +70,7 @@ sudo systemctl is-active --quiet "$SERVICE_NAME" || { echo "✗ ${SERVICE_NAME} 
 # deploy. Hitting the service's own endpoint means there is exactly one
 # source of truth for embedder config, permanently, not two that can drift.
 curl -sf -X POST "http://127.0.0.1:${HTTP_PORT}/mnemosyne/reindex" \
-  -H "Authorization: Bearer ${BEARER_TOKEN}" -H "Content-Type: application/json" -d '{}' && echo
+  -H "Content-Type: application/json" -d '{}' && echo
 
 echo "✓ mnemosyne service active. Local health check:"
 curl -sf "http://127.0.0.1:${HTTP_PORT}/mnemosyne/health" && echo

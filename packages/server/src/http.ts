@@ -21,11 +21,12 @@ function bearer(token: string) {
   };
 }
 
-/** Express app exposing REST + MCP-over-HTTP, both behind one bearer token. */
+/**
+ * Express app exposing REST + MCP-over-HTTP. Auth is opt-in: set
+ * MNEMOSYNE_BEARER_TOKEN to require it, leave it unset to run open (internal
+ * network only — matches the sibling CodeGraph MCP server on the same box).
+ */
 export function createHttpApp(cfg: MnemosyneConfig, svc: MnemosyneService) {
-  if (!cfg.http.bearerToken) {
-    throw new Error('HTTP mode requires MNEMOSYNE_BEARER_TOKEN');
-  }
   const app = express();
   app.use(express.json({ limit: '2mb' }));
 
@@ -42,7 +43,9 @@ export function createHttpApp(cfg: MnemosyneConfig, svc: MnemosyneService) {
     res.json({ ok: true, service: 'mnemosyne', embedder: svc.embedderId, llm: llm?.id ?? null });
   });
 
-  api.use(bearer(cfg.http.bearerToken));
+  if (cfg.http.bearerToken) {
+    api.use(bearer(cfg.http.bearerToken));
+  }
 
   // --- REST: one route per tool, plus a couple of conveniences ----------
   const call = (name: string) => async (req: Request, res: Response) => {
