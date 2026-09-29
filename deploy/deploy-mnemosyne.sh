@@ -60,7 +60,17 @@ sudo systemctl restart "$SERVICE_NAME"
 sleep 2
 sudo systemctl is-active --quiet "$SERVICE_NAME" || { echo "✗ ${SERVICE_NAME} failed to start"; sudo journalctl -u "$SERVICE_NAME" --no-pager -n 40; exit 1; }
 
-node "$INSTALL_DIR/packages/server/dist/bin/mnemosyne.js" reindex --repo "$INSTALL_DIR"
+# Reindex via the RUNNING service's own REST endpoint, not a separate CLI
+# process. A bare `node .../mnemosyne.js reindex` here doesn't inherit
+# /etc/mnemosyne.env (it's a plain shell command, nothing sources that file),
+# so it silently re-resolved a DIFFERENT embedder (fastembed, 384-dim,
+# installed as an optionalDependency) than the service's configured
+# MNEMOSYNE_EMBED_BACKEND=hash (256-dim) — dropping and recreating nodes_vec
+# at the wrong dimension out from under the already-running service on every
+# deploy. Hitting the service's own endpoint means there is exactly one
+# source of truth for embedder config, permanently, not two that can drift.
+curl -sf -X POST "http://127.0.0.1:${HTTP_PORT}/mnemosyne/reindex" \
+  -H "Authorization: Bearer ${BEARER_TOKEN}" -H "Content-Type: application/json" -d '{}' && echo
 
 echo "✓ mnemosyne service active. Local health check:"
 curl -sf "http://127.0.0.1:${HTTP_PORT}/mnemosyne/health" && echo
