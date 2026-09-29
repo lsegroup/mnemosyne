@@ -29,6 +29,14 @@ else
   cd "$INSTALL_DIR"
 fi
 
+# create_node/update_node auto-commit to this same repo (it's both the tool's
+# source and its own self-hosted corpus) — without a git identity here those
+# writes fail with "Committer identity unknown" the first time anyone uses
+# the shared HTTP endpoint to write, not just read. Idempotent; local config,
+# survives `git reset --hard` (that only touches the working tree/index).
+git config user.name "mnemosyne"
+git config user.email "mnemosyne@${SERVER_NAME}.globalclouddata.org"
+
 # The pipeline already compiled packages/*/dist with devDependencies
 # available — unpack that instead of building here. This box is RAM-starved
 # and `npm ci --omit=dev` (below) strips out typescript, so there is no tsc
