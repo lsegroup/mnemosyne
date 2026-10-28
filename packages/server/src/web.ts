@@ -77,7 +77,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   const settings = keys ? new SettingsStore(cfg.web.settingsFile, keys.enc) : null;
 
   // Built-in admin account: lets the portal be configured before GitLab SSO exists.
-  const localUser = (cfg.web.localAdmin.user ?? '').trim() || 'mnemosyne';
+  const localUser = (cfg.web.localAdmin.user ?? '').trim() || 'admin';
   const localHash =
     cfg.web.localAdmin.passwordHash || (cfg.web.localAdmin.password ? hashPassword(cfg.web.localAdmin.password) : undefined);
   const localEnabled = Boolean(keys && localHash);

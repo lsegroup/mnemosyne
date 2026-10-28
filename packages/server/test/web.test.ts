@@ -406,7 +406,7 @@ describe('local admin account and GitLab SSO settings', () => {
   it('has no default account unless the operator sets a password', async () => {
     const { base } = await start({ MNEMOSYNE_LOCAL_ADMIN_PASSWORD: '' });
     expect(await (await fetch(`${base}/`)).text()).toContain('not configured');
-    expect((await login(base, 'mnemosyne', '')).headers.get('location')).toContain('error=local');
+    expect((await login(base, 'admin', '')).headers.get('location')).toContain('error=local');
   });
 
   it('signs the local admin in and rejects wrong credentials', async () => {
@@ -416,12 +416,12 @@ describe('local admin account and GitLab SSO settings', () => {
     expect(page).not.toContain('Sign in with GitLab'); // SSO not configured yet
     expect(await (await fetch(`${base}/`)).text()).not.toContain('name="password"'); // never on the public page
 
-    const bad = await login(base, 'mnemosyne', 'nope');
+    const bad = await login(base, 'admin', 'nope');
     expect(bad.headers.get('location')).toContain('error=local');
     expect(bad.headers.get('set-cookie') ?? '').not.toContain('mnemosyne_session=ey');
-    expect((await login(base, 'someone', 'mnemosyne')).headers.get('location')).toContain('error=local');
+    expect((await login(base, 'mnemosyne', 'mnemosyne')).headers.get('location')).toContain('error=local');
 
-    const ok = await login(base, 'mnemosyne', 'mnemosyne');
+    const ok = await login(base, 'admin', 'mnemosyne');
     expect(ok.status).toBe(303);
     expect(ok.headers.get('location')).toBe('/mnemosyne/admin/');
     const cookie = cookieOf(ok);
@@ -431,13 +431,13 @@ describe('local admin account and GitLab SSO settings', () => {
 
   it('locks a client out after five misses, even with the right password', async () => {
     const { base } = await start();
-    for (let i = 0; i < 5; i++) await login(base, 'mnemosyne', `wrong${i}`);
-    expect((await login(base, 'mnemosyne', 'mnemosyne')).headers.get('location')).toContain('error=throttled');
+    for (let i = 0; i < 5; i++) await login(base, 'admin', `wrong${i}`);
+    expect((await login(base, 'admin', 'mnemosyne')).headers.get('location')).toContain('error=throttled');
   });
 
   it('configures GitLab SSO from the admin page and never returns the secret', async () => {
     const { base, origin, cfg } = await start();
-    const cookie = cookieOf(await login(base, 'mnemosyne', 'mnemosyne'));
+    const cookie = cookieOf(await login(base, 'admin', 'mnemosyne'));
     const hdr = { cookie, 'Content-Type': 'application/json', 'X-Requested-With': 'mnemosyne-admin', origin };
 
     const put = await fetch(`${base}/admin/api/settings`, {
@@ -469,11 +469,11 @@ describe('local admin account and GitLab SSO settings', () => {
     const now = Math.floor(Date.now() / 1000);
 
     await store.update((st) => void (st.ssoLiveAt = now - 3600)); // live for 1h: still allowed
-    const cookie = cookieOf(await login(base, 'mnemosyne', 'mnemosyne'));
+    const cookie = cookieOf(await login(base, 'admin', 'mnemosyne'));
     expect((await fetch(`${base}/admin`, { headers: { cookie } })).status).toBe(200);
 
     await store.update((st) => void (st.ssoLiveAt = now - 25 * 3600)); // live for 25h: off
-    expect((await login(base, 'mnemosyne', 'mnemosyne')).headers.get('location')).toContain('error=local');
+    expect((await login(base, 'admin', 'mnemosyne')).headers.get('location')).toContain('error=local');
     expect(await (await fetch(`${base}/admin/`)).text()).not.toContain('name="password"');
     expect((await fetch(`${base}/admin/api/settings`, { headers: { cookie } })).status).toBe(401);
     expect(await (await fetch(`${base}/admin`, { headers: { cookie } })).text()).not.toContain('LLM providers');
@@ -481,7 +481,7 @@ describe('local admin account and GitLab SSO settings', () => {
     // recovery switch for operators
     process.env.MNEMOSYNE_LOCAL_ADMIN_FORCE = '1';
     try {
-      expect((await login(base, 'mnemosyne', 'mnemosyne')).status).toBe(303);
+      expect((await login(base, 'admin', 'mnemosyne')).status).toBe(303);
     } finally {
       delete process.env.MNEMOSYNE_LOCAL_ADMIN_FORCE;
     }
