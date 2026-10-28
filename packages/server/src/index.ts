@@ -7,5 +7,7 @@ export { GitOps, type HistoryEntry } from './git.js';
 export { buildTools, type ToolDef } from './tools.js';
 export { createMcpServer } from './mcp.js';
 export { createHttpApp } from './http.js';
+export { createWebPortal, webConfigured, type WebPortal } from './web.js';
+export { ProviderStore, ProviderValidationError, type Provider, type ProviderPublic } from './provider-store.js';
 export { resolveEmbedder, resolveLLM } from './embedding.js';
 export { OpenAICompatibleEmbedder, OpenAICompatibleLLM } from './adapters/openai.js';

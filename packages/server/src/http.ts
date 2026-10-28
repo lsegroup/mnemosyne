@@ -8,6 +8,7 @@ import { buildTools } from './tools.js';
 import { createMcpServer } from './mcp.js';
 import { answer } from './ask.js';
 import { resolveLLM } from './embedding.js';
+import { createWebPortal } from './web.js';
 
 function bearer(token: string) {
   return (req: Request, res: Response, next: NextFunction) => {
@@ -42,6 +43,11 @@ export function createHttpApp(cfg: MnemosyneConfig, svc: MnemosyneService) {
   api.get('/health', (_req, res) => {
     res.json({ ok: true, service: 'mnemosyne', embedder: svc.embedderId, llm: llm?.id ?? null });
   });
+
+  // Web portal: public login screen + GitLab-authenticated admin. Has its own
+  // auth, so it sits in front of the MCP/REST bearer check below and leaves how
+  // MCP clients connect untouched.
+  api.use(createWebPortal(cfg).router);
 
   if (cfg.http.bearerToken) {
     api.use(bearer(cfg.http.bearerToken));

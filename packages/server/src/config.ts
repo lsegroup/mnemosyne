@@ -1,4 +1,4 @@
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 
 export interface MnemosyneConfig {
   /** Directory containing the `nodes/` corpus and the git repo. */
@@ -47,6 +47,24 @@ export interface MnemosyneConfig {
     basePath: string;
     /** optional shared bearer token; when unset, HTTP mode runs unauthenticated */
     bearerToken?: string;
+  };
+
+  /**
+   * Web portal (`<basePath>/` login screen, `<basePath>/admin/`). Independent of
+   * the MCP/REST auth above: MCP and REST keep working exactly as configured.
+   * The portal is enabled only when `secret`, `publicUrl` and the GitLab OAuth
+   * application are all set; otherwise the login page says it is not configured.
+   */
+  web: {
+    /** Operator secret (>= 16 chars); derives the cookie-signing and at-rest encryption keys. */
+    secret?: string;
+    /** Externally visible origin, e.g. `https://host:40000`; builds the OAuth redirect URI. */
+    publicUrl?: string;
+    gitlab: { url?: string; clientId?: string; clientSecret?: string };
+    /** GitLab usernames or e-mails allowed into /admin (lowercased). Empty = nobody. */
+    adminUsers: string[];
+    /** Sealed file holding the LLM providers configured in the admin UI. */
+    providersFile: string;
   };
 }
 
@@ -102,6 +120,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, repoOverride?: 
       port: int(env.MNEMOSYNE_HTTP_PORT, 40000),
       basePath: normalizeBasePath(env.MNEMOSYNE_BASE_PATH ?? '/mnemosyne'),
       bearerToken: env.MNEMOSYNE_BEARER_TOKEN,
+    },
+    web: {
+      secret: env.MNEMOSYNE_SECRET,
+      publicUrl: env.MNEMOSYNE_PUBLIC_URL?.replace(/\/+$/, ''),
+      gitlab: {
+        url: env.MNEMOSYNE_GITLAB_URL?.replace(/\/+$/, ''),
+        clientId: env.MNEMOSYNE_GITLAB_CLIENT_ID,
+        clientSecret: env.MNEMOSYNE_GITLAB_CLIENT_SECRET,
+      },
+      adminUsers: (env.MNEMOSYNE_ADMIN_USERS ?? '')
+        .split(',')
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean),
+      providersFile: resolve(env.MNEMOSYNE_PROVIDERS_FILE ?? `${dirname(dbPath)}/providers.enc`),
     },
   };
 }
