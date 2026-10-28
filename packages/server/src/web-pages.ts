@@ -30,14 +30,16 @@ export interface LoginView {
   basePath: string;
   /** Portal is switched on (secret and public URL set). */
   configured: boolean;
-  /** Local admin account sign-in is available. */
+  /** Render the separate ADMIN sign-in (local admin account + GitLab admins) instead of the public page. */
+  admin?: boolean;
+  /** Local admin account sign-in is available (admin page only). */
   local: boolean;
   /** GitLab SSO is configured. */
   sso: boolean;
   /** Error key from `?error=`. */
   error?: string;
   /** Already signed in. */
-  user?: { name: string; username: string; admin: boolean };
+  user?: { name: string; username: string };
 }
 
 const ERRORS: Record<string, string> = {
@@ -47,6 +49,7 @@ const ERRORS: Record<string, string> = {
   local: 'Wrong user name or password.',
   throttled: 'Too many attempts. Please wait a minute and try again.',
   nosso: 'GitLab sign-in is not set up yet.',
+  noadmin: 'This GitLab account has no admin rights on Mnemosyne.',
 };
 
 export function loginPage(v: LoginView): string {
@@ -54,21 +57,18 @@ export function loginPage(v: LoginView): string {
   let action: string;
   if (v.user) {
     action = `<p class="who">Signed in as <strong>${esc(v.user.name)}</strong> <span class="muted">@${esc(v.user.username)}</span></p>
-      ${
-        v.user.admin
-          ? `<a class="btn primary" href="${base}/admin/">Open admin</a>`
-          : `<div class="notice">Your GitLab account has no admin rights on this Mnemosyne.</div>`
-      }
       <form method="post" action="${base}/auth/logout"><button class="btn" type="submit">Sign out</button></form>`;
-  } else if (v.configured && (v.sso || v.local)) {
-    const sso = v.sso ? `<a class="btn primary" href="${base}/auth/login">Sign in with GitLab</a>` : '';
+  } else if (v.configured && v.admin && (v.sso || v.local)) {
+    const sso = v.sso ? `<a class="btn${v.local ? '' : ' primary'}" href="${base}/auth/login?to=admin">Sign in with GitLab</a>` : '';
     const local = v.local
       ? `<form class="local" method="post" action="${base}/auth/local">
-        <input name="username" autocomplete="username" placeholder="User name" required maxlength="100">
+        <input name="username" autocomplete="username" placeholder="Admin user name" required maxlength="100">
         <input name="password" type="password" autocomplete="current-password" placeholder="Password" required maxlength="200">
-        <button class="btn${v.sso ? '' : ' primary'}" type="submit">Sign in</button></form>`
+        <button class="btn primary" type="submit">Sign in</button></form>`
       : '';
-    action = v.sso && v.local ? `${sso}<div class="or">or local admin</div>${local}` : sso + local;
+    action = v.sso && v.local ? `${local}<div class="or">or GitLab admin</div>${sso}` : local + sso;
+  } else if (v.configured && !v.admin && v.sso) {
+    action = `<a class="btn primary" href="${base}/auth/login">Sign in with GitLab</a>`;
   } else {
     action = `<div class="notice">Sign-in is not configured on this server yet.</div>`;
   }
@@ -84,11 +84,11 @@ export function loginPage(v: LoginView): string {
     <img class="logo" src="${base}/assets/logo.webp" alt="" width="196" height="189">
     <section class="card">
       <h1>Mnemosyne</h1>
-      <p class="tag">Self-hosted AI team memory</p>
+      <p class="tag">${v.admin ? 'Administration' : 'Self-hosted AI team memory'}</p>
       ${err}
       ${action}
     </section>
-    <footer>MCP clients connect to <code>${base}/mcp</code></footer>
+    <footer>${v.admin ? `<a href="${base}/">Back to sign-in</a>` : `MCP clients connect to <code>${base}/mcp</code>`}</footer>
   </div>
 </main>`,
     // Palette sampled from the approved mockup: near-black base, violet glow left, teal glow right.
@@ -202,8 +202,8 @@ export interface AdminView {
   basePath: string;
   nonce: string;
   user: { name: string; username: string };
-  /** Callback URL to register in GitLab (Admin → Applications). */
-  redirectUri: string;
+  /** Callback URLs to register in GitLab (Admin → Applications), one per line. */
+  redirectUris: string[];
 }
 
 const ADMIN_CSS = `
@@ -237,7 +237,7 @@ export function adminPage(v: AdminView): string {
     `<header>
   <span class="brand">Mnemosyne <span class="muted">admin</span></span>
   <div class="right"><span>${esc(v.user.name)} <span>@${esc(v.user.username)}</span></span>
-  <form method="post" action="${base}/auth/logout"><button class="btn small" type="submit">Sign out</button></form></div>
+  <form method="post" action="${base}/admin/auth/logout"><button class="btn small" type="submit">Sign out</button></form></div>
 </header>
 <main>
   <section>
@@ -270,8 +270,8 @@ export function adminPage(v: AdminView): string {
   </section>
   <section>
     <h2>GitLab SSO</h2>
-    <p class="sub">Lets GitLab users sign in with their GitLab account. In GitLab create an application (Admin → Applications) with scope <code>read_user</code>, tick <em>Trusted</em> so signed-in users are not asked again, and use this redirect URI:</p>
-    <p class="sub"><code>${esc(v.redirectUri)}</code></p>
+    <p class="sub">Lets GitLab users sign in with their GitLab account. In GitLab create an application (Admin → Applications) with scope <code>read_user</code>, tick <em>Trusted</em> so signed-in users are not asked again, and add these redirect URIs (one per line; the first is the public sign-in, the second the admin sign-in):</p>
+    <p class="sub">${v.redirectUris.map((u) => `<code>${esc(u)}</code>`).join('<br>')}</p>
     <form id="ssoForm" class="grid" autocomplete="off">
       <label class="full">GitLab URL<input id="gitlabUrl" maxlength="300" placeholder="https://gitlab.example.com"></label>
       <label>Application ID<input id="clientId" maxlength="200"></label>

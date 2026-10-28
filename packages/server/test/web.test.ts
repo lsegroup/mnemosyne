@@ -157,17 +157,17 @@ describe('web portal', () => {
     res.headers.getSetCookie().map((c) => c.split(';')[0]!).filter((c) => !c.endsWith('=')).join('; ');
 
   /** Runs login -> GitLab -> callback for a fake GitLab user code; returns the callback response. */
-  async function signIn(code: string) {
-    const login = await fetch(`${base}/auth/login`, { redirect: 'manual' });
+  async function signIn(code: string, prefix = '') {
+    const login = await fetch(`${base}${prefix}/auth/login`, { redirect: 'manual' });
     expect(login.status).toBe(302);
     const authorize = new URL(login.headers.get('location')!);
     expect(authorize.pathname).toBe('/oauth/authorize');
     expect(authorize.searchParams.get('code_challenge_method')).toBe('S256');
     expect(authorize.searchParams.get('scope')).toBe('read_user');
-    expect(authorize.searchParams.get('redirect_uri')).toBe(`${base}/auth/callback`);
+    expect(authorize.searchParams.get('redirect_uri')).toBe(`${base}${prefix}/auth/callback`);
     challenge = authorize.searchParams.get('code_challenge')!;
     const state = authorize.searchParams.get('state')!;
-    const cb = await fetch(`${base}/auth/callback?code=${code}&state=${state}`, {
+    const cb = await fetch(`${base}${prefix}/auth/callback?code=${code}&state=${state}`, {
       redirect: 'manual',
       headers: { cookie: cookiesOf(login) },
     });
@@ -200,8 +200,10 @@ describe('web portal', () => {
 
   it('keeps /admin and its API closed to anonymous visitors', async () => {
     const page = await fetch(`${base}/admin/`, { redirect: 'manual' });
-    expect(page.status).toBe(302);
-    expect(page.headers.get('location')).toBe(`${new URL(base).pathname}/`);
+    expect(page.status).toBe(200); // the admin has its own sign-in page, no redirect to the public one
+    const html = await page.text();
+    expect(html).toContain('Administration');
+    expect(html).not.toContain('LLM providers');
     expect((await fetch(`${base}/admin/api/providers`)).status).toBe(401);
   });
 
@@ -213,11 +215,11 @@ describe('web portal', () => {
   });
 
   it('lets a listed GitLab user into admin and manage providers', async () => {
-    const cb = await signIn('admin-code');
+    const cb = await signIn('admin-code', '/admin');
     expect(cb.status).toBe(302);
     expect(cb.headers.get('location')).toBe(`${new URL(base).pathname}/admin/`);
     const cookie = cookiesOf(cb);
-    expect(cb.headers.getSetCookie().join(';')).toMatch(/HttpOnly/);
+    expect(cb.headers.getSetCookie().join(';')).toMatch(/mnemosyne_admin=.*HttpOnly.*Path=\/mnemosyne\/admin/);
 
     const page = await fetch(`${base}/admin/`, { headers: { cookie } });
     expect(page.status).toBe(200);
@@ -244,7 +246,7 @@ describe('web portal', () => {
   });
 
   it('refuses state-changing admin calls that lack the same-origin marker', async () => {
-    const cookie = cookiesOf(await signIn('admin-code'));
+    const cookie = cookiesOf(await signIn('admin-code', '/admin'));
     const body = JSON.stringify({ label: 'x', kind: 'openai-compatible', baseUrl: 'https://x.example', model: 'm' });
     const noHeader = await fetch(`${base}/admin/api/providers`, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body });
     expect(noHeader.status).toBe(403);
@@ -256,19 +258,27 @@ describe('web portal', () => {
     expect(foreignOrigin.status).toBe(403);
   });
 
-  it('signs in a GitLab user who is not an admin but keeps them out of admin', async () => {
+  it('keeps the two sign-in systems apart: a public GitLab session never opens admin', async () => {
     const cb = await signIn('dev-code');
     expect(cb.headers.get('location')).toBe(`${new URL(base).pathname}/`);
     const cookie = cookiesOf(cb);
     const home = await (await fetch(`${base}/`, { headers: { cookie } })).text();
     expect(home).toContain('Some Dev');
-    expect(home).toContain('no admin rights');
-    expect((await fetch(`${base}/admin/`, { headers: { cookie }, redirect: 'manual' })).status).toBe(302);
-    expect((await fetch(`${base}/admin/api/providers`, { headers: { cookie } })).status).toBe(403);
+    expect(home).not.toContain('Open admin');
+    const adminPageHtml = await (await fetch(`${base}/admin/`, { headers: { cookie } })).text();
+    expect(adminPageHtml).toContain('Administration');
+    expect(adminPageHtml).not.toContain('LLM providers');
+    expect((await fetch(`${base}/admin/api/providers`, { headers: { cookie } })).status).toBe(401);
+  });
+
+  it('refuses admin sign-in for a GitLab user who is not an admin and sets no admin cookie', async () => {
+    const cb = await signIn('dev-code', '/admin');
+    expect(cb.headers.get('location')).toBe(`${new URL(base).pathname}/admin/?error=noadmin`);
+    expect(cb.headers.getSetCookie().some((c) => c.startsWith('mnemosyne_admin=') && !c.startsWith('mnemosyne_admin=;'))).toBe(false);
   });
 
   it('ignores a forged session cookie', async () => {
-    const forged = `mnemosyne_session=${encodeURIComponent(Buffer.from(JSON.stringify({ u: 'x', n: 'x', e: '', a: true, exp: 9999999999 })).toString('base64url') + '.AAAA')}`;
+    const forged = `mnemosyne_admin=${encodeURIComponent(Buffer.from(JSON.stringify({ u: 'x', n: 'x', e: '', a: true, exp: 9999999999 })).toString('base64url') + '.AAAA')}`;
     expect((await fetch(`${base}/admin/api/providers`, { headers: { cookie: forged } })).status).toBe(401);
   });
 
@@ -276,6 +286,9 @@ describe('web portal', () => {
     const out = await fetch(`${base}/auth/logout`, { method: 'POST', redirect: 'manual' });
     expect(out.status).toBe(303);
     expect(out.headers.getSetCookie().join(';')).toContain('mnemosyne_session=;');
+    const adminOut = await fetch(`${base}/admin/auth/logout`, { method: 'POST', redirect: 'manual' });
+    expect(adminOut.status).toBe(303);
+    expect(adminOut.headers.getSetCookie().join(';')).toContain('mnemosyne_admin=;');
   });
 });
 
@@ -292,7 +305,9 @@ describe('web portal when not configured', () => {
       const html = await (await fetch(`${base}/`)).text();
       expect(html).toContain('not configured');
       expect(html).not.toContain('Sign in with GitLab');
-      expect((await fetch(`${base}/admin/`, { redirect: 'manual' })).status).toBe(302);
+      const adminHtml = await (await fetch(`${base}/admin/`)).text();
+      expect(adminHtml).toContain('not configured');
+      expect(adminHtml).not.toContain('LLM providers');
       expect((await fetch(`${base}/admin/api/providers`)).status).toBe(401);
     } finally {
       srv.close();
@@ -370,7 +385,7 @@ describe('local admin account and GitLab SSO settings', () => {
   }
 
   const login = (base: string, username: string, password: string) =>
-    fetch(`${base}/auth/local`, {
+    fetch(`${base}/admin/auth/local`, {
       method: 'POST',
       redirect: 'manual',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -396,9 +411,10 @@ describe('local admin account and GitLab SSO settings', () => {
 
   it('signs the local admin in and rejects wrong credentials', async () => {
     const { base } = await start();
-    const page = await (await fetch(`${base}/`)).text();
+    const page = await (await fetch(`${base}/admin/`)).text();
     expect(page).toContain('name="password"');
     expect(page).not.toContain('Sign in with GitLab'); // SSO not configured yet
+    expect(await (await fetch(`${base}/`)).text()).not.toContain('name="password"'); // never on the public page
 
     const bad = await login(base, 'mnemosyne', 'nope');
     expect(bad.headers.get('location')).toContain('error=local');
@@ -410,7 +426,7 @@ describe('local admin account and GitLab SSO settings', () => {
     expect(ok.headers.get('location')).toBe('/mnemosyne/admin/');
     const cookie = cookieOf(ok);
     expect((await fetch(`${base}/admin`, { headers: { cookie } })).status).toBe(200);
-    expect((await fetch(`${base}/admin`, { redirect: 'manual' })).status).toBe(302);
+    expect(await (await fetch(`${base}/admin`)).text()).not.toContain('LLM providers');
   });
 
   it('locks a client out after five misses, even with the right password', async () => {
@@ -431,6 +447,7 @@ describe('local admin account and GitLab SSO settings', () => {
     });
     expect(put.status).toBe(200);
     const got = await (await fetch(`${base}/admin/api/settings`, { headers: { cookie } })).json();
+    expect(got.redirectUris).toHaveLength(2);
     expect(got).toMatchObject({ gitlabUrl: 'https://gitlab.example.com', clientId: 'app-id', hasSecret: true, ssoActive: true });
     expect(got.adminUsers).toEqual(['obecker', 'store@lumanet.info']);
     expect(JSON.stringify(got)).not.toContain('super-secret-value');
@@ -457,9 +474,9 @@ describe('local admin account and GitLab SSO settings', () => {
 
     await store.update((st) => void (st.ssoLiveAt = now - 25 * 3600)); // live for 25h: off
     expect((await login(base, 'mnemosyne', 'mnemosyne')).headers.get('location')).toContain('error=local');
-    expect(await (await fetch(`${base}/`)).text()).not.toContain('name="password"');
+    expect(await (await fetch(`${base}/admin/`)).text()).not.toContain('name="password"');
     expect((await fetch(`${base}/admin/api/settings`, { headers: { cookie } })).status).toBe(401);
-    expect((await fetch(`${base}/admin`, { headers: { cookie }, redirect: 'manual' })).status).toBe(302);
+    expect(await (await fetch(`${base}/admin`, { headers: { cookie } })).text()).not.toContain('LLM providers');
 
     // recovery switch for operators
     process.env.MNEMOSYNE_LOCAL_ADMIN_FORCE = '1';
