@@ -64,7 +64,21 @@ rm -f /tmp/mnemosyne-dist.tar.gz
 
 npm ci --omit=dev --no-audit --no-fund
 
-sudo tee /etc/mnemosyne.env > /dev/null <<EOF
+# Web-portal settings (MNEMOSYNE_SECRET, MNEMOSYNE_PUBLIC_URL, MNEMOSYNE_GITLAB_*,
+# MNEMOSYNE_ADMIN_USERS) come from the pipeline as /tmp/mnemosyne-portal.env (built from
+# masked CI/CD variables). If the pipeline sends none, whatever the current env file holds
+# is kept, so a deploy never switches the portal off.
+PORTAL_KEYS='MNEMOSYNE_SECRET|MNEMOSYNE_PUBLIC_URL|MNEMOSYNE_GITLAB_URL|MNEMOSYNE_GITLAB_CLIENT_ID|MNEMOSYNE_GITLAB_CLIENT_SECRET|MNEMOSYNE_ADMIN_USERS'
+PORTAL_ENV="$(mktemp)"
+if [ -s /tmp/mnemosyne-portal.env ]; then
+  grep -E "^(${PORTAL_KEYS})=" /tmp/mnemosyne-portal.env > "$PORTAL_ENV" || true
+elif sudo test -f /etc/mnemosyne.env; then
+  sudo grep -E "^(${PORTAL_KEYS})=" /etc/mnemosyne.env > "$PORTAL_ENV" || true
+fi
+rm -f /tmp/mnemosyne-portal.env
+
+{
+  cat <<EOF
 MNEMOSYNE_REPO=$INSTALL_DIR
 MNEMOSYNE_HTTP_HOST=127.0.0.1
 MNEMOSYNE_HTTP_PORT=$HTTP_PORT
@@ -75,6 +89,9 @@ MNEMOSYNE_EMBED_BACKEND=hash
 MNEMOSYNE_EMBED_DIM=256
 MNEMOSYNE_GIT_PUSH=false
 EOF
+  cat "$PORTAL_ENV"
+} | sudo tee /etc/mnemosyne.env > /dev/null
+rm -f "$PORTAL_ENV"
 sudo chmod 600 /etc/mnemosyne.env
 
 sed -e "s#__INSTALL_DIR__#${INSTALL_DIR}#g" -e "s#__RUN_USER__#${RUN_USER}#g" \
@@ -100,23 +117,3 @@ curl -sf -X POST "http://127.0.0.1:${HTTP_PORT}/mnemosyne/reindex" \
 
 echo "✓ mnemosyne service active. Local health check:"
 curl -sf "http://127.0.0.1:${HTTP_PORT}/mnemosyne/health" && echo
-
-# Drop the nginx location block as a snippet ONLY — never edit the live GitLab
-# nginx config from this script. GitLab's nginx serves the whole box; a bad
-# automatic edit there takes GitLab down for everyone. Wiring the one-line
-# `include` into sites-available/gitlab-external is a deliberate manual step,
-# done once, reviewed by a human.
-sudo tee /etc/nginx/snippets/mnemosyne-location.conf > /dev/null <<EOF
-location /mnemosyne/ {
-    proxy_pass http://127.0.0.1:${HTTP_PORT}/mnemosyne/;
-    proxy_http_version 1.1;
-    proxy_set_header Connection "";
-    proxy_set_header Host \$host;
-    proxy_buffering off;
-}
-EOF
-echo "==> Wrote /etc/nginx/snippets/mnemosyne-location.conf"
-echo "==> ONE-TIME MANUAL STEP still required: add"
-echo "        include snippets/mnemosyne-location.conf;"
-echo "    inside the server{} block of /etc/nginx/sites-available/gitlab-external, then:"
-echo "        sudo nginx -t && sudo systemctl reload nginx"
