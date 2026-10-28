@@ -4,6 +4,7 @@ import {
   createHmac,
   hkdfSync,
   randomBytes,
+  scryptSync,
   timingSafeEqual,
 } from 'node:crypto';
 
@@ -65,4 +66,19 @@ export function verifyToken<T extends { exp: number }>(key: Buffer, token: strin
   } catch {
     return null;
   }
+}
+
+/** `scrypt$<salt>$<hash>` (base64url) for the local admin password. */
+export function hashPassword(password: string): string {
+  const salt = randomBytes(16);
+  return `scrypt$${salt.toString('base64url')}$${scryptSync(password, salt, 32).toString('base64url')}`;
+}
+
+/** Constant-time check against {@link hashPassword} output; false for anything malformed. */
+export function verifyPassword(password: string, stored: string | undefined): boolean {
+  const [kind, salt, hash] = (stored ?? '').split('$');
+  if (kind !== 'scrypt' || !salt || !hash) return false;
+  const expected = Buffer.from(hash, 'base64url');
+  const actual = scryptSync(password, Buffer.from(salt, 'base64url'), expected.length);
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
 }

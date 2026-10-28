@@ -1,8 +1,9 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { Router, type NextFunction, type Request, type Response } from 'express';
+import { Router, urlencoded, type NextFunction, type Request, type Response } from 'express';
 import type { MnemosyneConfig } from './config.js';
-import { MIN_SECRET_LENGTH, deriveKeys, signToken, verifyToken, type DerivedKeys } from './secrets.js';
+import { MIN_SECRET_LENGTH, deriveKeys, hashPassword, signToken, verifyPassword, verifyToken, type DerivedKeys } from './secrets.js';
 import { ProviderStore, ProviderValidationError } from './provider-store.js';
+import { SettingsStore, SettingsValidationError, applyPortalInput, type GitLabSettings, type PortalSettings } from './settings-store.js';
 import { adminPage, loginPage } from './web-pages.js';
 import { LOGO_WEBP_BASE64 } from './web-assets.js';
 
@@ -11,12 +12,14 @@ const OAUTH_COOKIE = 'mnemosyne_oauth';
 const SESSION_TTL_S = 8 * 3600;
 const OAUTH_TTL_S = 10 * 60;
 const GITLAB_TIMEOUT_MS = 10_000;
+const LOCAL_ADMIN_GRACE_S = 24 * 3600;
 
 interface Session {
   u: string; // GitLab username
   n: string; // display name
   e: string; // e-mail
   a: boolean; // may use /admin
+  l?: boolean; // signed in with the local admin account
   exp: number;
 }
 
@@ -51,13 +54,11 @@ export interface WebPortal {
 /** Everything the portal needs to be switched on; any gap leaves it in "not configured". */
 export function webConfigured(cfg: MnemosyneConfig): boolean {
   const w = cfg.web;
-  return Boolean(
-    w.secret && w.secret.length >= MIN_SECRET_LENGTH && w.publicUrl && w.gitlab.url && w.gitlab.clientId && w.gitlab.clientSecret,
-  );
+  return Boolean(w.secret && w.secret.length >= MIN_SECRET_LENGTH && w.publicUrl);
 }
 
 /**
- * Public login screen at `/`, GitLab OAuth under `/auth/*`, and the admin area
+ * Public login screen at `/`, sign-in (local admin account and GitLab SSO) under `/auth/*`, and the admin area
  * under `/admin/*` (HTML + JSON API). Mounted before the MCP/REST bearer check,
  * so it has its own auth and never touches how MCP clients connect.
  */
@@ -69,6 +70,38 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   const secure = Boolean(cfg.web.publicUrl?.startsWith('https://'));
   const keys: DerivedKeys | null = configured ? deriveKeys(cfg.web.secret!) : null;
   const providers = keys ? new ProviderStore(cfg.web.providersFile, keys.enc) : null;
+  const settings = keys ? new SettingsStore(cfg.web.settingsFile, keys.enc) : null;
+
+  // Built-in admin account: lets the portal be configured before GitLab SSO exists.
+  const localUser = (cfg.web.localAdmin.user ?? '').trim() || 'mnemosyne';
+  const localHash =
+    cfg.web.localAdmin.passwordHash || (cfg.web.localAdmin.password ? hashPassword(cfg.web.localAdmin.password) : undefined);
+  const localEnabled = Boolean(keys && localHash);
+
+  /** GitLab SSO + admin list: values saved in the admin UI win over the environment. */
+  const effective = async () => {
+    const st: PortalSettings = settings ? await settings.get().catch(() => ({})) : {};
+    const g: GitLabSettings = {
+      url: (st.gitlab?.url || cfg.web.gitlab.url) || undefined,
+      clientId: (st.gitlab?.clientId || cfg.web.gitlab.clientId) || undefined,
+      clientSecret: (st.gitlab?.clientSecret || cfg.web.gitlab.clientSecret) || undefined,
+    };
+    // The built-in account is a bootstrap: 24h after GitLab SSO is proven live (first admin
+    // sign-in through it) it stops working. MNEMOSYNE_LOCAL_ADMIN_FORCE=1 is the recovery
+    // switch if GitLab is down or SSO was misconfigured.
+    const dueAt = st.ssoLiveAt ? st.ssoLiveAt + LOCAL_ADMIN_GRACE_S : undefined;
+    const force = /^(1|true|yes|on)$/i.test(process.env.MNEMOSYNE_LOCAL_ADMIN_FORCE ?? '');
+    return {
+      gitlab: g,
+      sso: Boolean(g.url && g.clientId && g.clientSecret),
+      adminUsers: st.adminUsers?.length ? st.adminUsers : cfg.web.adminUsers,
+      ssoLiveAt: st.ssoLiveAt,
+      localActive: localEnabled && (force || !dueAt || Date.now() / 1000 < dueAt),
+    };
+  };
+
+  // Brute-force brake for the local login: 5 misses lock that client out for a minute.
+  const misses = new Map<string, { n: number; until: number }>();
 
   const setCookie = (res: Response, name: string, value: string, maxAgeS: number, path = cookiePath) =>
     res.append(
@@ -104,13 +137,15 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   });
 
   // --- public login screen ----------------------------------------------
-  router.get('/', (req, res) => {
+  router.get('/', async (req, res) => {
     const s = sessionOf(req);
     pageHeaders(res);
     res.send(
       loginPage({
         basePath,
         configured,
+        local: configured && (await effective()).localActive,
+        sso: configured && (await effective()).sso,
         error: typeof req.query.error === 'string' ? req.query.error : undefined,
         user: s ? { name: s.n, username: s.u, admin: s.a } : undefined,
       }),
@@ -124,8 +159,49 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     res.redirect(`${basePath}/?error=${error}`);
   };
 
-  router.get('/auth/login', (_req, res) => {
-    if (!keys) {
+  router.post('/auth/local', urlencoded({ extended: false, limit: '4kb' }), async (req, res) => {
+    noStore(res);
+    const origin = req.header('origin');
+    if (!keys || !localEnabled || (origin && origin !== new URL(cfg.web.publicUrl!).origin) || !(await effective()).localActive) {
+      fail(res, 'local');
+      return;
+    }
+    const ip = req.ip ?? 'unknown';
+    const now = Date.now();
+    const m = misses.get(ip);
+    if (m && m.n >= 5 && m.until > now) {
+      fail(res, 'throttled');
+      return;
+    }
+    const user = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
+    const password = typeof req.body?.password === 'string' ? req.body.password.slice(0, 200) : '';
+    // Always run the hash check so a wrong user name costs the same as a wrong password.
+    const passwordOk = verifyPassword(password, localHash);
+    if (!(passwordOk && user.toLowerCase() === localUser.toLowerCase())) {
+      misses.set(ip, { n: (m && m.until > now ? m.n : 0) + 1, until: now + 60_000 });
+      fail(res, 'local');
+      return;
+    }
+    misses.delete(ip);
+    setCookie(
+      res,
+      SESSION_COOKIE,
+      signToken(keys.sign, {
+        u: localUser,
+        n: 'Local administrator',
+        e: '',
+        a: true,
+        l: true,
+        exp: Math.floor(Date.now() / 1000) + SESSION_TTL_S,
+      } satisfies Session),
+      SESSION_TTL_S,
+    );
+    res.redirect(303, `${basePath}/admin/`);
+  });
+
+  router.get('/auth/login', async (_req, res) => {
+    const eff = keys ? await effective() : null;
+    if (!keys || !eff?.sso) {
       res.redirect(`${basePath}/`);
       return;
     }
@@ -139,9 +215,9 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       OAUTH_TTL_S,
       `${cookiePath === '/' ? '' : cookiePath}/auth`,
     );
-    const url = new URL(`${cfg.web.gitlab.url}/oauth/authorize`);
+    const url = new URL(`${eff.gitlab.url}/oauth/authorize`);
     url.search = new URLSearchParams({
-      client_id: cfg.web.gitlab.clientId!,
+      client_id: eff.gitlab.clientId!,
       redirect_uri: redirectUri,
       response_type: 'code',
       state,
@@ -158,6 +234,11 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       res.redirect(`${basePath}/`);
       return;
     }
+    const eff = await effective();
+    if (!eff.sso) {
+      fail(res, 'nosso');
+      return;
+    }
     const pending = verifyToken<OAuthState>(keys.sign, parseCookies(req.header('cookie'))[OAUTH_COOKIE]);
     if (!pending || typeof req.query.state !== 'string' || req.query.state !== pending.state) {
       fail(res, 'state');
@@ -168,12 +249,12 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       return;
     }
     try {
-      const tokenRes = await fetch(`${cfg.web.gitlab.url}/oauth/token`, {
+      const tokenRes = await fetch(`${eff.gitlab.url}/oauth/token`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
         body: new URLSearchParams({
-          client_id: cfg.web.gitlab.clientId!,
-          client_secret: cfg.web.gitlab.clientSecret!,
+          client_id: eff.gitlab.clientId!,
+          client_secret: eff.gitlab.clientSecret!,
           code: req.query.code,
           grant_type: 'authorization_code',
           redirect_uri: redirectUri,
@@ -184,7 +265,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       const token = (await tokenRes.json()) as { access_token?: string };
       if (!tokenRes.ok || !token.access_token) throw new Error(`token exchange failed (${tokenRes.status})`);
 
-      const userRes = await fetch(`${cfg.web.gitlab.url}/api/v4/user`, {
+      const userRes = await fetch(`${eff.gitlab.url}/api/v4/user`, {
         headers: { Authorization: `Bearer ${token.access_token}`, Accept: 'application/json' },
         signal: AbortSignal.timeout(GITLAB_TIMEOUT_MS),
       });
@@ -196,7 +277,12 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       }
 
       const ids = [user.username, user.email].filter(Boolean).map((s) => s!.toLowerCase());
-      const admin = ids.some((id) => cfg.web.adminUsers.includes(id));
+      const admin = ids.some((id) => eff.adminUsers.includes(id));
+      if (admin && !eff.ssoLiveAt) {
+        await settings!.update((s) => {
+          s.ssoLiveAt ??= Math.floor(Date.now() / 1000);
+        });
+      }
       setCookie(
         res,
         SESSION_COOKIE,
@@ -224,19 +310,19 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   });
 
   // --- admin ------------------------------------------------------------
-  const requireAdminPage = (req: Request, res: Response, next: NextFunction) => {
+  const requireAdminPage = async (req: Request, res: Response, next: NextFunction) => {
     const s = sessionOf(req);
-    if (!s || !s.a) {
+    if (!s || !s.a || (s.l && !(await effective()).localActive)) {
       res.redirect(`${basePath}/`);
       return;
     }
     next();
   };
 
-  const requireAdminApi = (req: Request, res: Response, next: NextFunction) => {
+  const requireAdminApi = async (req: Request, res: Response, next: NextFunction) => {
     noStore(res);
     const s = sessionOf(req);
-    if (!s) {
+    if (!s || (s.l && !(await effective()).localActive)) {
       res.status(401).json({ error: 'not signed in' });
       return;
     }
@@ -256,7 +342,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     next();
   };
 
-  router.get('/admin', requireAdminPage, (req, res) => {
+  router.get('/admin', requireAdminPage, async (req, res) => {
     const s = sessionOf(req)!;
     const nonce = randomBytes(16).toString('base64');
     pageHeaders(res, nonce);
@@ -265,8 +351,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         basePath,
         nonce,
         user: { name: s.n, username: s.u },
-        gitlabUrl: cfg.web.gitlab.url!,
-        adminUsers: cfg.web.adminUsers,
+        redirectUri,
       }),
     );
   });
@@ -280,7 +365,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       try {
         res.json(await fn(req, res));
       } catch (err) {
-        if (err instanceof ProviderValidationError) res.status(400).json({ error: err.message });
+        if (err instanceof ProviderValidationError || err instanceof SettingsValidationError) res.status(400).json({ error: err.message });
         else res.status(500).json({ error: 'internal error' });
       }
     };
@@ -289,6 +374,31 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   api.post('/providers', handle((req) => providers!.upsert(req.body ?? {})));
   api.post('/providers/:id/activate', handle(async (req) => (await providers!.activate(String(req.params.id)), { ok: true })));
   api.delete('/providers/:id', handle(async (req) => (await providers!.remove(String(req.params.id)), { ok: true })));
+
+  api.get(
+    '/settings',
+    handle(async () => {
+      const eff = await effective();
+      const secret = eff.gitlab.clientSecret ?? '';
+      return {
+        gitlabUrl: eff.gitlab.url ?? '',
+        clientId: eff.gitlab.clientId ?? '',
+        hasSecret: secret.length > 0,
+        secretHint: secret.length >= 12 ? `••••${secret.slice(-4)}` : secret ? '••••' : '',
+        adminUsers: eff.adminUsers,
+        ssoActive: eff.sso,
+        redirectUri,
+        localUser: eff.localActive ? localUser : null,
+      };
+    }),
+  );
+  api.put(
+    '/settings',
+    handle(async (req) => {
+      await settings!.update((s) => applyPortalInput(s, req.body ?? {}));
+      return { ok: true };
+    }),
+  );
 
   return { router, providers };
 }

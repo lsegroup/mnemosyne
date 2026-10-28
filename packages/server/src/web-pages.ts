@@ -28,8 +28,12 @@ function shell(title: string, body: string, extraCss = ''): string {
 
 export interface LoginView {
   basePath: string;
-  /** Sign-in is wired up (secret, public URL and GitLab OAuth app all set). */
+  /** Portal is switched on (secret and public URL set). */
   configured: boolean;
+  /** Local admin account sign-in is available. */
+  local: boolean;
+  /** GitLab SSO is configured. */
+  sso: boolean;
   /** Error key from `?error=`. */
   error?: string;
   /** Already signed in. */
@@ -40,6 +44,9 @@ const ERRORS: Record<string, string> = {
   state: 'The sign-in attempt expired or was tampered with. Please try again.',
   denied: 'GitLab sign-in was cancelled or refused.',
   gitlab: 'GitLab could not be reached or rejected the sign-in. Please try again.',
+  local: 'Wrong user name or password.',
+  throttled: 'Too many attempts. Please wait a minute and try again.',
+  nosso: 'GitLab sign-in is not set up yet.',
 };
 
 export function loginPage(v: LoginView): string {
@@ -53,8 +60,15 @@ export function loginPage(v: LoginView): string {
           : `<div class="notice">Your GitLab account has no admin rights on this Mnemosyne.</div>`
       }
       <form method="post" action="${base}/auth/logout"><button class="btn" type="submit">Sign out</button></form>`;
-  } else if (v.configured) {
-    action = `<a class="btn primary" href="${base}/auth/login">Sign in with GitLab</a>`;
+  } else if (v.configured && (v.sso || v.local)) {
+    const sso = v.sso ? `<a class="btn primary" href="${base}/auth/login">Sign in with GitLab</a>` : '';
+    const local = v.local
+      ? `<form class="local" method="post" action="${base}/auth/local">
+        <input name="username" autocomplete="username" placeholder="User name" required maxlength="100">
+        <input name="password" type="password" autocomplete="current-password" placeholder="Password" required maxlength="200">
+        <button class="btn${v.sso ? '' : ' primary'}" type="submit">Sign in</button></form>`
+      : '';
+    action = v.sso && v.local ? `${sso}<div class="or">or local admin</div>${local}` : sso + local;
   } else {
     action = `<div class="notice">Sign-in is not configured on this server yet.</div>`;
   }
@@ -100,6 +114,10 @@ h1{margin:0;font:600 38px/1.1 "Palatino Linotype","Book Antiqua",Palatino,Georgi
 .tag{margin:0 0 6px;color:var(--muted);font-size:13px}
 .notice{background:#12141b;font-size:12.5px;color:#a3a8b8}
 .who{margin:0}.muted{color:var(--muted)}
+form.local{display:flex;flex-direction:column;gap:10px}
+form.local input{padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:#0f1117;color:var(--text);font:inherit}
+form.local input:focus{outline:none;border-color:var(--accent)}
+.or{color:var(--muted);font-size:12px;letter-spacing:.4px;text-transform:uppercase}
 form{margin:0}form .btn{width:100%}.card .btn{width:100%}
 .btn.primary{color:#fff}
 footer{margin-top:24px;color:var(--muted);font-size:12px}
@@ -184,8 +202,8 @@ export interface AdminView {
   basePath: string;
   nonce: string;
   user: { name: string; username: string };
-  gitlabUrl: string;
-  adminUsers: string[];
+  /** Callback URL to register in GitLab (Admin → Applications). */
+  redirectUri: string;
 }
 
 const ADMIN_CSS = `
@@ -214,9 +232,6 @@ ul.plain{margin:0;padding-left:18px;color:var(--muted)}
 /** Admin shell; the interactive part lives in {@link ADMIN_JS}, run under the CSP nonce. */
 export function adminPage(v: AdminView): string {
   const base = esc(v.basePath);
-  const admins = v.adminUsers.length
-    ? `<ul class="plain">${v.adminUsers.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>`
-    : '<p class="sub">No admin users configured.</p>';
   const html = shell(
     'Mnemosyne admin',
     `<header>
@@ -254,9 +269,17 @@ export function adminPage(v: AdminView): string {
     </form>
   </section>
   <section>
-    <h2>Access</h2>
-    <p class="sub">Sign-in uses GitLab at <strong>${esc(v.gitlabUrl)}</strong>. Admin access is limited to:</p>
-    ${admins}
+    <h2>GitLab SSO</h2>
+    <p class="sub">Lets GitLab users sign in with their GitLab account. In GitLab create an application (Admin → Applications) with scope <code>read_user</code>, tick <em>Trusted</em> so signed-in users are not asked again, and use this redirect URI:</p>
+    <p class="sub"><code>${esc(v.redirectUri)}</code></p>
+    <form id="ssoForm" class="grid" autocomplete="off">
+      <label class="full">GitLab URL<input id="gitlabUrl" maxlength="300" placeholder="https://gitlab.example.com"></label>
+      <label>Application ID<input id="clientId" maxlength="200"></label>
+      <label>Secret<input id="clientSecret" type="password" maxlength="500" autocomplete="new-password"></label>
+      <label class="full">GitLab admins <span class="muted">(user names or e-mails, comma separated; they may open this admin page after GitLab sign-in)</span><input id="adminUsers" maxlength="2000"></label>
+      <div class="row full"><button class="btn primary" type="submit">Save GitLab SSO</button><span id="ssoMsg"></span></div>
+    </form>
+    <p class="sub" id="ssoState"></p>
   </section>
 </main>
 <script nonce="${esc(v.nonce)}">${ADMIN_JS(v.basePath)}</script>`,
@@ -322,6 +345,17 @@ function ADMIN_JS(basePath: string): string {
       baseUrl:$('baseUrl').value,model:$('model').value,apiKey:$('apiKey').value})
       .then(function(){reset();msg('Saved.',true);return load()}).catch(function(e){msg(e.message)});
   });
-  load();
+  function ssoMsg(t,ok){var m=$('ssoMsg');m.textContent=t||'';m.className=ok?'ok':'err'}
+  function loadSso(){return call('GET','/settings').then(function(c){
+    $('gitlabUrl').value=c.gitlabUrl;$('clientId').value=c.clientId;$('adminUsers').value=c.adminUsers.join(', ');
+    $('clientSecret').value='';$('clientSecret').placeholder=c.hasSecret?'Leave empty to keep '+c.secretHint:'';
+    $('ssoState').textContent=(c.ssoActive?'GitLab sign-in is active.':'GitLab sign-in is not active yet.')+(c.localUser?' Local admin account: '+c.localUser+'.':'')
+  }).catch(function(e){ssoMsg(e.message)})}
+  $('ssoForm').addEventListener('submit',function(ev){
+    ev.preventDefault();ssoMsg('');
+    call('PUT','/settings',{gitlabUrl:$('gitlabUrl').value,clientId:$('clientId').value,clientSecret:$('clientSecret').value,adminUsers:$('adminUsers').value})
+      .then(function(){ssoMsg('Saved.',true);return loadSso()}).catch(function(e){ssoMsg(e.message)});
+  });
+  load();loadSso();
 })();`;
 }

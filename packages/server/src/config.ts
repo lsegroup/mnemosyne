@@ -52,8 +52,8 @@ export interface MnemosyneConfig {
   /**
    * Web portal (`<basePath>/` login screen, `<basePath>/admin/`). Independent of
    * the MCP/REST auth above: MCP and REST keep working exactly as configured.
-   * The portal is enabled only when `secret`, `publicUrl` and the GitLab OAuth
-   * application are all set; otherwise the login page says it is not configured.
+   * The portal is enabled when `secret` and `publicUrl` are set. Sign-in is the local
+   * admin account and/or GitLab SSO (env or admin UI); with neither it says so.
    */
   web: {
     /** Operator secret (>= 16 chars); derives the cookie-signing and at-rest encryption keys. */
@@ -65,6 +65,13 @@ export interface MnemosyneConfig {
     adminUsers: string[];
     /** Sealed file holding the LLM providers configured in the admin UI. */
     providersFile: string;
+    /** Sealed file holding portal settings edited in the admin UI (override the env values). */
+    settingsFile: string;
+    /**
+     * Built-in admin account so the portal can be configured before (or without) GitLab SSO.
+     * Give either a `passwordHash` (`hashPassword()` output) or a plain `password`.
+     */
+    localAdmin: { user?: string; passwordHash?: string; password?: string };
   };
 }
 
@@ -134,6 +141,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, repoOverride?: 
         .map((s) => s.trim().toLowerCase())
         .filter(Boolean),
       providersFile: resolve(env.MNEMOSYNE_PROVIDERS_FILE ?? `${dirname(dbPath)}/providers.enc`),
+      settingsFile: resolve(env.MNEMOSYNE_SETTINGS_FILE ?? `${dirname(dbPath)}/settings.enc`),
+      localAdmin: {
+        user: env.MNEMOSYNE_LOCAL_ADMIN_USER,
+        passwordHash: env.MNEMOSYNE_LOCAL_ADMIN_PASSWORD_HASH,
+        password: env.MNEMOSYNE_LOCAL_ADMIN_PASSWORD,
+      },
     },
   };
 }

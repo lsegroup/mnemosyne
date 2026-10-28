@@ -11,7 +11,8 @@ import { loadConfig } from '../src/config.js';
 import { createHttpApp } from '../src/http.js';
 import { ProviderStore, ProviderValidationError } from '../src/provider-store.js';
 import { MnemosyneService } from '../src/service.js';
-import { deriveKeys, open, seal, signToken, verifyToken } from '../src/secrets.js';
+import { deriveKeys, hashPassword, open, seal, signToken, verifyPassword, verifyToken } from '../src/secrets.js';
+import { SettingsStore } from '../src/settings-store.js';
 import { createWebPortal } from '../src/web.js';
 
 const SECRET = 'a-test-secret-with-enough-length';
@@ -333,5 +334,139 @@ describe('MCP/REST stay gated exactly as before', () => {
     expect((await fetch(`${base}/search`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"query":"x"}' })).status).toBe(401);
     expect((await fetch(`${base}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status).toBe(401);
     expect((await fetch(`${base}/health`)).status).toBe(200);
+  });
+});
+
+// --- built-in admin account + settings UI ------------------------------------
+
+describe('local admin account and GitLab SSO settings', () => {
+  let tmp: string;
+  const servers: Server[] = [];
+  beforeAll(async () => {
+    tmp = await mkdtemp(join(tmpdir(), 'mnemosyne-local-'));
+  });
+  afterAll(async () => {
+    servers.forEach((x) => x.close());
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  /** A portal with no GitLab at all, only the built-in account, over a shared data dir. */
+  async function start(env: Record<string, string> = {}) {
+    const app = express();
+    const srv = createServer((q, r) => app(q, r));
+    await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+    servers.push(srv);
+    const origin = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+    const cfg = loadConfig({
+      MNEMOSYNE_REPO: tmp,
+      MNEMOSYNE_SECRET: SECRET,
+      MNEMOSYNE_PUBLIC_URL: origin,
+      MNEMOSYNE_LOCAL_ADMIN_PASSWORD: 'mnemosyne',
+      ...env,
+    });
+    app.use(express.json());
+    app.use(cfg.http.basePath, createWebPortal(cfg).router);
+    return { base: `${origin}${cfg.http.basePath}`, origin, cfg };
+  }
+
+  const login = (base: string, username: string, password: string) =>
+    fetch(`${base}/auth/local`, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ username, password }),
+    });
+  const cookieOf = (res: Response) => (res.headers.get('set-cookie') ?? '').split(';')[0]!;
+
+  it('hashes passwords with scrypt and verifies them in constant time', () => {
+    const h = hashPassword('mnemosyne');
+    expect(h.startsWith('scrypt$')).toBe(true);
+    expect(h).not.toContain('mnemosyne');
+    expect(verifyPassword('mnemosyne', h)).toBe(true);
+    expect(verifyPassword('Mnemosyne', h)).toBe(false);
+    expect(verifyPassword('x', undefined)).toBe(false);
+    expect(verifyPassword('x', 'garbage')).toBe(false);
+  });
+
+  it('has no default account unless the operator sets a password', async () => {
+    const { base } = await start({ MNEMOSYNE_LOCAL_ADMIN_PASSWORD: '' });
+    expect(await (await fetch(`${base}/`)).text()).toContain('not configured');
+    expect((await login(base, 'mnemosyne', '')).headers.get('location')).toContain('error=local');
+  });
+
+  it('signs the local admin in and rejects wrong credentials', async () => {
+    const { base } = await start();
+    const page = await (await fetch(`${base}/`)).text();
+    expect(page).toContain('name="password"');
+    expect(page).not.toContain('Sign in with GitLab'); // SSO not configured yet
+
+    const bad = await login(base, 'mnemosyne', 'nope');
+    expect(bad.headers.get('location')).toContain('error=local');
+    expect(bad.headers.get('set-cookie') ?? '').not.toContain('mnemosyne_session=ey');
+    expect((await login(base, 'someone', 'mnemosyne')).headers.get('location')).toContain('error=local');
+
+    const ok = await login(base, 'mnemosyne', 'mnemosyne');
+    expect(ok.status).toBe(303);
+    expect(ok.headers.get('location')).toBe('/mnemosyne/admin/');
+    const cookie = cookieOf(ok);
+    expect((await fetch(`${base}/admin`, { headers: { cookie } })).status).toBe(200);
+    expect((await fetch(`${base}/admin`, { redirect: 'manual' })).status).toBe(302);
+  });
+
+  it('locks a client out after five misses, even with the right password', async () => {
+    const { base } = await start();
+    for (let i = 0; i < 5; i++) await login(base, 'mnemosyne', `wrong${i}`);
+    expect((await login(base, 'mnemosyne', 'mnemosyne')).headers.get('location')).toContain('error=throttled');
+  });
+
+  it('configures GitLab SSO from the admin page and never returns the secret', async () => {
+    const { base, origin, cfg } = await start();
+    const cookie = cookieOf(await login(base, 'mnemosyne', 'mnemosyne'));
+    const hdr = { cookie, 'Content-Type': 'application/json', 'X-Requested-With': 'mnemosyne-admin', origin };
+
+    const put = await fetch(`${base}/admin/api/settings`, {
+      method: 'PUT',
+      headers: hdr,
+      body: JSON.stringify({ gitlabUrl: 'https://gitlab.example.com/', clientId: 'app-id', clientSecret: 'super-secret-value', adminUsers: 'Obecker, store@lumanet.info' }),
+    });
+    expect(put.status).toBe(200);
+    const got = await (await fetch(`${base}/admin/api/settings`, { headers: { cookie } })).json();
+    expect(got).toMatchObject({ gitlabUrl: 'https://gitlab.example.com', clientId: 'app-id', hasSecret: true, ssoActive: true });
+    expect(got.adminUsers).toEqual(['obecker', 'store@lumanet.info']);
+    expect(JSON.stringify(got)).not.toContain('super-secret-value');
+    expect(await readFile(cfg.web.settingsFile, 'utf8')).not.toContain('super-secret-value');
+
+    // an empty secret keeps the stored one; the login page now offers GitLab too
+    await fetch(`${base}/admin/api/settings`, { method: 'PUT', headers: hdr, body: JSON.stringify({ gitlabUrl: 'https://gitlab.example.com', clientId: 'app-id', clientSecret: '', adminUsers: 'obecker' }) });
+    expect((await (await fetch(`${base}/admin/api/settings`, { headers: { cookie } })).json()).hasSecret).toBe(true);
+    expect(await (await fetch(`${base}/`)).text()).toContain('Sign in with GitLab');
+
+    // cross-site writes are refused
+    const csrf = await fetch(`${base}/admin/api/settings`, { method: 'PUT', headers: { ...hdr, origin: 'https://evil.example' }, body: '{}' });
+    expect(csrf.status).toBe(403);
+  });
+
+  it('switches the local account off 24h after GitLab SSO went live, including open sessions', async () => {
+    const { base, cfg } = await start();
+    const store = new SettingsStore(cfg.web.settingsFile, deriveKeys(SECRET).enc);
+    const now = Math.floor(Date.now() / 1000);
+
+    await store.update((st) => void (st.ssoLiveAt = now - 3600)); // live for 1h: still allowed
+    const cookie = cookieOf(await login(base, 'mnemosyne', 'mnemosyne'));
+    expect((await fetch(`${base}/admin`, { headers: { cookie } })).status).toBe(200);
+
+    await store.update((st) => void (st.ssoLiveAt = now - 25 * 3600)); // live for 25h: off
+    expect((await login(base, 'mnemosyne', 'mnemosyne')).headers.get('location')).toContain('error=local');
+    expect(await (await fetch(`${base}/`)).text()).not.toContain('name="password"');
+    expect((await fetch(`${base}/admin/api/settings`, { headers: { cookie } })).status).toBe(401);
+    expect((await fetch(`${base}/admin`, { headers: { cookie }, redirect: 'manual' })).status).toBe(302);
+
+    // recovery switch for operators
+    process.env.MNEMOSYNE_LOCAL_ADMIN_FORCE = '1';
+    try {
+      expect((await login(base, 'mnemosyne', 'mnemosyne')).status).toBe(303);
+    } finally {
+      delete process.env.MNEMOSYNE_LOCAL_ADMIN_FORCE;
+    }
   });
 });
