@@ -63,6 +63,9 @@ export function loginPage(v: LoginView): string {
     'Mnemosyne',
     `<main class="stage">
   <div class="glow" aria-hidden="true"><i class="streak l"></i><i class="streak r"></i></div>
+  ${BACKDROP_SVG}
+  <svg class="grain" aria-hidden="true"><filter id="grain"><feTurbulence type="fractalNoise" baseFrequency=".85" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#grain)"/></svg>
+  <div class="vignette" aria-hidden="true"></div>
   <div class="stack">
     <img class="logo" src="${base}/assets/logo.webp" alt="" width="196" height="189">
     <section class="card">
@@ -92,7 +95,7 @@ background:linear-gradient(270deg,transparent,rgba(44,178,186,.92) 70%,rgba(120,
 .stack{position:relative;z-index:1;width:100%;max-width:340px;display:flex;flex-direction:column;align-items:center}
 .logo{display:block;width:196px;height:auto;margin-bottom:-62px;position:relative;z-index:2;filter:drop-shadow(0 10px 30px rgba(90,60,200,.40))}
 .card{width:100%;display:flex;flex-direction:column;gap:14px;align-items:stretch;text-align:center;
-padding:84px 28px 28px;border:1px solid var(--line);border-radius:14px;background:var(--panel);box-shadow:0 24px 70px rgba(0,0,0,.55)}
+padding:84px 28px 28px;border:1px solid var(--line);border-radius:14px;background:var(--panel);box-shadow:0 18px 48px rgba(0,0,0,.42)}
 h1{margin:0;font:600 38px/1.1 "Palatino Linotype","Book Antiqua",Palatino,Georgia,"Times New Roman",serif;letter-spacing:.4px;color:#8473de}
 .tag{margin:0 0 6px;color:var(--muted);font-size:13px}
 .notice{background:#12141b;font-size:12.5px;color:#a3a8b8}
@@ -100,9 +103,82 @@ h1{margin:0;font:600 38px/1.1 "Palatino Linotype","Book Antiqua",Palatino,Georgi
 form{margin:0}form .btn{width:100%}.card .btn{width:100%}
 .btn.primary{color:#fff}
 footer{margin-top:24px;color:var(--muted);font-size:12px}
-code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:transparent;border:0;padding:0 2px;color:#a3a8b8}`,
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:transparent;border:0;padding:0 2px;color:#a3a8b8}
+.stack::before{content:"";position:absolute;z-index:-1;left:50%;top:-110px;width:640px;height:420px;transform:translateX(-50%);
+background:radial-gradient(ellipse closest-side at 50% 50%,rgba(122,102,224,.34),rgba(40,150,170,.14) 50%,transparent 100%);pointer-events:none}
+.net{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;
+-webkit-mask-image:radial-gradient(ellipse 75% 75% at 50% 50%,#000 35%,transparent 100%);mask-image:radial-gradient(ellipse 75% 75% at 50% 50%,#000 35%,transparent 100%)}
+.net line{stroke-width:1;stroke-linecap:round}
+.net .node{animation:twinkle 5s ease-in-out infinite}
+.net .node.b{animation-duration:7.5s}.net .node.c{animation-duration:3.8s}
+.net .dust{animation:rise 34s linear infinite}
+.net .dust.b{animation-duration:48s}.net .dust.c{animation-duration:26s}
+.grain{position:absolute;inset:0;width:100%;height:100%;opacity:.07;mix-blend-mode:overlay;pointer-events:none}
+.vignette{position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse 85% 75% at 50% 46%,transparent 55%,rgba(4,5,9,.72) 100%)}
+.glow{animation:breathe 11s ease-in-out infinite}
+.streak.l,.streak.r{animation:shimmer 6s ease-in-out infinite}.streak.r{animation-delay:-3s}
+@keyframes twinkle{0%,100%{opacity:.35}50%{opacity:1}}
+@keyframes rise{from{transform:translateY(0)}to{transform:translateY(-120px)}}
+@keyframes breathe{0%,100%{opacity:.82}50%{opacity:1}}
+@keyframes shimmer{0%,100%{opacity:.7}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.glow,.streak,.net .node,.net .dust{animation:none!important}}`,
   );
 }
+
+/**
+ * Faint "memory network" behind the login card: nodes joined to their nearest
+ * neighbours (violet on the left half, teal on the right) plus slow-rising dust.
+ * Generated once with a fixed seed so the picture is identical on every load.
+ */
+const BACKDROP_SVG = (() => {
+  let seed = 0x4d6e656d;
+  const rnd = () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const W = 1600;
+  const H = 900;
+  const colour = (x: number) => (x < W / 2 ? '#8f73ea' : '#3cc4cc');
+  const behindCard = (x: number, y: number) => ((x - 800) / 300) ** 2 + ((y - 470) / 250) ** 2 < 1;
+
+  const nodes: Array<{ x: number; y: number; r: number }> = [];
+  while (nodes.length < 62) {
+    const x = rnd() * W;
+    const y = rnd() * H;
+    if (!behindCard(x, y)) nodes.push({ x, y, r: 1.6 + rnd() * 2.2 });
+  }
+  const seen = new Set<string>();
+  let lines = '';
+  nodes.forEach((a, i) => {
+    nodes
+      .map((b, j) => ({ j, d: Math.hypot(a.x - b.x, a.y - b.y) }))
+      .filter((n) => n.j !== i && n.d < 270)
+      .sort((p, q) => p.d - q.d)
+      .slice(0, 2)
+      .forEach(({ j }) => {
+        const key = i < j ? `${i}-${j}` : `${j}-${i}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        const b = nodes[j]!;
+        lines += `<line x1="${a.x.toFixed(0)}" y1="${a.y.toFixed(0)}" x2="${b.x.toFixed(0)}" y2="${b.y.toFixed(0)}" stroke="${colour((a.x + b.x) / 2)}" stroke-opacity=".22"/>`;
+      });
+  });
+  const dots = nodes
+    .map((n, i) => {
+      const cls = ['node', 'node b', 'node c'][i % 3];
+      return `<circle class="${cls}" cx="${n.x.toFixed(0)}" cy="${n.y.toFixed(0)}" r="${n.r.toFixed(1)}" fill="${colour(n.x)}" style="animation-delay:-${(rnd() * 8).toFixed(1)}s"/>`;
+    })
+    .join('');
+  let dust = '';
+  for (let i = 0; i < 38; i++) {
+    const x = rnd() * W;
+    const cls = ['dust', 'dust b', 'dust c'][i % 3];
+    dust += `<circle class="${cls}" cx="${x.toFixed(0)}" cy="${(rnd() * H).toFixed(0)}" r="${(0.7 + rnd() * 1.1).toFixed(1)}" fill="${colour(x)}" fill-opacity="${(0.25 + rnd() * 0.35).toFixed(2)}" style="animation-delay:-${(rnd() * 30).toFixed(1)}s"/>`;
+  }
+  return `<svg class="net" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid slice" aria-hidden="true">${lines}${dots}${dust}</svg>`;
+})();
 
 export interface AdminView {
   basePath: string;

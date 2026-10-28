@@ -180,6 +180,8 @@ describe('web portal', () => {
     expect(html).toContain('Sign in with GitLab');
     expect(html).toContain('color-scheme:dark');
     expect(html).toContain('/assets/logo.webp');
+    expect(html).toContain('class="net"'); // inline-SVG background (no external assets under the strict CSP)
+    expect(html).not.toContain('<script');
     const csp = res.headers.get('content-security-policy')!;
     expect(csp).toContain("script-src 'none'");
     expect(csp).toContain("img-src 'self'");
