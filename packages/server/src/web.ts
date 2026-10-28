@@ -4,6 +4,7 @@ import type { MnemosyneConfig } from './config.js';
 import { MIN_SECRET_LENGTH, deriveKeys, signToken, verifyToken, type DerivedKeys } from './secrets.js';
 import { ProviderStore, ProviderValidationError } from './provider-store.js';
 import { adminPage, loginPage } from './web-pages.js';
+import { LOGO_WEBP_BASE64 } from './web-assets.js';
 
 const SESSION_COOKIE = 'mnemosyne_session';
 const OAUTH_COOKIE = 'mnemosyne_oauth';
@@ -86,12 +87,21 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     noStore(res);
     res.setHeader(
       'Content-Security-Policy',
-      `default-src 'none'; style-src 'unsafe-inline'; script-src ${nonce ? `'nonce-${nonce}'` : "'none'"}; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`,
+      `default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; script-src ${nonce ? `'nonce-${nonce}'` : "'none'"}; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`,
     );
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'same-origin');
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
   };
+
+  // --- public brand asset (login screen logo) -----------------------------
+  const logo = Buffer.from(LOGO_WEBP_BASE64, 'base64');
+  router.get('/assets/logo.webp', (_req, res) => {
+    res.setHeader('Content-Type', 'image/webp');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.send(logo);
+  });
 
   // --- public login screen ----------------------------------------------
   router.get('/', (req, res) => {
