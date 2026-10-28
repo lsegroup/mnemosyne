@@ -179,7 +179,20 @@ describe('web portal', () => {
     const html = await res.text();
     expect(html).toContain('Sign in with GitLab');
     expect(html).toContain('color-scheme:dark');
-    expect(res.headers.get('content-security-policy')).toContain("script-src 'none'");
+    expect(html).toContain('/assets/logo.webp');
+    const csp = res.headers.get('content-security-policy')!;
+    expect(csp).toContain("script-src 'none'");
+    expect(csp).toContain("img-src 'self'");
+  });
+
+  it('serves the logo publicly as a cacheable WebP', async () => {
+    const res = await fetch(`${base}/assets/logo.webp`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('image/webp');
+    expect(res.headers.get('cache-control')).toContain('max-age');
+    const bytes = Buffer.from(await res.arrayBuffer());
+    expect(bytes.subarray(0, 4).toString()).toBe('RIFF');
+    expect(bytes.subarray(8, 12).toString()).toBe('WEBP');
   });
 
   it('keeps /admin and its API closed to anonymous visitors', async () => {

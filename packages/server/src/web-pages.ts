@@ -61,27 +61,46 @@ export function loginPage(v: LoginView): string {
   const err = v.error && ERRORS[v.error] ? `<div class="notice error">${esc(ERRORS[v.error]!)}</div>` : '';
   return shell(
     'Mnemosyne',
-    `<main>
-  <section class="card">
-    <div class="mark" aria-hidden="true">M</div>
-    <h1>Mnemosyne</h1>
-    <p class="tag">Self-hosted AI team memory</p>
-    ${err}
-    ${action}
-  </section>
-  <footer>MCP clients connect to <code>${base}/mcp</code></footer>
+    `<main class="stage">
+  <div class="glow" aria-hidden="true"><i class="streak l"></i><i class="streak r"></i></div>
+  <div class="stack">
+    <img class="logo" src="${base}/assets/logo.webp" alt="" width="196" height="189">
+    <section class="card">
+      <h1>Mnemosyne</h1>
+      <p class="tag">Self-hosted AI team memory</p>
+      ${err}
+      ${action}
+    </section>
+    <footer>MCP clients connect to <code>${base}/mcp</code></footer>
+  </div>
 </main>`,
-    `main{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;
-background:radial-gradient(900px 500px at 50% -10%,#1a2140 0%,transparent 70%),var(--bg)}
-.card{width:100%;max-width:380px;display:flex;flex-direction:column;gap:14px;align-items:stretch;text-align:center;
-padding:36px 32px;border:1px solid var(--line);border-radius:16px;background:var(--panel);box-shadow:0 20px 60px rgba(0,0,0,.45)}
-.mark{width:52px;height:52px;margin:0 auto;border-radius:14px;display:grid;place-items:center;font-size:26px;font-weight:700;color:#0b0d12;background:linear-gradient(135deg,var(--accent),#b78cff)}
-h1{margin:4px 0 0;font-size:26px;letter-spacing:.2px}
-.tag{margin:0 0 6px;color:var(--muted)}
+    // Palette sampled from the approved mockup: near-black base, violet glow left, teal glow right.
+    `:root{--bg:#0d0e13;--panel:#161922;--line:#262a36;--text:#e6e9ef;--muted:#8b90a0;--accent:#7a66e0;--accent-h:#9482ee}
+html,body{background:var(--bg)}
+.stage{position:relative;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;overflow:hidden}
+.glow{position:absolute;inset:0;pointer-events:none;
+background:
+radial-gradient(ellipse 36% 34% at 30% 44%,rgba(120,58,182,.66) 0%,rgba(96,46,150,.30) 42%,transparent 100%),
+radial-gradient(ellipse 36% 34% at 70% 44%,rgba(30,152,164,.46) 0%,rgba(24,104,118,.20) 42%,transparent 100%),
+radial-gradient(ellipse 50% 46% at 38% 30%,rgba(76,44,130,.30) 0%,transparent 100%),
+radial-gradient(ellipse 46% 40% at 64% 32%,rgba(26,90,106,.22) 0%,transparent 100%)}
+.streak{position:absolute;height:3px;border-radius:3px;filter:blur(.8px)}
+.streak.l{left:8%;width:40%;top:47%;transform:rotate(-4deg);transform-origin:right center;
+background:linear-gradient(90deg,transparent,rgba(160,84,222,.95) 70%,rgba(190,130,240,.9));box-shadow:0 0 26px 6px rgba(122,63,176,.5)}
+.streak.r{right:8%;width:40%;top:46%;transform:rotate(2.5deg);transform-origin:left center;
+background:linear-gradient(270deg,transparent,rgba(44,178,186,.92) 70%,rgba(120,220,226,.85));box-shadow:0 0 26px 6px rgba(30,150,162,.42)}
+.stack{position:relative;z-index:1;width:100%;max-width:340px;display:flex;flex-direction:column;align-items:center}
+.logo{display:block;width:196px;height:auto;margin-bottom:-62px;position:relative;z-index:2;filter:drop-shadow(0 10px 30px rgba(90,60,200,.40))}
+.card{width:100%;display:flex;flex-direction:column;gap:14px;align-items:stretch;text-align:center;
+padding:84px 28px 28px;border:1px solid var(--line);border-radius:14px;background:var(--panel);box-shadow:0 24px 70px rgba(0,0,0,.55)}
+h1{margin:0;font:600 38px/1.1 "Palatino Linotype","Book Antiqua",Palatino,Georgia,"Times New Roman",serif;letter-spacing:.4px;color:#8473de}
+.tag{margin:0 0 6px;color:var(--muted);font-size:13px}
+.notice{background:#12141b;font-size:12.5px;color:#a3a8b8}
 .who{margin:0}.muted{color:var(--muted)}
 form{margin:0}form .btn{width:100%}.card .btn{width:100%}
-footer{margin-top:22px;color:var(--muted);font-size:13px}
-code{background:#161a23;border:1px solid var(--line);padding:1px 6px;border-radius:5px}`,
+.btn.primary{color:#fff}
+footer{margin-top:24px;color:var(--muted);font-size:12px}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:transparent;border:0;padding:0 2px;color:#a3a8b8}`,
   );
 }
 
