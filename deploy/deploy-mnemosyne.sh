@@ -20,22 +20,40 @@ echo "==> Deploying mnemosyne to ${SERVER_NAME} (${DATACENTER}/${ENVIRONMENT}) a
 sudo mkdir -p "$INSTALL_DIR"
 sudo chown "$RUN_USER" "$INSTALL_DIR"
 
-if [ -d "$INSTALL_DIR/.git" ]; then
-  cd "$INSTALL_DIR"
-  git fetch origin main
-  git reset --hard origin/main
-else
-  git clone "$GIT_URL" "$INSTALL_DIR"
-  cd "$INSTALL_DIR"
-fi
-
 # create_node/update_node auto-commit to this same repo (it's both the tool's
 # source and its own self-hosted corpus) — without a git identity here those
 # writes fail with "Committer identity unknown" the first time anyone uses
-# the shared HTTP endpoint to write, not just read. Idempotent; local config,
-# survives `git reset --hard` (that only touches the working tree/index).
-git config user.name "mnemosyne"
-git config user.email "mnemosyne@${SERVER_NAME}.globalclouddata.org"
+# the shared HTTP endpoint to write, not just read. Idempotent local config;
+# it is also needed by the merge below, so it is set before the sync.
+set_git_identity() {
+  git config user.name "mnemosyne"
+  git config user.email "mnemosyne@${SERVER_NAME}.globalclouddata.org"
+}
+
+# --- sync repo ---------------------------------------------------------------
+# The running service commits every node it writes to THIS checkout and does not
+# push (MNEMOSYNE_GIT_PUSH=false), so local main routinely holds commits that
+# exist nowhere else — they are the team's memory. NEVER `git reset --hard` here:
+# that is exactly what once discarded ~475 unpushed node commits. Instead keep a
+# safety ref and merge origin/main in; on any problem stop and leave the checkout
+# untouched rather than dropping work.
+if [ -d "$INSTALL_DIR/.git" ]; then
+  cd "$INSTALL_DIR"
+  set_git_identity
+  git fetch origin main
+  git update-ref "refs/backup/pre-deploy-$(date -u +%Y%m%dT%H%M%SZ)" HEAD
+  if ! git merge --no-edit origin/main; then
+    git merge --abort 2>/dev/null || true
+    echo "✗ Could not merge origin/main into ${INSTALL_DIR}; nothing was discarded and the"
+    echo "  running service was not touched. Resolve on the box, then re-run the deploy."
+    exit 1
+  fi
+else
+  git clone "$GIT_URL" "$INSTALL_DIR"
+  cd "$INSTALL_DIR"
+  set_git_identity
+fi
+# --- end sync repo -----------------------------------------------------------
 
 # The pipeline already compiled packages/*/dist with devDependencies
 # available — unpack that instead of building here. This box is RAM-starved
