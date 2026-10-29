@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { createHttpApp } from '../src/http.js';
 import { ProviderStore, ProviderValidationError } from '../src/provider-store.js';
+import { modelsUrl, parseModelIds } from '../src/llm-models.js';
 import { MnemosyneService } from '../src/service.js';
 import { deriveKeys, hashPassword, open, seal, signToken, verifyPassword, verifyToken } from '../src/secrets.js';
 import { SettingsStore } from '../src/settings-store.js';
@@ -48,42 +49,87 @@ describe('ProviderStore', () => {
   });
   afterAll(() => rm(dir, { recursive: true, force: true }));
 
-  it('stores keys encrypted, never exposes them, and keeps the key on edit', async () => {
+  const input = { label: 'Meta', kind: 'openai-compatible', baseUrl: 'https://api.meta.ai/v1/', apiKey: 'meta-key-1234567890' };
+
+  it('stores keys encrypted, never exposes them, keeps the key on edit', async () => {
     const file = join(dir, 'providers.enc');
     const store = new ProviderStore(file, deriveKeys(SECRET).enc);
-    const created = await store.upsert({
-      label: 'Meta',
-      kind: 'openai-compatible',
-      baseUrl: 'https://api.meta.ai/v1/',
-      model: 'muse-spark-1.3',
-      apiKey: 'meta-key-1234567890',
-    });
+    const created = await store.upsert(input);
     expect(created.baseUrl).toBe('https://api.meta.ai/v1');
     expect(created).not.toHaveProperty('apiKey');
     expect(created.keyHint).toBe('••••7890');
+    expect(created.models).toEqual([]);
 
     expect(await readFile(file, 'utf8')).not.toContain('meta-key');
-    const listed = await store.list();
-    expect(listed.activeId).toBe(created.id); // first provider becomes active
-    expect(JSON.stringify(listed)).not.toContain('meta-key');
+    expect(JSON.stringify(await store.list())).not.toContain('meta-key');
 
-    await store.upsert({ id: created.id, label: 'Meta 2', kind: 'openai-compatible', baseUrl: 'https://api.meta.ai/v1', model: 'm', apiKey: '' });
-    expect((await store.getActive())?.apiKey).toBe('meta-key-1234567890');
-    expect((await store.getActive())?.label).toBe('Meta 2');
+    await store.upsert({ id: created.id, ...input, label: 'Meta 2', apiKey: '' });
+    expect((await store.getFull(created.id)).apiKey).toBe('meta-key-1234567890');
+    expect((await store.getFull(created.id)).label).toBe('Meta 2');
   });
 
-  it('validates input and handles activate / remove', async () => {
+  it('validates input', async () => {
     const store = new ProviderStore(join(dir, 'p2.enc'), deriveKeys(SECRET).enc);
-    await expect(async () => store.upsert({ label: '', kind: 'openai-compatible', baseUrl: 'https://x', model: 'm' })).rejects.toThrow(ProviderValidationError);
-    await expect(async () => store.upsert({ label: 'a', kind: 'weird', baseUrl: 'https://x', model: 'm' })).rejects.toThrow(/kind/);
-    await expect(async () => store.upsert({ label: 'a', kind: 'openai-compatible', baseUrl: 'ftp://x', model: 'm' })).rejects.toThrow(/http/);
-    const a = await store.upsert({ label: 'a', kind: 'openai-compatible', baseUrl: 'https://a.example', model: 'm', apiKey: 'k' });
-    const b = await store.upsert({ label: 'b', kind: 'anthropic-messages', baseUrl: 'https://b.example', model: 'm' });
-    await store.activate(b.id);
-    expect((await store.list()).activeId).toBe(b.id);
+    await expect(async () => store.upsert({ ...input, label: '' })).rejects.toThrow(ProviderValidationError);
+    await expect(async () => store.upsert({ ...input, kind: 'weird' })).rejects.toThrow(/format/);
+    await expect(async () => store.upsert({ ...input, baseUrl: 'ftp://x' })).rejects.toThrow(/http/);
+    await expect(async () => store.upsert({ ...input, apiKey: '' })).rejects.toThrow(/key is required/);
+  });
+
+  it('assigns one model per job, only from the models the provider reported', async () => {
+    const store = new ProviderStore(join(dir, 'p3.enc'), deriveKeys(SECRET).enc);
+    const a = await store.upsert(input);
+    const b = await store.upsert({ ...input, label: 'Other', baseUrl: 'https://b.example/v1', apiKey: 'other-key-1234567890' });
+    await expect(store.setAssignments({ text: { providerId: a.id, model: 'm1' } })).rejects.toThrow(/not one of the models/); // nothing fetched yet
+    await store.setModels(a.id, ['m1', 'img-1']);
+    await store.setModels(b.id, ['b1']);
+
+    await store.setAssignments({ text: { providerId: a.id, model: 'm1' }, image: { providerId: a.id, model: 'img-1' }, pdf: { providerId: b.id, model: 'b1' } });
+    expect((await store.list()).assignments).toEqual({
+      text: { providerId: a.id, model: 'm1' },
+      image: { providerId: a.id, model: 'img-1' },
+      pdf: { providerId: b.id, model: 'b1' },
+    });
+    expect((await store.getAssigned('image'))?.model).toBe('img-1');
+    await expect(store.setAssignments({ text: { providerId: 'nope', model: 'x' } })).rejects.toThrow(/unknown provider/);
+
+    // a refreshed list that no longer offers a chosen model clears that choice only
+    await store.setModels(a.id, ['m1']);
+    expect(Object.keys((await store.list()).assignments).sort()).toEqual(['pdf', 'text']);
+
+    // a new key or endpoint forgets the models and the choices made from them
+    await store.upsert({ id: a.id, ...input, apiKey: 'a-different-key-123456' });
+    const after = await store.list();
+    expect(after.providers.find((p) => p.id === a.id)!.models).toEqual([]);
+    expect(after.assignments.text).toBeUndefined();
+    expect(after.assignments.pdf?.providerId).toBe(b.id);
+
     await store.remove(b.id);
-    expect((await store.list()).activeId).toBe(a.id);
-    await expect(store.activate('nope')).rejects.toThrow(/unknown/);
+    expect((await store.list()).assignments).toEqual({});
+  });
+
+  it('still reads the first-generation file (one model per provider + one active provider)', async () => {
+    const file = join(dir, 'legacy.enc');
+    const keys = deriveKeys(SECRET);
+    await writeFile(
+      file,
+      seal(keys.enc, JSON.stringify({ providers: [{ id: 'old', label: 'Old', kind: 'openai-compatible', baseUrl: 'https://o.example/v1', model: 'gpt-x', apiKey: 'k-1234567890abc' }], activeId: 'old' })),
+    );
+    const listed = await new ProviderStore(file, keys.enc).list();
+    expect(listed.providers[0]!.models).toEqual(['gpt-x']);
+    expect(listed.assignments.text).toEqual({ providerId: 'old', model: 'gpt-x' });
+  });
+});
+
+describe('model discovery', () => {
+  it('knows where each API format keeps its model list and parses the common shapes', () => {
+    expect(modelsUrl({ kind: 'openai-compatible', baseUrl: 'https://api.meta.ai/v1/' })).toBe('https://api.meta.ai/v1/models');
+    expect(modelsUrl({ kind: 'anthropic-messages', baseUrl: 'https://api.meta.ai' })).toBe('https://api.meta.ai/v1/models');
+    expect(modelsUrl({ kind: 'anthropic-messages', baseUrl: 'https://x.example/v1' })).toBe('https://x.example/v1/models');
+    expect(parseModelIds({ data: [{ id: 'b' }, { id: 'a' }, { id: 'a' }] })).toEqual(['a', 'b']);
+    expect(parseModelIds({ models: [{ name: 'models/gem-1' }] })).toEqual(['gem-1']);
+    expect(parseModelIds(['x', 'y'])).toEqual(['x', 'y']);
+    expect(parseModelIds({ nothing: true })).toEqual([]);
   });
 });
 
@@ -203,7 +249,7 @@ describe('web portal', () => {
     expect(page.status).toBe(200); // the admin has its own sign-in page, no redirect to the public one
     const html = await page.text();
     expect(html).toContain('Administration');
-    expect(html).not.toContain('LLM providers');
+    expect(html).not.toContain('id="tab-llm"');
     expect((await fetch(`${base}/admin/api/providers`)).status).toBe(401);
   });
 
@@ -223,7 +269,7 @@ describe('web portal', () => {
     expect(res.headers.getSetCookie().some((c) => c.startsWith('mnemosyne_session=') && !c.startsWith('mnemosyne_session=;'))).toBe(false);
   });
 
-  it('lets a listed GitLab user into admin and manage providers', async () => {
+  it('lets a listed GitLab user into admin: menu, connect a provider, fetch its real models, choose per job', async () => {
     const cb = await signIn('admin-code', '/admin');
     expect(cb.status).toBe(302);
     expect(cb.headers.get('location')).toBe(`${new URL(base).pathname}/admin/`);
@@ -233,25 +279,64 @@ describe('web portal', () => {
     const page = await fetch(`${base}/admin/`, { headers: { cookie } });
     expect(page.status).toBe(200);
     const html = await page.text();
-    expect(html).toContain('LLM providers');
+    expect(html).toContain('id="tab-llm"');
+    expect(html).toContain('data-tab="llm"'); // left menu: LLM
+    expect(html).toContain('data-tab="sso"'); // left menu: SSO
+    expect(html).toContain('Choose a model for each job');
+    expect(html).toContain('--title:#8473de'); // login palette: purple main titles
+    expect(html).toContain('--teal:#3cc4cc'); // turquoise second-level titles
     expect(html).toContain('Olaf Becker');
     const nonce = /<script nonce="([^"]+)"/.exec(html)?.[1];
     expect(nonce).toBeTruthy();
     expect(page.headers.get('content-security-policy')).toContain(`'nonce-${nonce}'`);
 
-    const headers = { cookie, 'content-type': 'application/json', 'x-requested-with': 'mnemosyne-admin' };
-    const created = await fetch(`${base}/admin/api/providers`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ label: 'Meta', kind: 'openai-compatible', baseUrl: 'https://api.meta.ai/v1', model: 'muse-spark-1.3', apiKey: 'secret-key-abcdef123456' }),
+    // a fake provider whose model list depends on the key
+    const llm = createServer((req, res) => {
+      const ok = req.headers.authorization === 'Bearer good-key-1234567890';
+      res.writeHead(ok ? 200 : 401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(ok ? { data: [{ id: 'muse-spark-1.3' }, { id: 'muse-image-1.0' }, { id: 'muse-wonder-1.0' }] } : { error: 'no' }));
     });
-    expect(created.status).toBe(200);
-    const listed = await (await fetch(`${base}/admin/api/providers`, { headers: { cookie } })).text();
-    expect(listed).toContain('Meta');
-    expect(listed).not.toContain('secret-key-abcdef123456');
+    await new Promise<void>((r) => llm.listen(0, '127.0.0.1', r));
+    try {
+      const llmBase = `http://127.0.0.1:${(llm.address() as AddressInfo).port}/v1`;
+      const headers = { cookie, 'content-type': 'application/json', 'x-requested-with': 'mnemosyne-admin' };
+      const post = (path: string, body: object, method = 'POST') => fetch(`${base}/admin/api${path}`, { method, headers, body: JSON.stringify(body) });
 
-    const bad = await fetch(`${base}/admin/api/providers`, { method: 'POST', headers, body: JSON.stringify({ label: '' }) });
-    expect(bad.status).toBe(400);
+      // step 1: connect (key stored, never shown again)
+      const created = await (await post('/providers', { label: 'Meta', kind: 'openai-compatible', baseUrl: llmBase, apiKey: 'good-key-1234567890' })).json();
+      expect(created.models).toEqual([]);
+      const listed = await (await fetch(`${base}/admin/api/providers`, { headers: { cookie } })).text();
+      expect(listed).toContain('Meta');
+      expect(listed).not.toContain('good-key-1234567890');
+
+      // step 3 before step 2 is refused: nothing has been fetched yet
+      expect((await post('/llm/assignments', { text: { providerId: created.id, model: 'muse-spark-1.3' } }, 'PUT')).status).toBe(400);
+
+      // step 2: fetch what the key can really use
+      const pulled = await (await post(`/providers/${created.id}/models`, {})).json();
+      expect(pulled.models).toEqual(['muse-image-1.0', 'muse-spark-1.3', 'muse-wonder-1.0']);
+      expect(JSON.stringify(pulled)).not.toContain('good-key');
+
+      // step 3: one model per job; a model the provider did not report is refused
+      const ok = await post('/llm/assignments', { text: { providerId: created.id, model: 'muse-spark-1.3' }, image: { providerId: created.id, model: 'muse-image-1.0' }, pdf: { providerId: created.id, model: 'muse-wonder-1.0' } }, 'PUT');
+      expect(ok.status).toBe(200);
+      expect((await post('/llm/assignments', { text: { providerId: created.id, model: 'made-up' } }, 'PUT')).status).toBe(400);
+      const after = await (await fetch(`${base}/admin/api/providers`, { headers: { cookie } })).json();
+      expect(after.assignments.image).toEqual({ providerId: created.id, model: 'muse-image-1.0' });
+
+      // a provider that rejects the key is reported without leaking it
+      const bad = await (await post('/providers', { label: 'Bad', kind: 'openai-compatible', baseUrl: llmBase, apiKey: 'wrong-key-0987654321' })).json();
+      const rejected = await post(`/providers/${bad.id}/models`, {});
+      expect(rejected.status).toBe(400);
+      const err = await rejected.text();
+      expect(err).toContain('rejected the API key');
+      expect(err).not.toContain('wrong-key');
+
+      const missing = await post('/providers', { label: '' });
+      expect(missing.status).toBe(400);
+    } finally {
+      llm.close();
+    }
   });
 
   it('refuses state-changing admin calls that lack the same-origin marker', async () => {
@@ -276,7 +361,7 @@ describe('web portal', () => {
     expect(home).not.toContain('Open admin');
     const adminPageHtml = await (await fetch(`${base}/admin/`, { headers: { cookie } })).text();
     expect(adminPageHtml).toContain('Administration');
-    expect(adminPageHtml).not.toContain('LLM providers');
+    expect(adminPageHtml).not.toContain('id="tab-llm"');
     expect((await fetch(`${base}/admin/api/providers`, { headers: { cookie } })).status).toBe(401);
   });
 
@@ -316,7 +401,7 @@ describe('web portal when not configured', () => {
       expect(html).not.toContain('Sign in with GitLab');
       const adminHtml = await (await fetch(`${base}/admin/`)).text();
       expect(adminHtml).toContain('not configured');
-      expect(adminHtml).not.toContain('LLM providers');
+      expect(adminHtml).not.toContain('id="tab-llm"');
       expect((await fetch(`${base}/admin/api/providers`)).status).toBe(401);
     } finally {
       srv.close();
@@ -435,7 +520,7 @@ describe('local admin account and GitLab SSO settings', () => {
     expect(ok.headers.get('location')).toBe('/mnemosyne/admin/');
     const cookie = cookieOf(ok);
     expect((await fetch(`${base}/admin`, { headers: { cookie } })).status).toBe(200);
-    expect(await (await fetch(`${base}/admin`)).text()).not.toContain('LLM providers');
+    expect(await (await fetch(`${base}/admin`)).text()).not.toContain('id="tab-llm"');
   });
 
   it('submits the admin form exactly as the page defines it (action URL must be a live route)', async () => {
@@ -500,7 +585,7 @@ describe('local admin account and GitLab SSO settings', () => {
     expect((await login(base, 'admin', 'mnemosyne')).headers.get('location')).toContain('error=local');
     expect(await (await fetch(`${base}/admin/`)).text()).not.toContain('name="password"');
     expect((await fetch(`${base}/admin/api/settings`, { headers: { cookie } })).status).toBe(401);
-    expect(await (await fetch(`${base}/admin`, { headers: { cookie } })).text()).not.toContain('LLM providers');
+    expect(await (await fetch(`${base}/admin`, { headers: { cookie } })).text()).not.toContain('id="tab-llm"');
 
     // recovery switch for operators
     process.env.MNEMOSYNE_LOCAL_ADMIN_FORCE = '1';

@@ -206,93 +206,138 @@ export interface AdminView {
   redirectUris: string[];
 }
 
+// Same palette as the login screen: near-black base, violet main titles, turquoise second-level titles.
 const ADMIN_CSS = `
-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 24px;border-bottom:1px solid var(--line);background:var(--panel)}
-header .brand{font-weight:700;font-size:17px}header .right{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:14px}
-header form{margin:0}
-main{max-width:980px;margin:0 auto;padding:28px 24px 60px;display:flex;flex-direction:column;gap:26px}
-h2{margin:0 0 4px;font-size:18px}.sub{margin:0 0 14px;color:var(--muted);font-size:14px}
-section{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:22px}
+:root{--bg:#0d0e13;--panel:#161922;--panel2:#12141b;--line:#262a36;--text:#e6e9ef;--muted:#8b90a0;--accent:#7a66e0;--accent-h:#9482ee;--title:#8473de;--teal:#3cc4cc}
+html,body{background:var(--bg)}
+body{background:radial-gradient(ellipse 50% 40% at 12% 0%,rgba(120,58,182,.20),transparent 100%),radial-gradient(ellipse 45% 40% at 95% 0%,rgba(30,152,164,.14),transparent 100%),var(--bg);background-attachment:fixed}
+.btn.primary{color:#fff}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 24px;border-bottom:1px solid var(--line);background:rgba(22,25,34,.85)}
+.brand{font:600 24px/1 "Palatino Linotype","Book Antiqua",Palatino,Georgia,"Times New Roman",serif;letter-spacing:.4px;color:var(--title)}
+.brand .muted{font:500 14px/1 system-ui,sans-serif;letter-spacing:0;color:var(--teal)}
+.top .right{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:14px}.top form{margin:0}
+.layout{display:grid;grid-template-columns:210px minmax(0,1fr);gap:28px;max-width:1180px;margin:0 auto;padding:28px 24px 60px}
+.side{display:flex;flex-direction:column;gap:6px;position:sticky;top:20px;align-self:start}
+.side a{display:block;padding:10px 14px;border-radius:9px;border:1px solid transparent;color:var(--muted);text-decoration:none;font-weight:600}
+.side a:hover{color:var(--text);background:var(--panel)}
+.side a.active{color:var(--text);background:var(--panel);border-color:var(--line);box-shadow:inset 3px 0 0 var(--accent)}
+.tab{display:flex;flex-direction:column;gap:18px}
+[hidden]{display:none!important}
+h2{margin:0;font:600 32px/1.1 "Palatino Linotype","Book Antiqua",Palatino,Georgia,"Times New Roman",serif;letter-spacing:.3px;color:var(--title)}
+h3{margin:0 0 4px;font-size:17px;font-weight:600;color:var(--teal);display:flex;align-items:center;gap:10px}
+.num{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;border:1px solid var(--teal);font-size:13px;color:var(--teal)}
+.sub{margin:0 0 14px;color:var(--muted);font-size:14px}
+.lead{margin:-8px 0 4px;color:var(--muted);font-size:14.5px}
+.step{border:1px solid var(--line);border-radius:14px;background:var(--panel);padding:22px;box-shadow:0 14px 40px rgba(0,0,0,.30)}
+.step.off{opacity:.55}
 table{width:100%;border-collapse:collapse;font-size:14px}
 th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
 th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.5px}
 td.actions{text-align:right;white-space:nowrap}td.actions .btn{margin-left:6px}
 .badge{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;border:1px solid var(--line);color:var(--muted)}
-.badge.active{color:var(--ok);border-color:#1f5a38}
+.badge.ok{color:#4ade80;border-color:#1f5a38}
 form.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 form.grid .full{grid-column:1/-1}
 label{display:flex;flex-direction:column;gap:5px;font-size:13px;color:var(--muted)}
-input,select{padding:9px 10px;border-radius:8px;border:1px solid var(--line);background:#0d1017;color:var(--text);font:inherit}
+input,select{padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:#0f1117;color:var(--text);font:inherit}
 input:focus,select:focus{outline:none;border-color:var(--accent)}
-.row{display:flex;gap:10px;align-items:center}
-#msg{min-height:22px;font-size:14px}.ok{color:var(--ok)}.err{color:var(--danger)}
-ul.plain{margin:0;padding-left:18px;color:var(--muted)}
-@media(max-width:700px){form.grid{grid-template-columns:1fr}}`;
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.msg{min-height:22px;font-size:14px}.ok{color:#4ade80}.err{color:#ff8b8b}
+.roles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.roles .hint{font-size:12px;color:var(--muted)}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#a3a8b8}
+@media(max-width:860px){.layout{grid-template-columns:1fr}.side{flex-direction:row;position:static}.roles,form.grid{grid-template-columns:1fr}}`;
 
 /** Admin shell; the interactive part lives in {@link ADMIN_JS}, run under the CSP nonce. */
 export function adminPage(v: AdminView): string {
   const base = esc(v.basePath);
-  const html = shell(
+  return shell(
     'Mnemosyne admin',
-    `<header>
+    `<header class="top">
   <span class="brand">Mnemosyne <span class="muted">admin</span></span>
   <div class="right"><span>${esc(v.user.name)} <span>@${esc(v.user.username)}</span></span>
   <form method="post" action="${base}/admin/auth/logout"><button class="btn small" type="submit">Sign out</button></form></div>
 </header>
-<main>
-  <section>
-    <h2>LLM providers</h2>
-    <p class="sub">Models Mnemosyne may connect to. API keys are stored encrypted on the server and are never shown again after saving.</p>
-    <table><thead><tr><th>Name</th><th>API</th><th>Model</th><th>Key</th><th>Status</th><th></th></tr></thead>
-      <tbody id="rows"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody></table>
-  </section>
-  <section>
-    <h2 id="formTitle">Add provider</h2>
-    <p class="sub">Presets fill the endpoint and a default model; adjust as needed.</p>
-    <form id="form" class="grid" autocomplete="off">
-      <label>Preset
-        <select id="preset">
-          <option value="">Custom</option>
-          <option value="meta-openai">Meta Model API (OpenAI-compatible)</option>
-          <option value="meta-anthropic">Meta Model API (Anthropic Messages)</option>
-          <option value="openai">OpenAI</option>
-          <option value="xai">xAI</option>
-        </select></label>
-      <label>Name<input id="label" required maxlength="80" placeholder="Meta Muse Spark"></label>
-      <label>API format
-        <select id="kind"><option value="openai-compatible">OpenAI-compatible</option><option value="anthropic-messages">Anthropic Messages</option></select></label>
-      <label>Model<input id="model" required maxlength="120" placeholder="muse-spark-1.3"></label>
-      <label class="full">Base URL<input id="baseUrl" required maxlength="300" placeholder="https://api.meta.ai/v1"></label>
-      <label class="full">API key<input id="apiKey" type="password" maxlength="500" placeholder="" autocomplete="new-password"></label>
-      <div class="row full"><button class="btn primary" type="submit">Save provider</button>
-        <button class="btn" type="button" id="cancel" hidden>Cancel edit</button><span id="msg"></span></div>
-    </form>
-  </section>
-  <section>
-    <h2>GitLab SSO</h2>
-    <p class="sub">Lets GitLab users sign in with their GitLab account. In GitLab create an application (Admin → Applications) with scope <code>read_user</code>, tick <em>Trusted</em> so signed-in users are not asked again, and add these redirect URIs (one per line; the first is the public sign-in, the second the admin sign-in):</p>
-    <p class="sub">${v.redirectUris.map((u) => `<code>${esc(u)}</code>`).join('<br>')}</p>
-    <form id="ssoForm" class="grid" autocomplete="off">
-      <label class="full">GitLab URL<input id="gitlabUrl" maxlength="300" placeholder="https://gitlab.example.com"></label>
-      <label>Application ID<input id="clientId" maxlength="200"></label>
-      <label>Secret<input id="clientSecret" type="password" maxlength="500" autocomplete="new-password"></label>
-      <label class="full">GitLab admins <span class="muted">(user names or e-mails, comma separated; they may open this admin page after GitLab sign-in)</span><input id="adminUsers" maxlength="2000"></label>
-      <div class="row full"><button class="btn primary" type="submit">Save GitLab SSO</button><span id="ssoMsg"></span></div>
-    </form>
-    <p class="sub" id="ssoState"></p>
-  </section>
-</main>
+<div class="layout">
+  <nav class="side" aria-label="Admin sections"><a href="#llm" data-tab="llm" class="active">LLM</a><a href="#sso" data-tab="sso">SSO</a></nav>
+  <main>
+    <section id="tab-llm" class="tab">
+      <h2>LLM</h2>
+      <p class="lead">Connect a provider with its API key, fetch the models that key can really use, then choose which model does which job.</p>
+
+      <div class="step" id="step1">
+        <h3><span class="num">1</span> Connect a provider</h3>
+        <p class="sub">The API key is stored encrypted on the server and is never shown again after saving.</p>
+        <form id="form" class="grid" autocomplete="off">
+          <label>Provider
+            <select id="preset">
+              <option value="">Custom</option>
+              <option value="meta-openai">Meta Model API (OpenAI-compatible)</option>
+              <option value="meta-anthropic">Meta Model API (Anthropic Messages)</option>
+              <option value="openai">OpenAI</option>
+              <option value="xai">xAI</option>
+            </select></label>
+          <label>Name<input id="label" required maxlength="80" placeholder="Meta Model API"></label>
+          <label>API format
+            <select id="kind"><option value="openai-compatible">OpenAI-compatible</option><option value="anthropic-messages">Anthropic Messages</option></select></label>
+          <label>Base URL<input id="baseUrl" required maxlength="300" placeholder="https://api.meta.ai/v1"></label>
+          <label class="full">API key<input id="apiKey" type="password" maxlength="500" autocomplete="new-password"></label>
+          <div class="row full"><button class="btn primary" type="submit" id="save">Save &amp; fetch models</button>
+            <button class="btn" type="button" id="cancel" hidden>Cancel edit</button><span id="msg" class="msg"></span></div>
+        </form>
+      </div>
+
+      <div class="step" id="step2">
+        <h3><span class="num">2</span> Models your keys can use</h3>
+        <p class="sub">Asked from each provider with its own key — only models it really offers are listed. This reads the model list only; it makes no model calls and costs nothing.</p>
+        <table><thead><tr><th>Name</th><th>Endpoint</th><th>Key</th><th>Models</th><th></th></tr></thead>
+          <tbody id="rows"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody></table>
+        <p class="msg" id="fetchMsg"></p>
+      </div>
+
+      <div class="step off" id="step3">
+        <h3><span class="num">3</span> Choose a model for each job</h3>
+        <p class="sub">One model each for text, images and PDF handbooks, picked from the lists above.</p>
+        <form id="assign">
+          <div class="roles">
+            <label>Text<select id="role-text"></select><span class="hint">Documentation, summaries, answers</span></label>
+            <label>Images<select id="role-image"></select><span class="hint">Diagrams and illustrations</span></label>
+            <label>PDF<select id="role-pdf"></select><span class="hint">PDF handbooks</span></label>
+          </div>
+          <div class="row" style="margin-top:16px"><button class="btn primary" type="submit" id="saveRoles">Save choices</button><span id="assignMsg" class="msg"></span></div>
+        </form>
+      </div>
+    </section>
+
+    <section id="tab-sso" class="tab" hidden>
+      <h2>SSO</h2>
+      <p class="lead">Let GitLab users sign in with their GitLab account.</p>
+      <div class="step">
+        <h3>GitLab application</h3>
+        <p class="sub">In GitLab create an application (Admin → Applications) with scope <code>read_user</code>, tick <em>Trusted</em> so signed-in users are not asked again, and add these redirect URIs (one per line; the first is the public sign-in, the second the admin sign-in):</p>
+        <p class="sub">${v.redirectUris.map((u) => `<code>${esc(u)}</code>`).join('<br>')}</p>
+        <form id="ssoForm" class="grid" autocomplete="off">
+          <label class="full">GitLab URL<input id="gitlabUrl" maxlength="300" placeholder="https://gitlab.example.com"></label>
+          <label>Application ID<input id="clientId" maxlength="200"></label>
+          <label>Secret<input id="clientSecret" type="password" maxlength="500" autocomplete="new-password"></label>
+          <label class="full">GitLab admins <span class="muted">(user names or e-mails, comma separated; they may open this admin page after GitLab sign-in)</span><input id="adminUsers" maxlength="2000"></label>
+          <div class="row full"><button class="btn primary" type="submit">Save GitLab SSO</button><span id="ssoMsg" class="msg"></span></div>
+        </form>
+        <p class="sub" id="ssoState" style="margin-top:12px"></p>
+      </div>
+    </section>
+  </main>
+</div>
 <script nonce="${esc(v.nonce)}">${ADMIN_JS(v.basePath)}</script>`,
     ADMIN_CSS,
   );
-  return html;
 }
 
 const PRESETS = {
-  'meta-openai': { label: 'Meta Muse Spark', kind: 'openai-compatible', baseUrl: 'https://api.meta.ai/v1', model: 'muse-spark-1.3' },
-  'meta-anthropic': { label: 'Meta Muse Wonder', kind: 'anthropic-messages', baseUrl: 'https://api.meta.ai', model: 'muse-wonder-1.0' },
-  openai: { label: 'OpenAI', kind: 'openai-compatible', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
-  xai: { label: 'xAI', kind: 'openai-compatible', baseUrl: 'https://api.x.ai/v1', model: 'grok-3-fast' },
+  'meta-openai': { label: 'Meta Model API', kind: 'openai-compatible', baseUrl: 'https://api.meta.ai/v1' },
+  'meta-anthropic': { label: 'Meta Model API (Anthropic format)', kind: 'anthropic-messages', baseUrl: 'https://api.meta.ai' },
+  openai: { label: 'OpenAI', kind: 'openai-compatible', baseUrl: 'https://api.openai.com/v1' },
+  xai: { label: 'xAI', kind: 'openai-compatible', baseUrl: 'https://api.x.ai/v1' },
 };
 
 function ADMIN_JS(basePath: string): string {
@@ -300,62 +345,113 @@ function ADMIN_JS(basePath: string): string {
 (function(){
   var API=${JSON.stringify(basePath + '/admin/api')};
   var PRESETS=${JSON.stringify(PRESETS)};
+  var ROLES=['text','image','pdf'];
+  var HINTS={image:/image|imagen|flux|dall|diffusion|sdxl|sam|vision/i,text:/chat|muse|gpt|llama|claude|grok|spark|wonder|instruct/i,pdf:/muse|gpt|llama|claude|grok|spark|wonder|instruct|doc|long/i};
   var $=function(id){return document.getElementById(id)};
-  var editing=null;
-  function msg(t,ok){var m=$('msg');m.textContent=t||'';m.className=ok?'ok':'err'}
+  var editing=null,data={providers:[],assignments:{}};
+  function note(id,t,ok){var m=$(id);m.textContent=t||'';m.className='msg '+(ok?'ok':'err')}
   function call(method,path,body){
     return fetch(API+path,{method:method,credentials:'same-origin',
       headers:{'Content-Type':'application/json','X-Requested-With':'mnemosyne-admin'},
       body:body?JSON.stringify(body):undefined}).then(function(r){
         return r.json().catch(function(){return {}}).then(function(j){
-          if(r.status===401){location.href=${JSON.stringify(basePath + '/')};throw new Error('signed out')}
+          if(r.status===401){location.href=${JSON.stringify(basePath + '/admin/')};throw new Error('signed out')}
           if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j})})
   }
+  // --- tabs (left menu) ---
+  function showTab(){
+    var t=(location.hash||'#llm').slice(1);if(t!=='sso')t='llm';
+    ['llm','sso'].forEach(function(n){$('tab-'+n).hidden=(n!==t)});
+    Array.prototype.forEach.call(document.querySelectorAll('.side a'),function(a){a.className=a.getAttribute('data-tab')===t?'active':''});
+  }
+  window.addEventListener('hashchange',showTab);showTab();
+
   function cell(tr,text,cls){var td=document.createElement('td');td.textContent=text;if(cls)td.className=cls;tr.appendChild(td);return td}
   function btn(label,cls,fn){var b=document.createElement('button');b.type='button';b.className='btn small '+cls;b.textContent=label;b.addEventListener('click',fn);return b}
-  function render(data){
+  function ago(ms){if(!ms)return 'never fetched';var m=Math.round((Date.now()-ms)/60000);return m<1?'just now':m<60?m+' min ago':Math.round(m/60)+' h ago'}
+
+  // --- step 2: connections + their fetched models ---
+  function renderRows(){
     var rows=$('rows');rows.textContent='';
-    if(!data.providers.length){var tr=document.createElement('tr');cell(tr,'No providers configured yet.','muted').colSpan=6;rows.appendChild(tr);return}
+    if(!data.providers.length){var tr=document.createElement('tr');cell(tr,'No provider connected yet — start with step 1.','muted').colSpan=5;rows.appendChild(tr);return}
     data.providers.forEach(function(p){
       var tr=document.createElement('tr');
-      cell(tr,p.label);cell(tr,p.kind==='anthropic-messages'?'Anthropic':'OpenAI');cell(tr,p.model);
-      cell(tr,p.hasKey?p.keyHint:'none');
-      var st=cell(tr,'');var b=document.createElement('span');b.className='badge'+(p.id===data.activeId?' active':'');b.textContent=p.id===data.activeId?'active':'inactive';st.appendChild(b);
+      cell(tr,p.label);cell(tr,p.baseUrl);cell(tr,p.hasKey?p.keyHint:'none');
+      var m=cell(tr,'');var b=document.createElement('span');b.className='badge'+(p.models.length?' ok':'');
+      b.textContent=p.models.length?p.models.length+' models · '+ago(p.modelsPulledAt):'not fetched yet';m.appendChild(b);
       var act=cell(tr,'','actions');
-      if(p.id!==data.activeId)act.appendChild(btn('Activate','',function(){call('POST','/providers/'+p.id+'/activate').then(load).catch(function(e){msg(e.message)})}));
+      act.appendChild(btn(p.models.length?'Refresh models':'Fetch models','',function(){fetchModels(p.id,p.label)}));
       act.appendChild(btn('Edit','',function(){startEdit(p)}));
-      act.appendChild(btn('Delete','danger',function(){if(confirm('Delete provider "'+p.label+'"?'))call('DELETE','/providers/'+p.id).then(load).catch(function(e){msg(e.message)})}));
+      act.appendChild(btn('Delete','danger',function(){if(confirm('Delete "'+p.label+'" and its stored key?'))call('DELETE','/providers/'+p.id).then(load).catch(function(e){note('fetchMsg',e.message)})}));
       rows.appendChild(tr);
     });
   }
-  function load(){return call('GET','/providers').then(render).catch(function(e){$('rows').innerHTML='';msg(e.message)})}
-  function startEdit(p){
-    editing=p.id;$('formTitle').textContent='Edit provider';$('cancel').hidden=false;
-    $('label').value=p.label;$('kind').value=p.kind;$('model').value=p.model;$('baseUrl').value=p.baseUrl;
-    $('apiKey').value='';$('apiKey').placeholder=p.hasKey?'Leave empty to keep '+p.keyHint:'';$('preset').value='';
-    window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'});
+  function fetchModels(id,label){
+    note('fetchMsg','Asking '+label+' for its models…',true);
+    return call('POST','/providers/'+id+'/models').then(function(p){note('fetchMsg',label+': '+p.models.length+' models available.',true);return load()})
+      .catch(function(e){note('fetchMsg',label+': '+e.message);return load()});
   }
-  function reset(){editing=null;$('form').reset();$('formTitle').textContent='Add provider';$('cancel').hidden=true;$('apiKey').placeholder=''}
-  $('cancel').addEventListener('click',function(){reset();msg('')});
-  $('preset').addEventListener('change',function(){var p=PRESETS[$('preset').value];if(!p)return;
-    $('label').value=p.label;$('kind').value=p.kind;$('baseUrl').value=p.baseUrl;$('model').value=p.model});
-  $('form').addEventListener('submit',function(ev){
-    ev.preventDefault();msg('');
-    call('POST','/providers',{id:editing||undefined,label:$('label').value,kind:$('kind').value,
-      baseUrl:$('baseUrl').value,model:$('model').value,apiKey:$('apiKey').value})
-      .then(function(){reset();msg('Saved.',true);return load()}).catch(function(e){msg(e.message)});
+
+  // --- step 3: one model per job ---
+  function ordered(role,ids){
+    var re=HINTS[role],hit=[],rest=[];ids.forEach(function(i){(re.test(i)?hit:rest).push(i)});return hit.concat(rest);
+  }
+  function renderRoles(){
+    var any=data.providers.some(function(p){return p.models.length});
+    $('step3').className='step'+(any?'':' off');
+    ROLES.forEach(function(role){
+      var sel=$('role-'+role);sel.textContent='';sel.disabled=!any;
+      var none=document.createElement('option');none.value='';none.textContent='— not set —';sel.appendChild(none);
+      data.providers.forEach(function(p){
+        if(!p.models.length)return;
+        var g=document.createElement('optgroup');g.label=p.label;
+        ordered(role,p.models).forEach(function(mid){var o=document.createElement('option');o.value=p.id+'::'+mid;o.textContent=mid;g.appendChild(o)});
+        sel.appendChild(g);
+      });
+      var a=data.assignments[role];if(a)sel.value=a.providerId+'::'+a.model;
+    });
+    $('saveRoles').disabled=!any;
+  }
+  $('assign').addEventListener('submit',function(ev){
+    ev.preventDefault();note('assignMsg','');
+    var body={};
+    ROLES.forEach(function(role){var v=$('role-'+role).value;if(v){var i=v.indexOf('::');body[role]={providerId:v.slice(0,i),model:v.slice(i+2)}}});
+    call('PUT','/llm/assignments',body).then(function(){note('assignMsg','Saved.',true);return load()}).catch(function(e){note('assignMsg',e.message)});
   });
-  function ssoMsg(t,ok){var m=$('ssoMsg');m.textContent=t||'';m.className=ok?'ok':'err'}
+
+  function load(){return call('GET','/providers').then(function(d){data=d;renderRows();renderRoles()}).catch(function(e){note('fetchMsg',e.message)})}
+
+  // --- step 1: connect ---
+  function startEdit(p){
+    editing=p.id;$('cancel').hidden=false;$('save').textContent='Save & fetch models';
+    $('label').value=p.label;$('kind').value=p.kind;$('baseUrl').value=p.baseUrl;
+    $('apiKey').value='';$('apiKey').placeholder=p.hasKey?'Leave empty to keep '+p.keyHint:'';$('preset').value='';
+    $('step1').scrollIntoView({behavior:'smooth'});
+  }
+  function reset(){editing=null;$('form').reset();$('cancel').hidden=true;$('apiKey').placeholder=''}
+  $('cancel').addEventListener('click',function(){reset();note('msg','')});
+  $('preset').addEventListener('change',function(){var p=PRESETS[$('preset').value];if(!p)return;
+    $('label').value=p.label;$('kind').value=p.kind;$('baseUrl').value=p.baseUrl});
+  $('form').addEventListener('submit',function(ev){
+    ev.preventDefault();note('msg','');$('save').disabled=true;
+    var label=$('label').value;
+    call('POST','/providers',{id:editing||undefined,label:label,kind:$('kind').value,baseUrl:$('baseUrl').value,apiKey:$('apiKey').value})
+      .then(function(p){reset();note('msg','Saved. Fetching models…',true);return load().then(function(){return fetchModels(p.id,label)})})
+      .then(function(){note('msg','')}).catch(function(e){note('msg',e.message)}).then(function(){$('save').disabled=false});
+  });
+
+  // --- SSO tab ---
   function loadSso(){return call('GET','/settings').then(function(c){
     $('gitlabUrl').value=c.gitlabUrl;$('clientId').value=c.clientId;$('adminUsers').value=c.adminUsers.join(', ');
     $('clientSecret').value='';$('clientSecret').placeholder=c.hasSecret?'Leave empty to keep '+c.secretHint:'';
     $('ssoState').textContent=(c.ssoActive?'GitLab sign-in is active.':'GitLab sign-in is not active yet.')+(c.localUser?' Local admin account: '+c.localUser+'.':'')
-  }).catch(function(e){ssoMsg(e.message)})}
+  }).catch(function(e){note('ssoMsg',e.message)})}
   $('ssoForm').addEventListener('submit',function(ev){
-    ev.preventDefault();ssoMsg('');
+    ev.preventDefault();note('ssoMsg','');
     call('PUT','/settings',{gitlabUrl:$('gitlabUrl').value,clientId:$('clientId').value,clientSecret:$('clientSecret').value,adminUsers:$('adminUsers').value})
-      .then(function(){ssoMsg('Saved.',true);return loadSso()}).catch(function(e){ssoMsg(e.message)});
+      .then(function(){note('ssoMsg','Saved.',true);return loadSso()}).catch(function(e){note('ssoMsg',e.message)});
   });
+
   load();loadSso();
 })();`;
 }

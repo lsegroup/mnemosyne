@@ -3,6 +3,7 @@ import { Router, urlencoded, type NextFunction, type Request, type Response } fr
 import type { MnemosyneConfig } from './config.js';
 import { MIN_SECRET_LENGTH, deriveKeys, hashPassword, signToken, verifyPassword, verifyToken, type DerivedKeys } from './secrets.js';
 import { ProviderStore, ProviderValidationError } from './provider-store.js';
+import { fetchModels } from './llm-models.js';
 import { SettingsStore, SettingsValidationError, applyPortalInput, type GitLabSettings, type PortalSettings } from './settings-store.js';
 import { adminPage, loginPage } from './web-pages.js';
 import { LOGO_WEBP_BASE64 } from './web-assets.js';
@@ -452,7 +453,17 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
 
   api.get('/providers', handle(() => providers!.list()));
   api.post('/providers', handle((req) => providers!.upsert(req.body ?? {})));
-  api.post('/providers/:id/activate', handle(async (req) => (await providers!.activate(String(req.params.id)), { ok: true })));
+  // Step 2 of the LLM flow: ask the provider which models this API key may use (list call only, no inference).
+  api.post(
+    '/providers/:id/models',
+    handle(async (req) => {
+      const id = String(req.params.id);
+      const models = await fetchModels(await providers!.getFull(id));
+      return providers!.setModels(id, models);
+    }),
+  );
+  // Step 3: one model per job (text / image / pdf), chosen from the fetched lists.
+  api.put('/llm/assignments', handle((req) => providers!.setAssignments(req.body ?? {})));
   api.delete('/providers/:id', handle(async (req) => (await providers!.remove(String(req.params.id)), { ok: true })));
 
   api.get(

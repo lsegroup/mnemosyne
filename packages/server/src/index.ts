@@ -8,6 +8,7 @@ export { buildTools, type ToolDef } from './tools.js';
 export { createMcpServer } from './mcp.js';
 export { createHttpApp } from './http.js';
 export { createWebPortal, webConfigured, type WebPortal } from './web.js';
-export { ProviderStore, ProviderValidationError, type Provider, type ProviderPublic } from './provider-store.js';
+export { ProviderStore, ProviderValidationError, ROLES, type Assignment, type Assignments, type Provider, type ProviderPublic, type Role } from './provider-store.js';
+export { fetchModels, modelsUrl, parseModelIds } from './llm-models.js';
 export { resolveEmbedder, resolveLLM } from './embedding.js';
 export { OpenAICompatibleEmbedder, OpenAICompatibleLLM } from './adapters/openai.js';
