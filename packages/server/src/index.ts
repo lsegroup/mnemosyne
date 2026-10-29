@@ -10,5 +10,6 @@ export { createHttpApp } from './http.js';
 export { createWebPortal, webConfigured, type WebPortal } from './web.js';
 export { ProviderStore, ProviderValidationError, ROLES, type Assignment, type Assignments, type Provider, type ProviderPublic, type Role } from './provider-store.js';
 export { fetchModels, modelsUrl, parseModelIds } from './llm-models.js';
+export { AuditLog, clientIp, diffLines, type AuditEvent } from './audit.js';
 export { resolveEmbedder, resolveLLM } from './embedding.js';
 export { OpenAICompatibleEmbedder, OpenAICompatibleLLM } from './adapters/openai.js';

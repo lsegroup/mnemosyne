@@ -49,7 +49,7 @@ const ERRORS: Record<string, string> = {
   local: 'Wrong user name or password.',
   throttled: 'Too many attempts. Please wait a minute and try again.',
   nosso: 'GitLab sign-in is not set up yet.',
-  noadmin: 'This GitLab account has no admin rights on Mnemosyne.',
+  noadmin: 'Only GitLab administrators may open the admin area.',
 };
 
 export function loginPage(v: LoginView): string {
@@ -121,6 +121,15 @@ form.local input:focus{outline:none;border-color:var(--accent)}
 form{margin:0}form .btn{width:100%}.card .btn{width:100%}
 .btn.primary{color:#fff}
 footer{margin-top:24px;color:var(--muted);font-size:12px}
+.tablewrap{overflow-x:auto}
+table.audit{font-size:13px;min-width:980px}table.audit td{vertical-align:top}
+table.audit td.t{white-space:nowrap;color:var(--muted)}
+.ev{display:inline-block;padding:1px 9px;border-radius:99px;font-size:12px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.ev.login,.ev.create,.ev.fetch{color:var(--teal);border-color:#1d5f64}
+.ev.update{color:#b3a3ff;border-color:#4b3f94}
+.ev.login_failed,.ev.denied,.ev.delete,.ev.fetch_failed{color:#ff8b8b;border-color:#6a2e2e}
+pre.chg{margin:0;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word}
+pre.chg .p{color:#6ee7a0}pre.chg .m{color:#ff9a9a}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:transparent;border:0;padding:0 2px;color:#a3a8b8}
 .stack::before{content:"";position:absolute;z-index:-1;left:50%;top:-110px;width:640px;height:420px;transform:translateX(-50%);
 background:radial-gradient(ellipse closest-side at 50% 50%,rgba(122,102,224,.34),rgba(40,150,170,.14) 50%,transparent 100%);pointer-events:none}
@@ -259,7 +268,7 @@ export function adminPage(v: AdminView): string {
   <form method="post" action="${base}/admin/auth/logout"><button class="btn small" type="submit">Sign out</button></form></div>
 </header>
 <div class="layout">
-  <nav class="side" aria-label="Admin sections"><a href="#llm" data-tab="llm" class="active">LLM</a><a href="#sso" data-tab="sso">SSO</a></nav>
+  <nav class="side" aria-label="Admin sections"><a href="#llm" data-tab="llm" class="active">LLM</a><a href="#sso" data-tab="sso">SSO</a><a href="#audit" data-tab="audit">Audit</a></nav>
   <main>
     <section id="tab-llm" class="tab">
       <h2>LLM</h2>
@@ -311,7 +320,7 @@ export function adminPage(v: AdminView): string {
 
     <section id="tab-sso" class="tab" hidden>
       <h2>SSO</h2>
-      <p class="lead">Let GitLab users sign in with their GitLab account.</p>
+      <p class="lead">Let GitLab users sign in with their GitLab account. Admin access comes from GitLab itself: only a GitLab administrator can open this admin area.</p>
       <div class="step">
         <h3>GitLab application</h3>
         <p class="sub">In GitLab create an application (Admin → Applications) with scope <code>read_user</code>, tick <em>Trusted</em> so signed-in users are not asked again, and add these redirect URIs (one per line; the first is the public sign-in, the second the admin sign-in):</p>
@@ -320,10 +329,26 @@ export function adminPage(v: AdminView): string {
           <label class="full">GitLab URL<input id="gitlabUrl" maxlength="300" placeholder="https://gitlab.example.com"></label>
           <label>Application ID<input id="clientId" maxlength="200"></label>
           <label>Secret<input id="clientSecret" type="password" maxlength="500" autocomplete="new-password"></label>
-          <label class="full">GitLab admins <span class="muted">(user names or e-mails, comma separated; they may open this admin page after GitLab sign-in)</span><input id="adminUsers" maxlength="2000"></label>
           <div class="row full"><button class="btn primary" type="submit">Save GitLab SSO</button><span id="ssoMsg" class="msg"></span></div>
         </form>
         <p class="sub" id="ssoState" style="margin-top:12px"></p>
+      </div>
+    </section>
+
+    <section id="tab-audit" class="tab" hidden>
+      <h2>Audit</h2>
+      <p class="lead">Every sign-in and every change made in this admin area. Secrets are never written to the log.</p>
+      <div class="step">
+        <div class="row" style="margin-bottom:14px">
+          <input id="auditSearch" type="search" placeholder="Search events…" style="flex:1;min-width:220px">
+          <button class="btn small" type="button" id="auditRefresh">Refresh</button>
+          <span class="muted" id="auditCount"></span><span class="muted" id="auditTz"></span>
+        </div>
+        <div class="tablewrap">
+          <table class="audit"><thead><tr><th>Date / Time</th><th>Event</th><th>Entity Type</th><th>Name / ID</th><th>User</th><th>IP Address</th><th>Changes</th><th>Description</th></tr></thead>
+            <tbody id="auditRows"><tr><td colspan="8" class="muted">Loading…</td></tr></tbody></table>
+        </div>
+        <div class="row" style="margin-top:14px"><button class="btn small" type="button" id="auditMore" hidden>Load more</button><span id="auditMsg" class="msg"></span></div>
       </div>
     </section>
   </main>
@@ -360,8 +385,9 @@ function ADMIN_JS(basePath: string): string {
   }
   // --- tabs (left menu) ---
   function showTab(){
-    var t=(location.hash||'#llm').slice(1);if(t!=='sso')t='llm';
-    ['llm','sso'].forEach(function(n){$('tab-'+n).hidden=(n!==t)});
+    var t=(location.hash||'#llm').slice(1);if(t!=='sso'&&t!=='audit')t='llm';
+    ['llm','sso','audit'].forEach(function(n){$('tab-'+n).hidden=(n!==t)});
+    if(t==='audit')loadAudit(false);
     Array.prototype.forEach.call(document.querySelectorAll('.side a'),function(a){a.className=a.getAttribute('data-tab')===t?'active':''});
   }
   window.addEventListener('hashchange',showTab);showTab();
@@ -442,15 +468,48 @@ function ADMIN_JS(basePath: string): string {
 
   // --- SSO tab ---
   function loadSso(){return call('GET','/settings').then(function(c){
-    $('gitlabUrl').value=c.gitlabUrl;$('clientId').value=c.clientId;$('adminUsers').value=c.adminUsers.join(', ');
+    $('gitlabUrl').value=c.gitlabUrl;$('clientId').value=c.clientId;
     $('clientSecret').value='';$('clientSecret').placeholder=c.hasSecret?'Leave empty to keep '+c.secretHint:'';
     $('ssoState').textContent=(c.ssoActive?'GitLab sign-in is active.':'GitLab sign-in is not active yet.')+(c.localUser?' Local admin account: '+c.localUser+'.':'')
   }).catch(function(e){note('ssoMsg',e.message)})}
   $('ssoForm').addEventListener('submit',function(ev){
     ev.preventDefault();note('ssoMsg','');
-    call('PUT','/settings',{gitlabUrl:$('gitlabUrl').value,clientId:$('clientId').value,clientSecret:$('clientSecret').value,adminUsers:$('adminUsers').value})
+    call('PUT','/settings',{gitlabUrl:$('gitlabUrl').value,clientId:$('clientId').value,clientSecret:$('clientSecret').value})
       .then(function(){note('ssoMsg','Saved.',true);return loadSso()}).catch(function(e){note('ssoMsg',e.message)});
   });
+
+  // --- Audit tab ---
+  var auditShown=0,auditTimer=null;
+  $('auditTz').textContent=Intl.DateTimeFormat().resolvedOptions().timeZone;
+  function changeCell(td,text){
+    if(!text)return;var pre=document.createElement('pre');pre.className='chg';
+    text.split('\n').forEach(function(l,i){var sp=document.createElement('span');sp.className=l.charAt(0)==='+'?'p':l.charAt(0)==='-'?'m':'';sp.textContent=(i?'\n':'')+l;pre.appendChild(sp)});
+    td.appendChild(pre);
+  }
+  function auditRow(e){
+    var tr=document.createElement('tr');
+    cell(tr,new Date(e.time).toLocaleString(),'t');
+    var ev=cell(tr,'');var b=document.createElement('span');b.className='ev '+e.event;b.textContent=e.event.replace('_',' ');ev.appendChild(b);
+    cell(tr,e.entityType);cell(tr,e.entityName+(e.entityId&&e.entityId!==e.entityName?' ('+e.entityId.slice(0,8)+')':''));
+    cell(tr,e.user);cell(tr,e.ip);changeCell(cell(tr,''),e.changes);cell(tr,e.description);
+    return tr;
+  }
+  function loadAudit(more){
+    note('auditMsg','');var rows=$('auditRows');
+    if(!more){auditShown=0}
+    call('GET','/audit?q='+encodeURIComponent($('auditSearch').value.trim())+'&offset='+auditShown).then(function(d){
+      if(!more)rows.textContent='';
+      if(!d.events.length&&!more){var tr=document.createElement('tr');cell(tr,'No events yet.','muted').colSpan=8;rows.appendChild(tr)}
+      d.events.forEach(function(e){rows.appendChild(auditRow(e))});
+      auditShown+=d.events.length;
+      $('auditCount').textContent=auditShown+' of '+d.total+' events';
+      $('auditMore').hidden=auditShown>=d.total;
+    }).catch(function(e){note('auditMsg',e.message)});
+  }
+  var st;$('auditSearch').addEventListener('input',function(){clearTimeout(st);st=setTimeout(function(){loadAudit(false)},250)});
+  $('auditRefresh').addEventListener('click',function(){loadAudit(false)});
+  $('auditMore').addEventListener('click',function(){loadAudit(true)});
+  setInterval(function(){if(!$('tab-audit').hidden&&!$('auditSearch').value&&auditShown<=500)loadAudit(false)},15000);
 
   load();loadSso();
 })();`;

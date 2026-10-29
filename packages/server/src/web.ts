@@ -4,6 +4,7 @@ import type { MnemosyneConfig } from './config.js';
 import { MIN_SECRET_LENGTH, deriveKeys, hashPassword, signToken, verifyPassword, verifyToken, type DerivedKeys } from './secrets.js';
 import { ProviderStore, ProviderValidationError } from './provider-store.js';
 import { fetchModels } from './llm-models.js';
+import { AuditLog, clientIp, diffLines, type AuditInput } from './audit.js';
 import { SettingsStore, SettingsValidationError, applyPortalInput, type GitLabSettings, type PortalSettings } from './settings-store.js';
 import { adminPage, loginPage } from './web-pages.js';
 import { LOGO_WEBP_BASE64 } from './web-assets.js';
@@ -39,6 +40,8 @@ interface GitLabUser {
   name?: string;
   email?: string;
   state?: string;
+  /** Present (true) only when GitLab reports the signed-in user as an instance administrator. */
+  is_admin?: boolean;
 }
 
 function parseCookies(header: string | undefined): Record<string, string> {
@@ -76,6 +79,8 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   const keys: DerivedKeys | null = configured ? deriveKeys(cfg.web.secret!) : null;
   const providers = keys ? new ProviderStore(cfg.web.providersFile, keys.enc) : null;
   const settings = keys ? new SettingsStore(cfg.web.settingsFile, keys.enc) : null;
+  const audit = keys ? new AuditLog(cfg.web.auditFile) : null;
+  const rec = (req: Request, e: AuditInput) => audit?.log({ ip: clientIp(req), ...e });
 
   // Built-in admin account: lets the portal be configured before GitLab SSO exists.
   const localUser = (cfg.web.localAdmin.user ?? '').trim() || 'admin';
@@ -99,7 +104,6 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     return {
       gitlab: g,
       sso: Boolean(g.url && g.clientId && g.clientSecret),
-      adminUsers: st.adminUsers?.length ? st.adminUsers : cfg.web.adminUsers,
       ssoLiveAt: st.ssoLiveAt,
       localActive: localEnabled && (force || !dueAt || Date.now() / 1000 < dueAt),
     };
@@ -152,10 +156,14 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     username: string;
     name: string;
     email: string;
+    /** GitLab instance administrator (GitLab's own flag, not a list kept here). */
+    admin: boolean;
   }
   interface SsoArea {
     /** '' for the public area, '/admin' for the admin area. */
     prefix: string;
+    /** Shown in the audit trail. */
+    label: 'public' | 'admin';
     oauthCookie: string;
     sessionCookie: string;
     sessionPath: string;
@@ -169,7 +177,8 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   const mountSso = (area: SsoArea) => {
     const redirectUri = here(`${area.prefix}/auth/callback`);
     const oauthPath = authPath(area.prefix);
-    const fail = (res: Response, error: string) => {
+    const fail = (req: Request, res: Response, error: string, user = 'anonymous') => {
+      void rec(req, { event: 'login_failed', entityType: `${area.label}_sso`, user, description: `GitLab sign-in refused (${error})` });
       clearCookie(res, area.oauthCookie, oauthPath);
       res.redirect(`${area.failTo}?error=${error}`);
     };
@@ -211,16 +220,16 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       }
       const eff = await effective();
       if (!eff.sso) {
-        fail(res, 'nosso');
+        fail(req, res, 'nosso');
         return;
       }
       const pending = verifyToken<OAuthState>(keys.sign, parseCookies(req.header('cookie'))[area.oauthCookie]);
       if (!pending || typeof req.query.state !== 'string' || req.query.state !== pending.state) {
-        fail(res, 'state');
+        fail(req, res, 'state');
         return;
       }
       if (typeof req.query.code !== 'string') {
-        fail(res, 'denied');
+        fail(req, res, 'denied');
         return;
       }
       try {
@@ -247,15 +256,25 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         const user = (await userRes.json()) as GitLabUser;
         if (!userRes.ok || !user.username) throw new Error(`user lookup failed (${userRes.status})`);
         if (user.state && user.state !== 'active') {
-          fail(res, 'denied');
+          fail(req, res, 'denied');
           return;
         }
 
-        const verdict = await area.admit({ username: user.username, name: user.name ?? user.username, email: user.email ?? '' }, eff);
+        const verdict = await area.admit(
+          { username: user.username, name: user.name ?? user.username, email: user.email ?? '', admin: user.is_admin === true },
+          eff,
+        );
         if ('error' in verdict) {
-          fail(res, verdict.error);
+          fail(req, res, verdict.error, user.username);
           return;
         }
+        void rec(req, {
+          event: 'login',
+          entityType: `${area.label}_sso`,
+          entityName: user.name ?? user.username,
+          user: user.username,
+          description: `Signed in with GitLab (${area.label}${area.label === 'admin' ? ', GitLab administrator' : ''})`,
+        });
         setCookie(
           res,
           area.sessionCookie,
@@ -272,7 +291,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         noStore(res);
         res.redirect(verdict.to);
       } catch {
-        fail(res, 'gitlab');
+        fail(req, res, 'gitlab');
       }
     });
   };
@@ -297,6 +316,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
 
   mountSso({
     prefix: '',
+    label: 'public',
     oauthCookie: OAUTH_COOKIE,
     sessionCookie: SESSION_COOKIE,
     sessionPath: cookiePath,
@@ -304,7 +324,9 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     admit: async () => ({ to: `${basePath}/` }),
   });
 
-  router.post('/auth/logout', (_req, res) => {
+  router.post('/auth/logout', (req, res) => {
+    const who = sessionFrom(req, SESSION_COOKIE);
+    if (who) void rec(req, { event: 'logout', entityType: 'public_session', user: who.u, description: 'Signed out' });
     clearCookie(res, SESSION_COOKIE);
     noStore(res);
     res.redirect(303, `${basePath}/`);
@@ -312,7 +334,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
 
   // =========================================================================
   // ADMIN AREA — everything under `/admin/*`: its own sign-in (built-in local account and
-  // GitLab admins), its own session cookie, its own API. Self-contained on purpose.
+  // GitLab instance administrators), its own session cookie, its own API. Self-contained on purpose.
   // =========================================================================
   const adminBase = `${basePath}/admin`;
   const adminCookiePath = adminBase;
@@ -335,28 +357,33 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
 
   router.post('/admin/auth/local', urlencoded({ extended: false, limit: '4kb' }), async (req, res) => {
     noStore(res);
-    const back = (error: string) => res.redirect(`${adminBase}/?error=${error}`);
+    const attempted = typeof req.body?.username === 'string' ? req.body.username.trim().slice(0, 100) : '';
+    const back = (error: string, why: string) => {
+      void rec(req, { event: 'login_failed', entityType: 'admin_local', user: attempted || 'anonymous', description: why });
+      res.redirect(`${adminBase}/?error=${error}`);
+    };
     if (!keys || !localEnabled || !originOk(req) || !(await effective()).localActive) {
-      back('local');
+      back('local', 'Local admin sign-in refused (disabled, or request from another origin)');
       return;
     }
-    const ip = req.ip ?? 'unknown';
+    const ip = clientIp(req);
     const now = Date.now();
     const m = misses.get(ip);
     if (m && m.n >= 5 && m.until > now) {
-      back('throttled');
+      back('throttled', 'Locked out: too many wrong passwords from this address');
       return;
     }
-    const user = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
+    const user = attempted;
     const password = typeof req.body?.password === 'string' ? req.body.password.slice(0, 200) : '';
     // Always run the hash check so a wrong user name costs the same as a wrong password.
     const passwordOk = verifyPassword(password, localHash);
     if (!(passwordOk && user.toLowerCase() === localUser.toLowerCase())) {
       misses.set(ip, { n: (m && m.until > now ? m.n : 0) + 1, until: now + 60_000 });
-      back('local');
+      back('local', 'Wrong user name or password');
       return;
     }
     misses.delete(ip);
+    void rec(req, { event: 'login', entityType: 'admin_local', entityName: 'Local administrator', user: localUser, description: 'Signed in with the built-in local admin account' });
     setCookie(
       res,
       ADMIN_COOKIE,
@@ -375,13 +402,14 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
 
   mountSso({
     prefix: '/admin',
+    label: 'admin',
     oauthCookie: ADMIN_OAUTH_COOKIE,
     sessionCookie: ADMIN_COOKIE,
     sessionPath: adminCookiePath,
     failTo: `${adminBase}/`,
     admit: async (user, eff) => {
-      const ids = [user.username, user.email].filter(Boolean).map((x) => x.toLowerCase());
-      if (!ids.some((id) => eff.adminUsers.includes(id))) return { error: 'noadmin' };
+      // Admin rights come from GitLab itself: only a GitLab instance administrator gets in.
+      if (!user.admin) return { error: 'noadmin' };
       // First successful GitLab admin sign-in proves SSO works: starts the 24h life of the local account.
       if (!eff.ssoLiveAt) {
         await settings!.update((st) => {
@@ -392,7 +420,9 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     },
   });
 
-  router.post('/admin/auth/logout', (_req, res) => {
+  router.post('/admin/auth/logout', (req, res) => {
+    const who = adminSession(req);
+    if (who) void rec(req, { event: 'logout', entityType: 'admin_session', user: who.u, description: 'Signed out of admin' });
     clearCookie(res, ADMIN_COOKIE, adminCookiePath);
     noStore(res);
     res.redirect(303, `${adminBase}/`);
@@ -417,6 +447,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     // State-changing calls must come from our own page: SameSite=Lax already blocks
     // cross-site cookies; the custom header and Origin check are defence in depth.
     if (req.method !== 'GET' && (req.header('x-requested-with') !== 'mnemosyne-admin' || !originOk(req))) {
+      void rec(req, { event: 'denied', entityType: 'admin_api', user: s.u, description: `Cross-site request refused: ${req.method} ${req.path}` });
       res.status(403).json({ error: 'cross-site request refused' });
       return;
     }
@@ -451,20 +482,79 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       }
     };
 
+  const who = (req: Request) => adminSession(req)?.u ?? 'unknown';
+
   api.get('/providers', handle(() => providers!.list()));
-  api.post('/providers', handle((req) => providers!.upsert(req.body ?? {})));
+  api.post(
+    '/providers',
+    handle(async (req) => {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const before = typeof body.id === 'string' ? await providers!.getFull(body.id).catch(() => null) : null;
+      const saved = await providers!.upsert(body);
+      const now = { label: saved.label, kind: saved.kind, baseUrl: saved.baseUrl };
+      const keyChanged = typeof body.apiKey === 'string' && body.apiKey.trim() !== '';
+      const changes = [diffLines(before ? { label: before.label, kind: before.kind, baseUrl: before.baseUrl } : {}, now), keyChanged ? '+ apiKey: "••••" (new key stored)' : null]
+        .filter(Boolean)
+        .join('\n');
+      void rec(req, {
+        event: before ? 'update' : 'create',
+        entityType: 'llm_provider',
+        entityId: saved.id,
+        entityName: saved.label,
+        user: who(req),
+        changes: changes || null,
+        description: before ? 'LLM provider changed' : 'LLM provider connected',
+      });
+      return saved;
+    }),
+  );
   // Step 2 of the LLM flow: ask the provider which models this API key may use (list call only, no inference).
   api.post(
     '/providers/:id/models',
     handle(async (req) => {
       const id = String(req.params.id);
-      const models = await fetchModels(await providers!.getFull(id));
-      return providers!.setModels(id, models);
+      const provider = await providers!.getFull(id);
+      try {
+        const saved = await providers!.setModels(id, await fetchModels(provider));
+        void rec(req, { event: 'fetch', entityType: 'llm_provider', entityId: id, entityName: provider.label, user: who(req), description: `Fetched ${saved.models.length} models from the provider` });
+        return saved;
+      } catch (err) {
+        void rec(req, { event: 'fetch_failed', entityType: 'llm_provider', entityId: id, entityName: provider.label, user: who(req), description: (err as Error).message });
+        throw err;
+      }
     }),
   );
   // Step 3: one model per job (text / image / pdf), chosen from the fetched lists.
-  api.put('/llm/assignments', handle((req) => providers!.setAssignments(req.body ?? {})));
-  api.delete('/providers/:id', handle(async (req) => (await providers!.remove(String(req.params.id)), { ok: true })));
+  api.put(
+    '/llm/assignments',
+    handle(async (req) => {
+      const flat = async (a: Record<string, { providerId: string; model: string } | undefined>) => {
+        const names = new Map((await providers!.list()).providers.map((p) => [p.id, p.label]));
+        return Object.fromEntries(Object.entries(a).map(([k, v]) => [k, v ? `${names.get(v.providerId) ?? v.providerId} / ${v.model}` : undefined]));
+      };
+      const before = await flat((await providers!.list()).assignments);
+      const next = await providers!.setAssignments(req.body ?? {});
+      void rec(req, {
+        event: 'update',
+        entityType: 'llm_assignment',
+        entityName: 'Models per job',
+        user: who(req),
+        changes: diffLines(before, await flat(next)),
+        description: 'Model choices for text / images / PDF saved',
+      });
+      return next;
+    }),
+  );
+  api.delete(
+    '/providers/:id',
+    handle(async (req) => {
+      const id = String(req.params.id);
+      const label = (await providers!.getFull(id).catch(() => null))?.label ?? id;
+      await providers!.remove(id);
+      void rec(req, { event: 'delete', entityType: 'llm_provider', entityId: id, entityName: label, user: who(req), description: 'LLM provider and its stored key removed' });
+      return { ok: true };
+    }),
+  );
 
   api.get(
     '/settings',
@@ -476,7 +566,6 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         clientId: eff.gitlab.clientId ?? '',
         hasSecret: secret.length > 0,
         secretHint: secret.length >= 12 ? `••••${secret.slice(-4)}` : secret ? '••••' : '',
-        adminUsers: eff.adminUsers,
         ssoActive: eff.sso,
         redirectUris: [here('/auth/callback'), here('/admin/auth/callback')],
         localUser: eff.localActive ? localUser : null,
@@ -486,9 +575,25 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   api.put(
     '/settings',
     handle(async (req) => {
-      await settings!.update((s) => applyPortalInput(s, req.body ?? {}));
+      const before = await effective();
+      await settings!.update((st) => applyPortalInput(st, req.body ?? {}));
+      const after = await effective();
+      const secretChanged = typeof req.body?.clientSecret === 'string' && req.body.clientSecret.trim() !== '';
+      const changes = [
+        diffLines({ gitlabUrl: before.gitlab.url, clientId: before.gitlab.clientId }, { gitlabUrl: after.gitlab.url, clientId: after.gitlab.clientId }),
+        secretChanged ? '+ clientSecret: "••••" (new secret stored)' : null,
+      ]
+        .filter(Boolean)
+        .join('\n');
+      void rec(req, { event: 'update', entityType: 'sso', entityName: 'GitLab SSO', user: who(req), changes: changes || null, description: after.sso ? 'GitLab SSO settings saved (active)' : 'GitLab SSO settings saved (not complete yet)' });
       return { ok: true };
     }),
+  );
+
+  // Audit trail, newest first (same columns as the CenTest / load-balancer audit view).
+  api.get(
+    '/audit',
+    handle((req) => audit!.list({ q: typeof req.query.q === 'string' ? req.query.q : '', offset: Number(req.query.offset) || 0 })),
   );
 
   return { router, providers };

@@ -61,12 +61,12 @@ export interface MnemosyneConfig {
     /** Externally visible origin, e.g. `https://host:40000`; builds the OAuth redirect URI. */
     publicUrl?: string;
     gitlab: { url?: string; clientId?: string; clientSecret?: string };
-    /** GitLab usernames or e-mails allowed into /admin (lowercased). Empty = nobody. */
-    adminUsers: string[];
     /** Sealed file holding the LLM providers configured in the admin UI. */
     providersFile: string;
     /** Sealed file holding portal settings edited in the admin UI (override the env values). */
     settingsFile: string;
+    /** Append-only audit trail (JSON lines) of sign-ins and admin changes. */
+    auditFile: string;
     /**
      * Built-in admin account so the portal can be configured before (or without) GitLab SSO.
      * Give either a `passwordHash` (`hashPassword()` output) or a plain `password`.
@@ -136,12 +136,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, repoOverride?: 
         clientId: env.MNEMOSYNE_GITLAB_CLIENT_ID,
         clientSecret: env.MNEMOSYNE_GITLAB_CLIENT_SECRET,
       },
-      adminUsers: (env.MNEMOSYNE_ADMIN_USERS ?? '')
-        .split(',')
-        .map((s) => s.trim().toLowerCase())
-        .filter(Boolean),
       providersFile: resolve(env.MNEMOSYNE_PROVIDERS_FILE ?? `${dirname(dbPath)}/providers.enc`),
       settingsFile: resolve(env.MNEMOSYNE_SETTINGS_FILE ?? `${dirname(dbPath)}/settings.enc`),
+      auditFile: resolve(env.MNEMOSYNE_AUDIT_FILE ?? `${dirname(dbPath)}/audit.jsonl`),
       localAdmin: {
         user: env.MNEMOSYNE_LOCAL_ADMIN_USER,
         passwordHash: env.MNEMOSYNE_LOCAL_ADMIN_PASSWORD_HASH,

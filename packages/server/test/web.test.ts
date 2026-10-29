@@ -143,7 +143,7 @@ describe('web portal', () => {
   let base: string;
   let challenge = '';
   const gitlabUsers: Record<string, object> = {
-    'admin-code': { username: 'obecker', name: 'Olaf Becker', email: 'obecker@lumanet.info', state: 'active' },
+    'admin-code': { username: 'store', name: 'Store Admin', email: 'store@lumanet.info', state: 'active', is_admin: true },
     'dev-code': { username: 'dev', name: 'Some Dev', email: 'dev@example.com', state: 'active' },
   };
 
@@ -185,7 +185,6 @@ describe('web portal', () => {
       MNEMOSYNE_GITLAB_URL: gitlabUrl,
       MNEMOSYNE_GITLAB_CLIENT_ID: 'cid',
       MNEMOSYNE_GITLAB_CLIENT_SECRET: 'csecret',
-      MNEMOSYNE_ADMIN_USERS: 'Obecker',
     });
     portalApp = express();
     portalApp.use(express.json());
@@ -285,7 +284,7 @@ describe('web portal', () => {
     expect(html).toContain('Choose a model for each job');
     expect(html).toContain('--title:#8473de'); // login palette: purple main titles
     expect(html).toContain('--teal:#3cc4cc'); // turquoise second-level titles
-    expect(html).toContain('Olaf Becker');
+    expect(html).toContain('Store Admin');
     const nonce = /<script nonce="([^"]+)"/.exec(html)?.[1];
     expect(nonce).toBeTruthy();
     expect(page.headers.get('content-security-policy')).toContain(`'nonce-${nonce}'`);
@@ -552,18 +551,18 @@ describe('local admin account and GitLab SSO settings', () => {
     const put = await fetch(`${base}/admin/api/settings`, {
       method: 'PUT',
       headers: hdr,
-      body: JSON.stringify({ gitlabUrl: 'https://gitlab.example.com/', clientId: 'app-id', clientSecret: 'super-secret-value', adminUsers: 'Obecker, store@lumanet.info' }),
+      body: JSON.stringify({ gitlabUrl: 'https://gitlab.example.com/', clientId: 'app-id', clientSecret: 'super-secret-value' }),
     });
     expect(put.status).toBe(200);
     const got = await (await fetch(`${base}/admin/api/settings`, { headers: { cookie } })).json();
     expect(got.redirectUris).toHaveLength(2);
     expect(got).toMatchObject({ gitlabUrl: 'https://gitlab.example.com', clientId: 'app-id', hasSecret: true, ssoActive: true });
-    expect(got.adminUsers).toEqual(['obecker', 'store@lumanet.info']);
+    expect(got).not.toHaveProperty('adminUsers'); // admin rights come from GitLab, not from a list
     expect(JSON.stringify(got)).not.toContain('super-secret-value');
     expect(await readFile(cfg.web.settingsFile, 'utf8')).not.toContain('super-secret-value');
 
     // an empty secret keeps the stored one; the login page now offers GitLab too
-    await fetch(`${base}/admin/api/settings`, { method: 'PUT', headers: hdr, body: JSON.stringify({ gitlabUrl: 'https://gitlab.example.com', clientId: 'app-id', clientSecret: '', adminUsers: 'obecker' }) });
+    await fetch(`${base}/admin/api/settings`, { method: 'PUT', headers: hdr, body: JSON.stringify({ gitlabUrl: 'https://gitlab.example.com', clientId: 'app-id', clientSecret: '' }) });
     expect((await (await fetch(`${base}/admin/api/settings`, { headers: { cookie } })).json()).hasSecret).toBe(true);
     expect(await (await fetch(`${base}/`)).text()).toContain('Sign in with GitLab');
 
@@ -594,5 +593,71 @@ describe('local admin account and GitLab SSO settings', () => {
     } finally {
       delete process.env.MNEMOSYNE_LOCAL_ADMIN_FORCE;
     }
+  });
+  const isolated = () => ({ MNEMOSYNE_SETTINGS_FILE: join(tmp, `s-${Math.random()}.enc`), MNEMOSYNE_AUDIT_FILE: join(tmp, `a-${Math.random()}.jsonl`) });
+
+  it('writes an audit trail: sign-ins, failures with the client address, and changes without secrets', async () => {
+    const { base, origin, cfg } = await start(isolated());
+    // rightmost X-Forwarded-For entry (added by our own :40000 front) is the client; anything before it is client-supplied
+    const post = (u: string, p: string) =>
+      fetch(`${base}/admin/auth/local`, {
+        method: 'POST',
+        redirect: 'manual',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Forwarded-For': '9.9.9.9, 203.0.113.7' },
+        body: new URLSearchParams({ username: u, password: p }),
+      });
+    await post('admin', 'wrong-password');
+    const ok = await post('admin', 'mnemosyne');
+    const cookie = cookieOf(ok);
+    const hdr = { cookie, 'Content-Type': 'application/json', 'X-Requested-With': 'mnemosyne-admin', origin };
+    await fetch(`${base}/admin/api/settings`, { method: 'PUT', headers: hdr, body: JSON.stringify({ gitlabUrl: 'https://gl.example.com', clientId: 'cid-1', clientSecret: 'top-secret-value-xyz' }) });
+    await fetch(`${base}/admin/api/providers`, { method: 'POST', headers: hdr, body: JSON.stringify({ label: 'Meta', kind: 'openai-compatible', baseUrl: 'https://api.meta.ai/v1', apiKey: 'meta-key-aaaaaaaa1234' }) });
+    await new Promise((r) => setTimeout(r, 100));
+
+    const got = await (await fetch(`${base}/admin/api/audit`, { headers: { cookie } })).json();
+    const events = got.events as { event: string; entityType: string; user: string; ip: string; changes: string | null; description: string }[];
+    expect(got.total).toBe(events.length);
+    const failed = events.find((e) => e.event === 'login_failed');
+    expect(failed).toMatchObject({ entityType: 'admin_local', user: 'admin', ip: '203.0.113.7' });
+    expect(events.find((e) => e.event === 'login')).toMatchObject({ entityType: 'admin_local', user: 'admin', ip: '203.0.113.7' });
+    const sso = events.find((e) => e.entityType === 'sso')!;
+    expect(sso.event).toBe('update');
+    expect(sso.changes).toContain('+ gitlabUrl: "https://gl.example.com"');
+    expect(sso.changes).toContain('clientSecret');
+    const prov = events.find((e) => e.entityType === 'llm_provider')!;
+    expect(prov.event).toBe('create');
+    expect(events[0]!.event).toBe('create'); // newest first
+
+    // nothing secret ever reaches the file
+    const file = await readFile(cfg.web.auditFile, 'utf8');
+    expect(file).not.toContain('top-secret-value-xyz');
+    expect(file).not.toContain('meta-key-aaaaaaaa1234');
+    expect(file).not.toContain('mnemosyne"'); // no password material either
+
+    // search + paging
+    const q = await (await fetch(`${base}/admin/api/audit?q=gitlab`, { headers: { cookie } })).json();
+    expect(q.events.length).toBeGreaterThan(0);
+    expect(q.events.every((e: { entityType: string; description: string; changes: string | null }) => `${e.entityType} ${e.description} ${e.changes}`.toLowerCase().includes('gitlab'))).toBe(true);
+    const paged = await (await fetch(`${base}/admin/api/audit?offset=1`, { headers: { cookie } })).json();
+    expect(paged.events.length).toBe(got.total - 1);
+
+    // admin only
+    expect((await fetch(`${base}/admin/api/audit`)).status).toBe(401);
+    // sign-out is recorded too
+    await fetch(`${base}/admin/auth/logout`, { method: 'POST', headers: { cookie }, redirect: 'manual' });
+    const after = await (await new Promise<Response>((r) => setTimeout(r, 100)).then(() => fetch(`${base}/admin/auth/local`, { method: 'POST', redirect: 'manual', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'admin', password: 'mnemosyne' }) }))).headers.get('set-cookie');
+    const again = await (await fetch(`${base}/admin/api/audit`, { headers: { cookie: (after ?? '').split(';')[0]! } })).json();
+    expect(again.events.some((e: { event: string }) => e.event === 'logout')).toBe(true);
+  });
+
+  it('shows an Audit tab with the CenTest-style columns and has no typed admin list', async () => {
+    const { base } = await start(isolated());
+    const cookie = cookieOf(await login(base, 'admin', 'mnemosyne'));
+    const html = await (await fetch(`${base}/admin/`, { headers: { cookie } })).text();
+    expect(html).toContain('data-tab="audit"');
+    for (const col of ['Date / Time', 'Event', 'Entity Type', 'Name / ID', 'User', 'IP Address', 'Changes', 'Description']) expect(html).toContain(`<th>${col}</th>`);
+    expect(html).not.toContain('GitLab admins');
+    expect(html).not.toContain('id="adminUsers"');
+    expect(html).toContain('only a GitLab administrator');
   });
 });

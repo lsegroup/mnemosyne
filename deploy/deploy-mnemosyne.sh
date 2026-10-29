@@ -65,10 +65,10 @@ rm -f /tmp/mnemosyne-dist.tar.gz
 npm ci --omit=dev --no-audit --no-fund
 
 # Web-portal settings (MNEMOSYNE_SECRET, MNEMOSYNE_PUBLIC_URL, MNEMOSYNE_GITLAB_*,
-# MNEMOSYNE_ADMIN_USERS) come from the pipeline as /tmp/mnemosyne-portal.env (built from
+# MNEMOSYNE_LOCAL_ADMIN_*) come from the pipeline as /tmp/mnemosyne-portal.env (built from
 # masked CI/CD variables). If the pipeline sends none, whatever the current env file holds
 # is kept, so a deploy never switches the portal off.
-PORTAL_KEYS='MNEMOSYNE_SECRET|MNEMOSYNE_PUBLIC_URL|MNEMOSYNE_GITLAB_URL|MNEMOSYNE_GITLAB_CLIENT_ID|MNEMOSYNE_GITLAB_CLIENT_SECRET|MNEMOSYNE_ADMIN_USERS|MNEMOSYNE_LOCAL_ADMIN_USER|MNEMOSYNE_LOCAL_ADMIN_PASSWORD|MNEMOSYNE_LOCAL_ADMIN_PASSWORD_HASH'
+PORTAL_KEYS='MNEMOSYNE_SECRET|MNEMOSYNE_PUBLIC_URL|MNEMOSYNE_GITLAB_URL|MNEMOSYNE_GITLAB_CLIENT_ID|MNEMOSYNE_GITLAB_CLIENT_SECRET|MNEMOSYNE_LOCAL_ADMIN_USER|MNEMOSYNE_LOCAL_ADMIN_PASSWORD|MNEMOSYNE_LOCAL_ADMIN_PASSWORD_HASH'
 PORTAL_ENV="$(mktemp)"
 if [ -s /tmp/mnemosyne-portal.env ]; then
   grep -E "^(${PORTAL_KEYS})=" /tmp/mnemosyne-portal.env > "$PORTAL_ENV" || true

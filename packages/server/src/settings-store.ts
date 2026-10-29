@@ -11,8 +11,6 @@ export interface GitLabSettings {
 /** Portal settings editable from the admin UI; they override the environment values. */
 export interface PortalSettings {
   gitlab?: GitLabSettings;
-  /** GitLab usernames / e-mails (lowercased) that may open /admin after GitLab SSO. */
-  adminUsers?: string[];
   /** Epoch seconds of the first successful GitLab admin sign-in: SSO is proven live from then on. */
   ssoLiveAt?: number;
 }
@@ -59,7 +57,7 @@ function str(v: unknown, field: string, max: number): string {
   return s;
 }
 
-/** Validate the admin form; an empty clientSecret keeps the stored one. */
+/** Validate the SSO form; an empty clientSecret keeps the stored one. Admin rights come from GitLab, never from a list here. */
 export function applyPortalInput(s: PortalSettings, input: Record<string, unknown>): void {
   const url = str(input.gitlabUrl, 'GitLab URL', 300).replace(/\/+$/, '');
   if (url) {
@@ -73,10 +71,5 @@ export function applyPortalInput(s: PortalSettings, input: Record<string, unknow
   }
   const clientId = str(input.clientId, 'Application ID', 200);
   const newSecret = str(input.clientSecret, 'Secret', 500);
-  const admins = str(input.adminUsers, 'Admin users', 2000)
-    .split(/[\s,]+/)
-    .map((a) => a.toLowerCase())
-    .filter(Boolean);
   s.gitlab = { url, clientId, clientSecret: newSecret || s.gitlab?.clientSecret || '' };
-  s.adminUsers = admins;
 }
