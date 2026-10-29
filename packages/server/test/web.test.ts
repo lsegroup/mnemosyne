@@ -584,7 +584,8 @@ describe('web portal', () => {
     it('lists every GitLab project of the person, also those without notes, with a blank page', async () => {
       const dev = cookiesOf(await signIn('dev-code'));
       const home = await (await fetch(`${base}/`, { headers: { cookie: dev } })).text();
-      expect(home).toMatch(/Zeta[\s\S]*?no notes yet/);
+      expect(home).toMatch(/<span class="c zero" aria-label="0 notes">0<\/span>\s*<span class="t">Zeta/);
+      expect(home).toMatch(/<span class="c" aria-label="\d+ notes">[1-9]\d*<\/span>/);
       expect(home).toContain(`href="${base.replace(new URL(base).origin, '')}/p/zeta"`);
       const page = await fetch(`${base}/p/zeta`, { headers: { cookie: dev } });
       expect(page.status).toBe(200);

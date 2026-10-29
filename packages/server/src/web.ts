@@ -173,7 +173,9 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     /** OAuth scopes requested from GitLab. */
     scope: string;
     /** Runs after GitLab accepted the user, with their access token (e.g. to read their project memberships). */
-    after?: (user: SsoUser, accessToken: string) => Promise<void>;
+    after?: (user: SsoUser, accessToken: string, warmed: Promise<unknown> | undefined) => Promise<void>;
+    /** Started the moment GitLab hands over the token, in parallel with the user lookup (the browser is waiting on GitLab's redirect page). */
+    warm?: (accessToken: string) => Promise<unknown>;
     oauthCookie: string;
     sessionCookie: string;
     sessionPath: string;
@@ -259,6 +261,8 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         const token = (await tokenRes.json()) as { access_token?: string };
         if (!tokenRes.ok || !token.access_token) throw new Error(`token exchange failed (${tokenRes.status})`);
 
+        const warmed = area.warm?.(token.access_token);
+        warmed?.catch(() => undefined);
         const userRes = await fetch(`${eff.gitlab.url}/api/v4/user`, {
           headers: { Authorization: `Bearer ${token.access_token}`, Accept: 'application/json' },
           signal: AbortSignal.timeout(GITLAB_TIMEOUT_MS),
@@ -281,6 +285,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         await area.after?.(
           { username: user.username, name: user.name ?? user.username, email: user.email ?? '', admin: user.is_admin === true },
           token.access_token,
+          warmed,
         );
         void rec(req, {
           event: 'login',
@@ -724,9 +729,10 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     sessionPath: cookiePath,
     failTo: `${basePath}/`,
     admit: async () => ({ to: `${basePath}/` }),
-    after: async (user, accessToken) => {
-      const eff = await effective();
-      members.set(user.username, { at: Date.now(), admin: user.admin, projects: await fetchMemberships(eff.gitlab.url!, accessToken) });
+    warm: async (accessToken) => fetchMemberships((await effective()).gitlab.url!, accessToken),
+    after: async (user, _accessToken, warmed) => {
+      const projects = ((await warmed?.catch(() => null)) ?? null) as GitLabProject[] | null;
+      members.set(user.username, { at: Date.now(), admin: user.admin, projects });
     },
   });
 

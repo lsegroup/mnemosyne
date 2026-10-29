@@ -559,7 +559,10 @@ h3,h4,h5,h6{margin:14px 0 2px;color:var(--teal)}
 a.card:hover{border-color:var(--accent)}
 .card .t{font-size:17px;font-weight:600;color:var(--teal)}
 .card .s{font-size:13px;color:var(--muted)}
-.card .n{margin-top:4px;font-size:13px;color:var(--text)}
+.card{position:relative}.card .t{padding-right:46px}
+.card .n{margin-top:4px;font-size:13px;color:var(--muted)}
+.card .c{position:absolute;top:12px;right:12px;min-width:30px;height:30px;padding:0 6px;box-sizing:border-box;border-radius:99px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#0b0d14;background:var(--teal)}
+.card .c.zero{background:transparent;color:var(--muted);border:1px solid var(--line);font-weight:600}
 .badge{display:inline-block;padding:1px 9px;border-radius:99px;font-size:12px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
 .badge.working,.badge.resolved{color:#4ade80;border-color:#1f5a38}
 .badge.broken{color:#ff8b8b;border-color:#6a2e2e}
@@ -602,10 +605,11 @@ function docsShell(title: string, basePath: string, user: DocsUser, body: string
 }
 
 export function homePage(v: { basePath: string; user: DocsUser; cards: ProjectCard[]; notice?: string; isAdmin: boolean }): string {
-  const card = (c: ProjectCard) => `<a class="card" href="${esc(c.href)}">
+  const card = (c: ProjectCard) => `<a class="card" href="${esc(c.href)}" title="${c.count === 0 ? 'No notes yet' : `${c.count} ${c.count === 1 ? 'note' : 'notes'}`}">
+    <span class="c${c.count === 0 ? ' zero' : ''}" aria-label="${c.count} notes">${c.count}</span>
     <span class="t">${esc(c.title)}</span><span class="s">${esc(c.sub)}</span>
-    <span class="n">${c.count === 0 ? 'no notes yet' : `${c.count} ${c.count === 1 ? 'note' : 'notes'}`}${c.updated ? ` · updated ${esc(c.updated)}` : ''}</span>
-    ${c.adminOnly ? '<span class="badge admin">administrators only</span>' : ''}${c.count === 0 ? '<span class="badge">no documentation</span>' : ''}</a>`;
+    ${c.updated ? `<span class="n">updated ${esc(c.updated)}</span>` : ''}
+    ${c.adminOnly ? '<span class="badge admin">administrators only</span>' : ''}</a>`;
   const body = `<h1>Your projects</h1>
 <p class="lead">Documentation for the projects you belong to in GitLab${v.isAdmin ? ' — as a GitLab administrator you see every project' : ''}.</p>
 ${v.notice ? `<div class="notice">${esc(v.notice)}</div>` : ''}
