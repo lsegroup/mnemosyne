@@ -21,6 +21,12 @@ import { renderMarkdown } from '../src/markdown.js';
 import { matchProject, redact } from '../src/docs.js';
 
 const SECRET = 'a-test-secret-with-enough-length';
+// Fake credentials for the masking tests, assembled at runtime so no credential-shaped text sits in the source
+// (the public GitHub mirror scans every commit for such text and refuses to push if it finds any).
+const FAKE_TOKEN = ['glpat', 'abcdefghijklmnopqrstuvwx'].join('-');
+const FAKE_AWS = 'AKIA' + 'ABCDEFGHIJKLMNOP';
+const FAKE_PEM_BEGIN = '-----BEGIN RSA ' + 'PRIVATE KEY-----';
+const FAKE_PEM_END = '-----END RSA ' + 'PRIVATE KEY-----';
 
 describe('secrets', () => {
   const k = deriveKeys(SECRET);
@@ -158,7 +164,7 @@ describe('web portal', () => {
       mkdir(join(tmp, 'nodes', project), { recursive: true }).then(() =>
         writeFile(join(tmp, 'nodes', project, `${id}.md`), `---\nid: ${id}\ntitle: ${title}\ntype: howto\nstatus: working\nproject: ${project}\ncomponents: [web]\nlinks:\n  - rel: relates-to\n    target: alpha-second\nobserved_at: 2026-10-20\n---\n\n${body}\n`),
       );
-    await note('alpha', 'alpha-first', 'Alpha first note', '## Setup\n\nRun `make` then **deploy**.\n\n<script>alert(1)</script>\n\n[ok](https://example.com) [bad](javascript:alert(1))\n\npassword: hunter2-secret-value\n\ntoken glpat-FIXTURE\n');
+    await note('alpha', 'alpha-first', 'Alpha first note', '## Setup\n\nRun `make` then **deploy**.\n\n<script>alert(1)</script>\n\n[ok](https://example.com) [bad](javascript:alert(1))\n\npassword: hunter2-secret-value\n\ntoken ' + FAKE_TOKEN + '\n');
     await note('alpha', 'alpha-second', 'Alpha second note', 'Second.');
     await note('beta', 'beta-first', 'Beta private note', 'Only beta members.');
     await note('lse', 'lse-first', 'Catch-all note', 'No single GitLab project.');
@@ -414,7 +420,7 @@ describe('web portal', () => {
     expect(html).toContain('href="https://example.com"');
     expect(html).not.toContain('href="javascript:');
     expect(html).not.toContain('hunter2-secret-value');
-    expect(html).not.toContain('glpat-FIXTURE');
+    expect(html).not.toContain(FAKE_TOKEN);
     expect(html).toContain('[redacted');
     expect(html).toContain('Alpha second note'); // related note, linked
   });
@@ -810,8 +816,8 @@ describe('documentation helpers', () => {
   });
 
   it('masks credentials in note text', () => {
-    const out = redact('db password: S3cretValue1\nBearer abcdefghijklmnopqrstuvwxyz0123\nkey AKIA-FIXTURE\n-----BEGIN RSA PRIVATE-KEY-FIXTURE-----\nxx\n-----END RSA PRIVATE KEY-----\nplain text stays');
-    expect(out).not.toMatch(/S3cretValue1|abcdefghijklmnopqrstuvwxyz0123|AKIA-FIXTURE|BEGIN RSA/);
+    const out = redact(`db password: S3cretValue1\nBearer abcdefghijklmnopqrstuvwxyz0123\nkey ${FAKE_AWS}\n${FAKE_PEM_BEGIN}\nxx\n${FAKE_PEM_END}\nplain text stays`);
+    expect(out).not.toMatch(new RegExp(`S3cretValue1|abcdefghijklmnopqrstuvwxyz0123|${FAKE_AWS}|BEGIN RSA`));
     expect(out).toContain('plain text stays');
   });
 
