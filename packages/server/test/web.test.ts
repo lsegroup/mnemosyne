@@ -652,6 +652,15 @@ describe('local admin account and GitLab SSO settings', () => {
     expect(again.events.some((e: { event: string }) => e.event === 'logout')).toBe(true);
   });
 
+  it('keeps the audit table styles on the ADMIN page (not on the login page)', async () => {
+    const { base } = await start(isolated());
+    const cookie = cookieOf(await login(base, 'admin', 'mnemosyne'));
+    const admin = await (await fetch(`${base}/admin/`, { headers: { cookie } })).text();
+    for (const rule of ['.tablewrap{overflow-x:auto', 'table.audit{', 'pre.chg{', '.ev.login_failed']) expect(admin).toContain(rule);
+    const loginHtml = await (await fetch(`${base}/admin/`)).text();
+    expect(loginHtml).not.toContain('table.audit');
+  });
+
   it('shows an Audit tab with the CenTest-style columns and has no typed admin list', async () => {
     const { base } = await start(isolated());
     const cookie = cookieOf(await login(base, 'admin', 'mnemosyne'));

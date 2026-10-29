@@ -121,15 +121,6 @@ form.local input:focus{outline:none;border-color:var(--accent)}
 form{margin:0}form .btn{width:100%}.card .btn{width:100%}
 .btn.primary{color:#fff}
 footer{margin-top:24px;color:var(--muted);font-size:12px}
-.tablewrap{overflow-x:auto}
-table.audit{font-size:13px;min-width:980px}table.audit td{vertical-align:top}
-table.audit td.t{white-space:nowrap;color:var(--muted)}
-.ev{display:inline-block;padding:1px 9px;border-radius:99px;font-size:12px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
-.ev.login,.ev.create,.ev.fetch{color:var(--teal);border-color:#1d5f64}
-.ev.update{color:#b3a3ff;border-color:#4b3f94}
-.ev.login_failed,.ev.denied,.ev.delete,.ev.fetch_failed{color:#ff8b8b;border-color:#6a2e2e}
-pre.chg{margin:0;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word}
-pre.chg .p{color:#6ee7a0}pre.chg .m{color:#ff9a9a}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:transparent;border:0;padding:0 2px;color:#a3a8b8}
 .stack::before{content:"";position:absolute;z-index:-1;left:50%;top:-110px;width:640px;height:420px;transform:translateX(-50%);
 background:radial-gradient(ellipse closest-side at 50% 50%,rgba(122,102,224,.34),rgba(40,150,170,.14) 50%,transparent 100%);pointer-events:none}
@@ -225,7 +216,7 @@ body{background:radial-gradient(ellipse 50% 40% at 12% 0%,rgba(120,58,182,.20),t
 .brand{font:600 24px/1 "Palatino Linotype","Book Antiqua",Palatino,Georgia,"Times New Roman",serif;letter-spacing:.4px;color:var(--title)}
 .brand .muted{font:500 14px/1 system-ui,sans-serif;letter-spacing:0;color:var(--teal)}
 .top .right{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:14px}.top form{margin:0}
-.layout{display:grid;grid-template-columns:210px minmax(0,1fr);gap:28px;max-width:1180px;margin:0 auto;padding:28px 24px 60px}
+.layout{display:grid;grid-template-columns:210px minmax(0,1fr);gap:28px;max-width:1640px;margin:0 auto;padding:28px 24px 60px}
 .side{display:flex;flex-direction:column;gap:6px;position:sticky;top:20px;align-self:start}
 .side a{display:block;padding:10px 14px;border-radius:9px;border:1px solid transparent;color:var(--muted);text-decoration:none;font-weight:600}
 .side a:hover{color:var(--text);background:var(--panel)}
@@ -254,6 +245,19 @@ input:focus,select:focus{outline:none;border-color:var(--accent)}
 .msg{min-height:22px;font-size:14px}.ok{color:#4ade80}.err{color:#ff8b8b}
 .roles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
 .roles .hint{font-size:12px;color:var(--muted)}
+.layout>main{min-width:0}.tab>.step{min-width:0}
+.tablewrap{overflow-x:auto;max-width:100%}
+table.audit{font-size:13px;width:100%;min-width:900px}
+table.audit td{vertical-align:top}
+table.audit td.t{white-space:nowrap;color:var(--muted)}
+table.audit td.chg{min-width:230px;max-width:360px}
+table.audit td.desc{min-width:170px;max-width:280px}
+.ev{display:inline-block;padding:1px 9px;border-radius:99px;font-size:12px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.ev.login,.ev.create,.ev.fetch{color:var(--teal);border-color:#1d5f64}
+.ev.update{color:#b3a3ff;border-color:#4b3f94}
+.ev.login_failed,.ev.denied,.ev.delete,.ev.fetch_failed{color:#ff8b8b;border-color:#6a2e2e}
+pre.chg{margin:0;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+pre.chg .p{color:#6ee7a0}pre.chg .m{color:#ff9a9a}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#a3a8b8}
 @media(max-width:860px){.layout{grid-template-columns:1fr}.side{flex-direction:row;position:static}.roles,form.grid{grid-template-columns:1fr}}`;
 
@@ -491,7 +495,7 @@ function ADMIN_JS(basePath: string): string {
     cell(tr,new Date(e.time).toLocaleString(),'t');
     var ev=cell(tr,'');var b=document.createElement('span');b.className='ev '+e.event;b.textContent=e.event.replace('_',' ');ev.appendChild(b);
     cell(tr,e.entityType);cell(tr,e.entityName+(e.entityId&&e.entityId!==e.entityName?' ('+e.entityId.slice(0,8)+')':''));
-    cell(tr,e.user);cell(tr,e.ip);changeCell(cell(tr,''),e.changes);cell(tr,e.description);
+    cell(tr,e.user);cell(tr,e.ip);changeCell(cell(tr,'','chg'),e.changes);cell(tr,e.description,'desc');
     return tr;
   }
   function loadAudit(more){
