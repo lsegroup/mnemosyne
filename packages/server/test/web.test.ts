@@ -192,7 +192,8 @@ describe('web portal', () => {
           json(
             200,
             t === 'dev-code'
-              ? [{ id: 1, name: 'Alpha', path: 'alpha', path_with_namespace: 'grp/alpha', web_url: 'https://gl.example/grp/alpha' }]
+              ? [{ id: 1, name: 'Alpha', path: 'alpha', path_with_namespace: 'grp/alpha', web_url: 'https://gl.example/grp/alpha' },
+                  { id: 2, name: 'Zeta', path: 'zeta', path_with_namespace: 'grp/zeta', web_url: 'https://gl.example/grp/zeta' }]
               : [],
           );
       } else if (req.url === '/api/v4/user') {
@@ -578,6 +579,17 @@ describe('web portal', () => {
       expect(after).toMatch(/<nav class="card contents"><strong>Contents<\/strong>[\s\S]*href="#h-change-history"/);
       expect((after.match(/<tr><td>\d{4}-\d{2}-\d{2}/g) ?? []).length).toBeLessThanOrEqual(20);
       expect((after.match(/<tr><td>\d{4}-\d{2}-\d{2}/g) ?? []).length).toBeGreaterThan(0);
+    });
+
+    it('lists every GitLab project of the person, also those without notes, with a blank page', async () => {
+      const dev = cookiesOf(await signIn('dev-code'));
+      const home = await (await fetch(`${base}/`, { headers: { cookie: dev } })).text();
+      expect(home).toMatch(/Zeta[\s\S]*?no notes yet/);
+      expect(home).toContain(`href="${base.replace(new URL(base).origin, '')}/p/zeta"`);
+      const page = await fetch(`${base}/p/zeta`, { headers: { cookie: dev } });
+      expect(page.status).toBe(200);
+      expect(await page.text()).toContain('No documentation has been generated yet');
+      expect((await fetch(`${base}/p/not-a-project`, { headers: { cookie: dev } })).status).toBe(404);
     });
 
     it('asks the AI for description, requirements and disaster recovery, and builds the change history itself', async () => {

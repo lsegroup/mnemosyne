@@ -7,7 +7,7 @@ import { fetchModels } from './llm-models.js';
 import { AuditLog, clientIp, diffLines, type AuditInput } from './audit.js';
 import { SettingsStore, SettingsValidationError, applyPortalInput, type GitLabSettings, type PortalSettings } from './settings-store.js';
 import { adminPage, docsNotFound, homePage, loginPage, nodePage, notesPage, projectHome, type ProjectCard } from './web-pages.js';
-import { NodeIndex, fetchMemberships, matchProject, redact, type GitLabProject } from './docs.js';
+import { NodeIndex, fetchMemberships, matchProject, redact, slug, type GitLabProject } from './docs.js';
 import { outline, renderMarkdown } from './markdown.js';
 import { DocStore, IMAGE_PRICE_USD, approxTokens, buildDiagramBriefPrompt, buildWikiPrompt, changeHistory, estimateText, historyMarkdown, missingSections, toPdfImage, type DocMeta } from './docgen.js';
 import { chat } from './llm-call-chat.js';
@@ -331,20 +331,28 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     const ds = docsSession(req);
     pageHeaders(res);
     if (ds && nodeIndex) {
-      const cards: ProjectCard[] = (await nodeIndex.projects())
+      const fromNotes = (await nodeIndex.projects())
         .filter((p) => canRead(ds.m, p.project))
         .map((p) => {
           const gl = ds.m.projects ? matchProject(p.project, ds.m.projects) : null;
           return {
-            title: gl?.name ?? p.project,
-            sub: gl ? gl.fullPath : 'no GitLab project',
-            count: p.count,
-            updated: p.updated,
-            href: `${basePath}/p/${encodeURIComponent(p.project)}`,
-            adminOnly: ds.m.admin && !gl,
+            gl,
+            card: {
+              title: gl?.name ?? p.project,
+              sub: gl ? gl.fullPath : 'no GitLab project',
+              count: p.count,
+              updated: p.updated,
+              href: `${basePath}/p/${encodeURIComponent(p.project)}`,
+              adminOnly: ds.m.admin && !gl,
+            } as ProjectCard,
           };
-        })
-        .sort((x, y) => x.title.localeCompare(y.title));
+        });
+      // every GitLab project the person belongs to is listed, also those nobody has written a note for yet
+      const withNotes = new Set(fromNotes.map((x) => x.gl?.id).filter((id) => id !== undefined));
+      const empty: ProjectCard[] = (ds.m.projects ?? [])
+        .filter((g) => !withNotes.has(g.id))
+        .map((g) => ({ title: g.name, sub: g.fullPath, count: 0, updated: null, href: `${basePath}/p/${encodeURIComponent(slug(g.path))}`, adminOnly: false }));
+      const cards: ProjectCard[] = [...fromNotes.map((x) => x.card), ...empty].sort((x, y) => x.title.localeCompare(y.title));
       res.send(
         homePage({
           basePath,
@@ -401,11 +409,12 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     };
     if (!canRead(ds.m, project)) return refuse('Project documentation refused (not a member of the matching GitLab project)');
     if (adminOnly && !ds.m.admin) return refuse('Administrator-only page refused');
-    if (!(await nodeIndex.inProject(project)).length) {
+    const gl = ds.m.projects ? matchProject(project, ds.m.projects) : null;
+    // a GitLab project nobody has written notes for yet still gets its (blank) page
+    if (!(await nodeIndex.inProject(project)).length && !gl) {
       notFound(res, ds, 'This page does not exist, or you do not have access to it.');
       return null;
     }
-    const gl = ds.m.projects ? matchProject(project, ds.m.projects) : null;
     return { ds, project, gl, subtitle: gl ? `GitLab project ${gl.fullPath}` : 'No matching GitLab project — visible to GitLab administrators only' };
   };
 
@@ -510,6 +519,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     const text = await providers!.getAssigned('text');
     if (!text) return { error: 'Choose a model for Text in Admin → LLM first.' };
     if (kind === 'wiki') {
+      if (!(await nodeIndex!.inProject(project)).length) return { error: 'This project has no notes yet, so there is nothing to write the documentation from.' };
       const gl = null as null;
       const prompt = buildWikiPrompt(project, gl, await nodeIndex!.inProject(project));
       const est = estimateText(text.model, prompt.inputTokens, 12000);

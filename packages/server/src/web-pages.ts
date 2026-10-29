@@ -604,8 +604,8 @@ function docsShell(title: string, basePath: string, user: DocsUser, body: string
 export function homePage(v: { basePath: string; user: DocsUser; cards: ProjectCard[]; notice?: string; isAdmin: boolean }): string {
   const card = (c: ProjectCard) => `<a class="card" href="${esc(c.href)}">
     <span class="t">${esc(c.title)}</span><span class="s">${esc(c.sub)}</span>
-    <span class="n">${c.count} ${c.count === 1 ? 'note' : 'notes'}${c.updated ? ` · updated ${esc(c.updated)}` : ''}</span>
-    ${c.adminOnly ? '<span class="badge admin">administrators only</span>' : ''}</a>`;
+    <span class="n">${c.count === 0 ? 'no notes yet' : `${c.count} ${c.count === 1 ? 'note' : 'notes'}`}${c.updated ? ` · updated ${esc(c.updated)}` : ''}</span>
+    ${c.adminOnly ? '<span class="badge admin">administrators only</span>' : ''}${c.count === 0 ? '<span class="badge">no documentation</span>' : ''}</a>`;
   const body = `<h1>Your projects</h1>
 <p class="lead">Documentation for the projects you belong to in GitLab${v.isAdmin ? ' — as a GitLab administrator you see every project' : ''}.</p>
 ${v.notice ? `<div class="notice">${esc(v.notice)}</div>` : ''}
