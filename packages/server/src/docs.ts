@@ -27,24 +27,30 @@ export function matchProject(notesProject: string, projects: GitLabProject[]): G
 
 /** The projects this GitLab user belongs to, read with their own access token (scope `read_api`). */
 export async function fetchMemberships(gitlabUrl: string, token: string): Promise<GitLabProject[] | null> {
-  const out: GitLabProject[] = [];
-  for (let page = 1; page <= 10; page++) {
-    let res: Response;
+  type Row = { id: number; name: string; path: string; path_with_namespace: string; web_url: string };
+  const get = async (page: number): Promise<Response | null> => {
     try {
-      res = await fetch(`${gitlabUrl}/api/v4/projects?membership=true&simple=true&per_page=100&page=${page}`, {
+      return await fetch(`${gitlabUrl}/api/v4/projects?membership=true&simple=true&per_page=100&page=${page}`, {
         headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
         signal: AbortSignal.timeout(10_000),
       });
     } catch {
       return null;
     }
-    // 401/403 = the GitLab application lacks the read_api scope: fail closed (show nothing).
-    if (!res.ok) return page === 1 ? null : out;
-    const rows = (await res.json()) as { id: number; name: string; path: string; path_with_namespace: string; web_url: string }[];
-    for (const r of rows) out.push({ id: r.id, name: r.name, path: r.path, fullPath: r.path_with_namespace, webUrl: r.web_url });
-    if (rows.length < 100) break;
-  }
-  return out;
+  };
+  const first = await get(1);
+  // 401/403 = the GitLab application lacks the read_api scope: fail closed (show nothing).
+  if (!first || !first.ok) return null;
+  const rows = (await first.json()) as Row[];
+  // the remaining pages are read in parallel: the person is waiting on the sign-in redirect
+  const pages = Math.min(10, Number(first.headers.get('x-total-pages')) || (rows.length < 100 ? 1 : 2));
+  const rest = await Promise.all(
+    Array.from({ length: Math.max(0, pages - 1) }, async (_, i) => {
+      const r = await get(i + 2);
+      return r?.ok ? ((await r.json()) as Row[]) : [];
+    }),
+  );
+  return [...rows, ...rest.flat()].map((r) => ({ id: r.id, name: r.name, path: r.path, fullPath: r.path_with_namespace, webUrl: r.web_url }));
 }
 
 /** Mask anything that looks like a credential before a note is shown in a browser. */

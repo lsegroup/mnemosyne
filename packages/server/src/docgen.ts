@@ -239,3 +239,15 @@ export function historyMarkdown(entries: HistoryEntry[]): string {
     '',
   ].join('\n');
 }
+
+/** The sections the owner's layout requires; the AI is asked for them but cannot be forced, so the result is checked. */
+export function missingSections(markdown: string): string[] {
+  const need: [string, RegExp][] = [
+    ['Hardware and software requirements', /^##\s+Hardware and software requirements\b/im],
+    ['Disaster recovery', /^##\s+Disaster recovery\b/im],
+    ['Installation / rebuild steps', /^###\s+Installation/im],
+    ['Access', /^###\s+Access\b/im],
+    ['Testing and verification', /^###\s+Testing/im],
+  ];
+  return need.filter(([, re]) => !re.test(markdown)).map(([n]) => n);
+}

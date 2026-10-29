@@ -572,9 +572,10 @@ describe('web portal', () => {
       expect((await fetch(`${new URL(base).origin}${src}`, { redirect: 'manual' })).status).toBe(302); // not signed in
 
       // layout: article left, infobox card right with the small clickable diagram, rule, then the change history
-      expect(after).toMatch(/<div class="wp"><div class="main"><article>[\s\S]*<\/article><hr class="rule"><section class="hist"><h2>Change history<\/h2>[\s\S]*<\/section><\/div><aside class="card">/);
-      expect(after).toMatch(/<aside class="card">[\s\S]*<a class="pic" id="pic" href="[^"]*\/p\/alpha\/diagram\/[^"]*"[\s\S]*click to enlarge/);
+      expect(after).toMatch(/<div class="wp"><div class="main"><article>[\s\S]*<\/article><hr class="rule"><section class="hist"><h2 id="h-change-history">Change history<\/h2>[\s\S]*<\/section><\/div><aside class="side">/);
+      expect(after).toMatch(/<aside class="side"><div class="card">[\s\S]*<a class="pic" id="pic" href="[^"]*\/p\/alpha\/diagram\/[^"]*"[\s\S]*click to enlarge/);
       expect(after).toContain('id="lightbox"');
+      expect(after).toMatch(/<nav class="card contents"><strong>Contents<\/strong>[\s\S]*href="#h-change-history"/);
       expect((after.match(/<tr><td>\d{4}-\d{2}-\d{2}/g) ?? []).length).toBeLessThanOrEqual(20);
       expect((after.match(/<tr><td>\d{4}-\d{2}-\d{2}/g) ?? []).length).toBeGreaterThan(0);
     });
@@ -588,6 +589,9 @@ describe('web portal', () => {
       expect(p.user).toContain('do NOT write a change history');
       const h = changeHistory(notes);
       expect(h).toHaveLength(20);
+      const { missingSections } = await import('../src/docgen.js');
+      expect(missingSections('Intro\n\n## Overview\n')).toHaveLength(5);
+      expect(missingSections('## Hardware and software requirements\n## Disaster recovery\n### Installation / rebuild steps\n### Access\n### Testing and verification')).toEqual([]);
       expect(h[0]!.date >= h[19]!.date).toBe(true); // newest first
       const md = historyMarkdown(h);
       expect(md).toContain('\n---\n');

@@ -731,8 +731,11 @@ const HOME_CSS = `
 .toc strong{color:var(--teal)}.toc ol,.toc ul{margin:6px 0 0;padding-left:18px}.toc li{margin:2px 0;font-size:14px}.toc a{color:var(--text);text-decoration:none}.toc a:hover{color:var(--teal)}
 .toc ul{padding-left:16px;list-style:circle;color:var(--muted)}
 .wp{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:28px;align-items:start;margin-top:18px}
-@media(max-width:900px){.wp{grid-template-columns:minmax(0,1fr)}.wp .card{order:-1}}
+@media(max-width:900px){.wp{grid-template-columns:minmax(0,1fr)}}
+.side{position:sticky;top:16px;display:flex;flex-direction:column;gap:16px;max-height:calc(100vh - 32px);overflow:auto}
+@media(max-width:900px){.side{position:static;max-height:none;order:-1}}
 .card{border:1px solid var(--line);border-radius:12px;background:var(--panel2);overflow:hidden}
+.contents{padding:12px 16px 14px}.contents strong{color:var(--title);font:600 16px/1.2 "Palatino Linotype","Book Antiqua",Palatino,Georgia,serif}.contents ol,.contents ul{margin:8px 0 0;padding-left:18px}.contents li{margin:3px 0;font-size:13.5px}.contents ul{list-style:circle;color:var(--muted)}.contents a{color:var(--text);text-decoration:none}.contents a:hover{color:var(--teal)}
 .card h3{margin:0;padding:11px 14px;text-align:center;font:600 18px/1.2 "Palatino Linotype","Book Antiqua",Palatino,Georgia,serif;color:var(--title);border-bottom:1px solid var(--line)}
 .card .pic{display:block;margin:12px;padding:6px;border-radius:8px;background:#fff;cursor:zoom-in}
 .card .pic img{display:block;width:100%;height:auto}
@@ -774,16 +777,31 @@ export function projectHome(v: ProjectHomeView): string {
           .join('')}</p>`
       : '';
 
-  const hist = `<hr class="rule"><section class="hist"><h2>Change history</h2><p class="versions">The ${v.history.length} most recently submitted notes, newest first, show what was changed or deployed last. ${v.isAdmin ? `Open a note, or search all of them under <a href="${base}/p/${enc}/notes">Source notes</a>, for the details.` : 'An administrator can open the source notes for the details.'}</p><table><thead><tr><th>Date (UTC)</th><th>Note</th><th>Type</th></tr></thead><tbody>${v.history
+  const hist = `<hr class="rule"><section class="hist"><h2 id="h-change-history">Change history</h2><p class="versions">The ${v.history.length} most recently submitted notes, newest first, show what was changed or deployed last. ${v.isAdmin ? `Open a note, or search all of them under <a href="${base}/p/${enc}/notes">Source notes</a>, for the details.` : 'An administrator can open the source notes for the details.'}</p><table><thead><tr><th>Date (UTC)</th><th>Note</th><th>Type</th></tr></thead><tbody>${v.history
     .map((e) => `<tr><td>${esc(e.date)}</td><td>${v.isAdmin ? `<a href="${base}/p/${enc}/${encodeURIComponent(e.id)}">${esc(e.title)}</a>` : esc(e.title)}</td><td>${esc(e.type)}</td></tr>`)
     .join('')}</tbody></table></section>`;
 
+  const contents = v.wiki
+    ? (() => {
+        const groups: { id: string; text: string; subs: { id: string; text: string }[] }[] = [];
+        for (const t of v.wiki.toc) {
+          if (t.level === 2) groups.push({ id: t.id, text: t.text, subs: [] });
+          else if (t.level === 3 && groups.length) groups[groups.length - 1]!.subs.push({ id: t.id, text: t.text });
+        }
+        groups.push({ id: 'h-change-history', text: 'Change history', subs: [] });
+        const link = (g: { id: string; text: string }) => `<a href="#${esc(g.id)}">${esc(g.text)}</a>`;
+        return `<nav class="card contents"><strong>Contents</strong><ol>${groups
+          .map((g) => `<li>${link(g)}${g.subs.length ? `<ul>${g.subs.map((x) => `<li>${link(x)}</li>`).join('')}</ul>` : ''}</li>`)
+          .join('')}</ol></nav>`;
+      })()
+    : '';
+
   const card = v.wiki
-    ? `<aside class="card"><h3>${esc(v.project)}</h3>${
+    ? `<aside class="side"><div class="card"><h3>${esc(v.project)}</h3>${
         v.diagram
           ? `<a class="pic" id="pic" href="${base}/p/${enc}/diagram/${esc(v.diagram.id)}" target="_blank" rel="noopener"><img src="${base}/p/${enc}/diagram/${esc(v.diagram.id)}" alt="Workflow diagram of ${esc(v.project)}"></a><p class="cap">Workflow diagram · click to enlarge<br>created ${esc(when(v.diagram.generatedAt))} by ${esc(v.diagram.model)}</p>${vers(v.diagramVersions, `${base}/p/${enc}/diagram/`, 'diagrams')}`
           : `<div class="noimg">Workflow diagram<br>not created yet${v.isAdmin ? '<br>Use “Create workflow diagram” above.' : ''}</div>`
-      }<dl><dt>Documentation</dt><dd>${esc(when(v.wiki.meta.generatedAt))}</dd><dt>Written by</dt><dd>${esc(v.wiki.meta.model)}</dd><dt>Source notes</dt><dd>${v.wiki.meta.noteCount ?? '?'} notes</dd><dt>Latest note</dt><dd>${esc(v.history[0]?.date ?? 'unknown')} UTC</dd>${v.glUrl ? `<dt>GitLab project</dt><dd><a href="${esc(v.glUrl)}" rel="noopener noreferrer">${esc(v.glUrl.replace(/^https?:\/\//, ''))}</a></dd>` : ''}</dl></aside>`
+      }<dl><dt>Documentation</dt><dd>${esc(when(v.wiki.meta.generatedAt))}</dd><dt>Written by</dt><dd>${esc(v.wiki.meta.model)}</dd><dt>Source notes</dt><dd>${v.wiki.meta.noteCount ?? '?'} notes</dd><dt>Latest note</dt><dd>${esc(v.history[0]?.date ?? 'unknown')} UTC</dd>${v.glUrl ? `<dt>GitLab project</dt><dd><a href="${esc(v.glUrl)}" rel="noopener noreferrer">${esc(v.glUrl.replace(/^https?:\/\//, ''))}</a></dd>` : ''}</dl></div>${contents}</aside>`
     : '';
 
   const article = v.wiki
@@ -874,7 +892,7 @@ function HOME_JS(api: string, busy: string | null): string {
     poll=setInterval(function(){
       call('GET','/status').then(function(s){
         if(s.state==='running'){working('Working on it ('+s.kind+')… '+s.seconds+' s')}
-        else{clearInterval(poll);if(s.state==='error'){status(s.error,'err')}else{status('Done. Reloading…','ok');location.reload()}}
+        else{clearInterval(poll);if(s.state==='error'){status(s.error,'err')}else if(s.warning){status(s.warning,'err')}else{status('Done. Reloading…','ok');location.reload()}}
       }).catch(function(){});
     },3000);
   }

@@ -9,7 +9,7 @@ import { SettingsStore, SettingsValidationError, applyPortalInput, type GitLabSe
 import { adminPage, docsNotFound, homePage, loginPage, nodePage, notesPage, projectHome, type ProjectCard } from './web-pages.js';
 import { NodeIndex, fetchMemberships, matchProject, redact, type GitLabProject } from './docs.js';
 import { outline, renderMarkdown } from './markdown.js';
-import { DocStore, IMAGE_PRICE_USD, approxTokens, buildDiagramBriefPrompt, buildWikiPrompt, changeHistory, estimateText, historyMarkdown, toPdfImage, type DocMeta } from './docgen.js';
+import { DocStore, IMAGE_PRICE_USD, approxTokens, buildDiagramBriefPrompt, buildWikiPrompt, changeHistory, estimateText, historyMarkdown, missingSections, toPdfImage, type DocMeta } from './docgen.js';
 import { chat } from './llm-call-chat.js';
 import { generateImage } from './llm-call-image.js';
 import { buildPdf } from './pdf.js';
@@ -382,7 +382,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   // to start without it. A daily cap and "one AI job at a time" bound the spending.
   // --------------------------------------------------------------------------
   const docStore = keys ? new DocStore(cfg.web.docsDir) : null;
-  const jobs = new Map<string, { kind: string; state: 'running' | 'done' | 'error'; startedAt: number; error?: string }>();
+  const jobs = new Map<string, { kind: string; state: 'running' | 'done' | 'error'; startedAt: number; error?: string; warning?: string }>();
   const usedConsents = new Map<string, number>();
   const CONSENT_TTL_S = 600;
 
@@ -562,6 +562,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
 
   const runJob = async (project: string, kind: 'wiki' | 'diagram', user: string, ip: string, glName: string | null) => {
     const started = Date.now();
+    let warning: string | undefined;
     jobs.set(project, { kind, state: 'running', startedAt: started });
     const log = (e: AuditInput) => audit?.log({ ip, user, entityType: `docs_${kind}`, entityName: project, ...e });
     try {
@@ -573,7 +574,9 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
           { kind: 'wiki', project, model: `${text.provider.label} / ${text.model}`, by: user, noteCount: prompt.noteCount, inputTokens: out.inputTokens, outputTokens: out.outputTokens, ext: 'md' },
           redact(stripFence(out.text)),
         );
-        void log({ event: 'ai_done', entityId: meta.id, description: `Article written by ${meta.model} from ${prompt.noteCount} notes (${out.inputTokens} tokens in, ${out.outputTokens} out)` });
+        const missing = missingSections(out.text);
+        if (missing.length) warning = `The article was saved, but the AI left out: ${missing.join(', ')}. Click “Regenerate documentation” to try again.`;
+        void log({ event: 'ai_done', entityId: meta.id, description: `Article written by ${meta.model} from ${prompt.noteCount} notes (${out.inputTokens} tokens in, ${out.outputTokens} out)${missing.length ? `; MISSING SECTIONS: ${missing.join(', ')}` : ''}` });
       } else {
         const wiki = (await docStore!.latest(project, 'wiki'))!;
         const image = (await providers!.getAssigned('image'))!;
@@ -588,7 +591,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         );
         void log({ event: 'ai_done', entityId: meta.id, description: `Workflow diagram drawn by ${meta.model} (brief by ${text.model}: ${prompt.inputTokens} in, ${prompt.outputTokens} out)` });
       }
-      jobs.set(project, { kind, state: 'done', startedAt: started });
+      jobs.set(project, { kind, state: 'done', startedAt: started, warning });
     } catch (err) {
       const msg = err instanceof ProviderValidationError ? err.message : 'The generation failed unexpectedly.';
       jobs.set(project, { kind, state: 'error', startedAt: started, error: msg });
@@ -633,7 +636,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     if (!g) return;
     const j = jobs.get(g.project);
     res.setHeader('Cache-Control', 'no-store');
-    res.json(j ? { state: j.state, kind: j.kind, seconds: Math.round((Date.now() - j.startedAt) / 1000), error: j.error } : { state: 'idle' });
+    res.json(j ? { state: j.state, kind: j.kind, seconds: Math.round((Date.now() - j.startedAt) / 1000), error: j.error, warning: j.warning } : { state: 'idle' });
   });
 
   // PDF: no AI, no cost — cover, index, article and the latest diagram.
