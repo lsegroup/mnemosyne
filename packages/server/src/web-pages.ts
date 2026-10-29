@@ -1,8 +1,7 @@
 /** HTML for the web portal. Dark theme, no external assets, no inline handlers. */
 
-export function esc(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
-}
+import { esc } from './html.js';
+export { esc };
 
 const CSS = `
 :root{color-scheme:dark;--bg:#0b0d12;--panel:#12151c;--line:#232834;--text:#e6e9ef;--muted:#8b93a7;--accent:#6c8cff;--accent-h:#8aa3ff;--danger:#ff6b6b;--ok:#4ade80}
@@ -517,4 +516,176 @@ function ADMIN_JS(basePath: string): string {
 
   load();loadSso();
 })();`;
+}
+
+// ============================================================================
+// Documentation pages (signed-in area at `/`): project overview, project page, note page.
+// Same palette as the login screen: purple main titles, turquoise second-level titles.
+// ============================================================================
+
+export interface DocsUser {
+  name: string;
+  username: string;
+}
+
+export interface ProjectCard {
+  title: string;
+  /** GitLab path or a hint such as "no GitLab project". */
+  sub: string;
+  count: number;
+  updated: string | null;
+  href: string;
+  /** Only visible because the viewer is a GitLab administrator. */
+  adminOnly: boolean;
+}
+
+const DOCS_CSS = `
+:root{--bg:#0d0e13;--panel:#161922;--panel2:#12141b;--line:#262a36;--text:#e6e9ef;--muted:#8b90a0;--accent:#7a66e0;--accent-h:#9482ee;--title:#8473de;--teal:#3cc4cc}
+html,body{background:var(--bg)}
+body{background:radial-gradient(ellipse 50% 40% at 12% 0%,rgba(120,58,182,.20),transparent 100%),radial-gradient(ellipse 45% 40% at 95% 0%,rgba(30,152,164,.14),transparent 100%),var(--bg);background-attachment:fixed}
+a{color:var(--teal)}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 24px;border-bottom:1px solid var(--line);background:rgba(22,25,34,.85)}
+.brand{font:600 24px/1 "Palatino Linotype","Book Antiqua",Palatino,Georgia,"Times New Roman",serif;letter-spacing:.4px;color:var(--title);text-decoration:none}
+.top .right{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:14px}.top form{margin:0}
+main.docs{max-width:1180px;margin:0 auto;padding:30px 24px 70px;display:flex;flex-direction:column;gap:18px}
+h1{margin:0;font:600 34px/1.15 "Palatino Linotype","Book Antiqua",Palatino,Georgia,"Times New Roman",serif;letter-spacing:.3px;color:var(--title)}
+h2{margin:6px 0 0;font-size:19px;font-weight:600;color:var(--teal)}
+h3,h4,h5,h6{margin:14px 0 2px;color:var(--teal)}
+.lead{margin:0;color:var(--muted)}
+.crumbs{font-size:13px;color:var(--muted)}.crumbs a{color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:14px}
+.card{display:flex;flex-direction:column;gap:6px;padding:18px;border:1px solid var(--line);border-radius:14px;background:var(--panel);text-decoration:none;color:var(--text);box-shadow:0 14px 40px rgba(0,0,0,.28)}
+a.card:hover{border-color:var(--accent)}
+.card .t{font-size:17px;font-weight:600;color:var(--teal)}
+.card .s{font-size:13px;color:var(--muted)}
+.card .n{margin-top:4px;font-size:13px;color:var(--text)}
+.badge{display:inline-block;padding:1px 9px;border-radius:99px;font-size:12px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.badge.working,.badge.resolved{color:#4ade80;border-color:#1f5a38}
+.badge.broken{color:#ff8b8b;border-color:#6a2e2e}
+.badge.in-progress{color:#b3a3ff;border-color:#4b3f94}
+.badge.admin{color:#f0c36a;border-color:#6b5420}
+.notice{padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:#a3a8b8;font-size:14px}
+form.search{display:flex;gap:10px}form.search input{flex:1;padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:#0f1117;color:var(--text);font:inherit}
+form.search input:focus{outline:none;border-color:var(--accent)}
+.btn{display:inline-flex;align-items:center;padding:9px 14px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--text);font:inherit;font-weight:600;cursor:pointer;text-decoration:none}
+.btn:hover{border-color:var(--accent)}.btn.small{padding:5px 10px;font-size:13px}
+ul.notes{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:12px;background:var(--panel);overflow:hidden}
+ul.notes li{display:flex;gap:12px;align-items:baseline;padding:11px 16px;border-bottom:1px solid var(--line)}
+ul.notes li:last-child{border-bottom:0}
+ul.notes a{flex:1;text-decoration:none;color:var(--text);font-weight:500}ul.notes a:hover{color:var(--teal)}
+.muted{color:var(--muted)}.date{font-size:13px;color:var(--muted);white-space:nowrap}
+.meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+article{padding:22px 26px;border:1px solid var(--line);border-radius:14px;background:var(--panel);line-height:1.65}
+article p{margin:0 0 12px}article ul,article ol{margin:0 0 12px;padding-left:22px}
+article code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.92em;color:#c7cbe0;background:#0f1117;border:1px solid var(--line);border-radius:5px;padding:0 5px}
+article pre{margin:0 0 14px;padding:12px 14px;overflow-x:auto;background:#0f1117;border:1px solid var(--line);border-radius:10px}
+article pre code{border:0;padding:0;background:none;white-space:pre}
+article blockquote{margin:0 0 12px;padding:2px 14px;border-left:3px solid var(--accent);color:#a3a8b8}
+article hr{border:0;border-top:1px solid var(--line);margin:18px 0}
+.tablewrap{overflow-x:auto;margin:0 0 14px}
+article table{border-collapse:collapse;font-size:14px}article th,article td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+article th{color:var(--teal);background:var(--panel2)}
+dl.refs{margin:0;display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;font-size:14px}dl.refs dt{color:var(--muted)}dl.refs dd{margin:0}
+@media(max-width:700px){main.docs{padding:22px 16px 60px}.top{padding:12px 16px}}`;
+
+function docsShell(title: string, basePath: string, user: DocsUser, body: string): string {
+  const base = esc(basePath);
+  return shell(
+    title,
+    `<header class="top"><a class="brand" href="${base}/">Mnemosyne</a>
+  <div class="right"><span>${esc(user.name)} <span>@${esc(user.username)}</span></span>
+  <form method="post" action="${base}/auth/logout"><button class="btn small" type="submit">Sign out</button></form></div></header>
+<main class="docs">${body}</main>`,
+    DOCS_CSS,
+  );
+}
+
+export function homePage(v: { basePath: string; user: DocsUser; cards: ProjectCard[]; notice?: string; isAdmin: boolean }): string {
+  const card = (c: ProjectCard) => `<a class="card" href="${esc(c.href)}">
+    <span class="t">${esc(c.title)}</span><span class="s">${esc(c.sub)}</span>
+    <span class="n">${c.count} ${c.count === 1 ? 'note' : 'notes'}${c.updated ? ` · updated ${esc(c.updated)}` : ''}</span>
+    ${c.adminOnly ? '<span class="badge admin">administrators only</span>' : ''}</a>`;
+  const body = `<h1>Your projects</h1>
+<p class="lead">Documentation for the projects you belong to in GitLab${v.isAdmin ? ' — as a GitLab administrator you see every project' : ''}.</p>
+${v.notice ? `<div class="notice">${esc(v.notice)}</div>` : ''}
+${v.cards.length ? `<div class="grid">${v.cards.map(card).join('')}</div>` : v.notice ? '' : '<div class="notice">No documentation exists yet for the projects you belong to.</div>'}`;
+  return docsShell('Mnemosyne', v.basePath, v.user, body);
+}
+
+const TYPE_TITLES: Record<string, string> = {
+  decision: 'Decisions',
+  howto: 'How-tos',
+  gotcha: 'Gotchas',
+  status: 'Status',
+  reference: 'Reference',
+};
+
+export interface NoteRow {
+  id: string;
+  title: string;
+  type: string;
+  status: string;
+  observed_at: string | null;
+}
+
+export function projectPage(v: { basePath: string; user: DocsUser; project: string; subtitle: string; q: string; notes: NoteRow[]; total: number }): string {
+  const base = esc(v.basePath);
+  const enc = encodeURIComponent(v.project);
+  const groups = new Map<string, NoteRow[]>();
+  for (const n of v.notes) groups.set(n.type, [...(groups.get(n.type) ?? []), n]);
+  const order = ['decision', 'howto', 'gotcha', 'status', 'reference'].filter((t) => groups.has(t));
+  const sections = order
+    .map(
+      (t) => `<h2>${esc(TYPE_TITLES[t] ?? t)} <span class="muted">(${groups.get(t)!.length})</span></h2>
+<ul class="notes">${groups
+        .get(t)!
+        .map(
+          (n) => `<li><a href="${base}/p/${enc}/${encodeURIComponent(n.id)}">${esc(n.title)}</a>
+<span class="badge ${esc(n.status)}">${esc(n.status)}</span><span class="date">${esc(n.observed_at ?? '')}</span></li>`,
+        )
+        .join('')}</ul>`,
+    )
+    .join('\n');
+  const body = `<div class="crumbs"><a href="${base}/">Projects</a> / ${esc(v.project)}</div>
+<h1>${esc(v.project)}</h1>
+<p class="lead">${esc(v.subtitle)}</p>
+<form class="search" method="get" action="${base}/p/${enc}"><input name="q" value="${esc(v.q)}" placeholder="Search this project's notes…" maxlength="200"><button class="btn" type="submit">Search</button></form>
+${v.q ? `<p class="lead">${v.notes.length} of ${v.total} notes match “${esc(v.q)}”.</p>` : `<p class="lead">${v.total} notes.</p>`}
+${sections || '<div class="notice">No notes found.</div>'}`;
+  return docsShell(`${v.project} · Mnemosyne`, v.basePath, v.user, body);
+}
+
+export function nodePage(v: {
+  basePath: string;
+  user: DocsUser;
+  project: string;
+  title: string;
+  type: string;
+  status: string;
+  observedAt: string | null;
+  components: string[];
+  authors: string[];
+  bodyHtml: string;
+  links: { rel: string; id: string; title: string | null }[];
+  codeRefs: string[];
+}): string {
+  const base = esc(v.basePath);
+  const enc = encodeURIComponent(v.project);
+  const links = v.links.length
+    ? `<h2>Related</h2><dl class="refs">${v.links
+        .map((l) => `<dt>${esc(l.rel)}</dt><dd>${l.title ? `<a href="${base}/p/${enc}/${encodeURIComponent(l.id)}">${esc(l.title)}</a>` : `<span class="muted">${esc(l.id)} (not in this project)</span>`}</dd>`)
+        .join('')}</dl>`
+    : '';
+  const refs = v.codeRefs.length ? `<h2>Code</h2><dl class="refs">${v.codeRefs.map((r) => `<dt>file</dt><dd><code>${esc(r)}</code></dd>`).join('')}</dl>` : '';
+  const body = `<div class="crumbs"><a href="${base}/">Projects</a> / <a href="${base}/p/${enc}">${esc(v.project)}</a></div>
+<h1>${esc(v.title)}</h1>
+<div class="meta"><span class="badge">${esc(TYPE_TITLES[v.type] ?? v.type)}</span><span class="badge ${esc(v.status)}">${esc(v.status)}</span>${v.observedAt ? `<span class="date">observed ${esc(v.observedAt)}</span>` : ''}${v.components.map((c) => `<span class="badge">${esc(c)}</span>`).join('')}</div>
+<article>${v.bodyHtml}</article>
+${links}${refs}
+${v.authors.length ? `<p class="lead">Recorded by ${esc(v.authors.join(', '))}</p>` : ''}`;
+  return docsShell(`${v.title} · Mnemosyne`, v.basePath, v.user, body);
+}
+
+export function docsNotFound(basePath: string, user: DocsUser, message: string): string {
+  return docsShell('Not found · Mnemosyne', basePath, user, `<h1>Not available</h1><div class="notice">${esc(message)}</div><p><a class="btn" href="${esc(basePath)}/">Back to your projects</a></p>`);
 }

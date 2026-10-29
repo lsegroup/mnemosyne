@@ -6,7 +6,9 @@ import { ProviderStore, ProviderValidationError } from './provider-store.js';
 import { fetchModels } from './llm-models.js';
 import { AuditLog, clientIp, diffLines, type AuditInput } from './audit.js';
 import { SettingsStore, SettingsValidationError, applyPortalInput, type GitLabSettings, type PortalSettings } from './settings-store.js';
-import { adminPage, loginPage } from './web-pages.js';
+import { adminPage, docsNotFound, homePage, loginPage, nodePage, projectPage, type ProjectCard } from './web-pages.js';
+import { NodeIndex, fetchMemberships, matchProject, redact, type GitLabProject } from './docs.js';
+import { renderMarkdown } from './markdown.js';
 import { LOGO_WEBP_BASE64 } from './web-assets.js';
 
 // Two independent sign-in systems: the public page (cookie below) and the admin area
@@ -164,6 +166,10 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     prefix: string;
     /** Shown in the audit trail. */
     label: 'public' | 'admin';
+    /** OAuth scopes requested from GitLab. */
+    scope: string;
+    /** Runs after GitLab accepted the user, with their access token (e.g. to read their project memberships). */
+    after?: (user: SsoUser, accessToken: string) => Promise<void>;
     oauthCookie: string;
     sessionCookie: string;
     sessionPath: string;
@@ -205,7 +211,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         redirect_uri: redirectUri,
         response_type: 'code',
         state,
-        scope: 'read_user',
+        scope: area.scope,
         code_challenge: challenge,
         code_challenge_method: 'S256',
       }).toString();
@@ -268,6 +274,10 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
           fail(req, res, verdict.error, user.username);
           return;
         }
+        await area.after?.(
+          { username: user.username, name: user.name ?? user.username, email: user.email ?? '', admin: user.is_admin === true },
+          token.access_token,
+        );
         void rec(req, {
           event: 'login',
           entityType: `${area.label}_sso`,
@@ -299,9 +309,52 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   // =========================================================================
   // PUBLIC AREA — `/`: GitLab sign-in for everyone. Knows nothing about the admin.
   // =========================================================================
-  router.get('/', async (req, res) => {
+  // Who may read which project's documentation: GitLab's own membership list, read with the user's
+  // token at sign-in and kept in memory for the session (never in a cookie: it can be long).
+  const nodeIndex = keys ? new NodeIndex(cfg.nodesDir) : null;
+  const members = new Map<string, { at: number; admin: boolean; projects: GitLabProject[] | null }>();
+
+  const docsSession = (req: Request) => {
     const s = sessionFrom(req, SESSION_COOKIE);
+    const m = s ? members.get(s.u) : undefined;
+    return s && m && Date.now() - m.at < SESSION_TTL_S * 1000 ? { s, m } : null;
+  };
+  /** Administrators see every project; others only those that match a GitLab project they belong to. */
+  const canRead = (m: { admin: boolean; projects: GitLabProject[] | null }, project: string) =>
+    m.admin || (m.projects !== null && matchProject(project, m.projects) !== null);
+
+  router.get('/', async (req, res) => {
+    const ds = docsSession(req);
     pageHeaders(res);
+    if (ds && nodeIndex) {
+      const cards: ProjectCard[] = (await nodeIndex.projects())
+        .filter((p) => canRead(ds.m, p.project))
+        .map((p) => {
+          const gl = ds.m.projects ? matchProject(p.project, ds.m.projects) : null;
+          return {
+            title: gl?.name ?? p.project,
+            sub: gl ? gl.fullPath : 'no GitLab project',
+            count: p.count,
+            updated: p.updated,
+            href: `${basePath}/p/${encodeURIComponent(p.project)}`,
+            adminOnly: ds.m.admin && !gl,
+          };
+        })
+        .sort((x, y) => x.title.localeCompare(y.title));
+      res.send(
+        homePage({
+          basePath,
+          user: { name: ds.s.n, username: ds.s.u },
+          cards,
+          isAdmin: ds.m.admin,
+          notice:
+            ds.m.projects === null && !ds.m.admin
+              ? 'GitLab did not share your project list, so nothing can be shown yet. The Mnemosyne application in GitLab needs the read_api scope.'
+              : undefined,
+        }),
+      );
+      return;
+    }
     res.send(
       loginPage({
         basePath,
@@ -309,7 +362,85 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         local: false,
         sso: configured && (await effective()).sso,
         error: typeof req.query.error === 'string' ? req.query.error : undefined,
-        user: s ? { name: s.n, username: s.u } : undefined,
+      }),
+    );
+  });
+
+  const notFound = (res: Response, ds: NonNullable<ReturnType<typeof docsSession>>, msg: string) => {
+    pageHeaders(res);
+    res.status(404).send(docsNotFound(basePath, { name: ds.s.n, username: ds.s.u }, msg));
+  };
+
+  router.get('/p/:project', async (req, res) => {
+    const ds = docsSession(req);
+    if (!ds || !nodeIndex) {
+      res.redirect(`${basePath}/`);
+      return;
+    }
+    const project = String(req.params.project);
+    if (!canRead(ds.m, project)) {
+      void rec(req, { event: 'denied', entityType: 'docs_project', entityName: project, user: ds.s.u, description: 'Project documentation refused (not a member of the matching GitLab project)' });
+      notFound(res, ds, 'This project does not exist, or you are not a member of it in GitLab.');
+      return;
+    }
+    const all = await nodeIndex.inProject(project);
+    if (!all.length) {
+      notFound(res, ds, 'This project does not exist, or you are not a member of it in GitLab.');
+      return;
+    }
+    const q = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 200) : '';
+    const needle = q.toLowerCase();
+    const hits = needle ? all.filter((n) => [n.title, n.body, ...n.components].some((t) => t.toLowerCase().includes(needle))) : all;
+    const gl = ds.m.projects ? matchProject(project, ds.m.projects) : null;
+    void rec(req, { event: 'view', entityType: 'docs_project', entityName: project, user: ds.s.u, description: q ? `Searched project documentation for “${q}”` : 'Opened project documentation' });
+    pageHeaders(res);
+    res.send(
+      projectPage({
+        basePath,
+        user: { name: ds.s.n, username: ds.s.u },
+        project,
+        subtitle: gl ? `GitLab project ${gl.fullPath}` : 'No matching GitLab project — visible to GitLab administrators only',
+        q,
+        total: all.length,
+        notes: hits
+          .map((n) => ({ id: n.id, title: n.title, type: n.type, status: n.status, observed_at: n.observed_at }))
+          .sort((x, y) => (y.observed_at ?? '').localeCompare(x.observed_at ?? '') || x.title.localeCompare(y.title)),
+      }),
+    );
+  });
+
+  router.get('/p/:project/:id', async (req, res) => {
+    const ds = docsSession(req);
+    if (!ds || !nodeIndex) {
+      res.redirect(`${basePath}/`);
+      return;
+    }
+    const project = String(req.params.project);
+    const note = canRead(ds.m, project) ? await nodeIndex.get(project, String(req.params.id)) : null;
+    if (!note) {
+      if (!canRead(ds.m, project)) void rec(req, { event: 'denied', entityType: 'docs_note', entityName: project, entityId: String(req.params.id), user: ds.s.u, description: 'Note refused (not a member of the matching GitLab project)' });
+      notFound(res, ds, 'This note does not exist, or you are not a member of its project in GitLab.');
+      return;
+    }
+    const related = await Promise.all(
+      note.links.map(async (l) => ({ rel: l.rel, id: l.target, title: (await nodeIndex.get(project, l.target))?.title ?? null })),
+    );
+    void rec(req, { event: 'view', entityType: 'docs_note', entityId: note.id, entityName: note.title, user: ds.s.u, description: `Opened a note of ${project}` });
+    pageHeaders(res);
+    res.send(
+      nodePage({
+        basePath,
+        user: { name: ds.s.n, username: ds.s.u },
+        project,
+        title: note.title,
+        type: note.type,
+        status: note.status,
+        observedAt: note.observed_at,
+        components: note.components,
+        authors: note.authors,
+        bodyHtml: renderMarkdown(redact(note.body)),
+        links: related,
+        codeRefs: note.code_refs.map((r) => `${r.repo}: ${r.path}${r.line ? `:${r.line}` : ''}`),
       }),
     );
   });
@@ -317,16 +448,24 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   mountSso({
     prefix: '',
     label: 'public',
+    scope: 'read_user read_api',
     oauthCookie: OAUTH_COOKIE,
     sessionCookie: SESSION_COOKIE,
     sessionPath: cookiePath,
     failTo: `${basePath}/`,
     admit: async () => ({ to: `${basePath}/` }),
+    after: async (user, accessToken) => {
+      const eff = await effective();
+      members.set(user.username, { at: Date.now(), admin: user.admin, projects: await fetchMemberships(eff.gitlab.url!, accessToken) });
+    },
   });
 
   router.post('/auth/logout', (req, res) => {
     const who = sessionFrom(req, SESSION_COOKIE);
-    if (who) void rec(req, { event: 'logout', entityType: 'public_session', user: who.u, description: 'Signed out' });
+    if (who) {
+      members.delete(who.u);
+      void rec(req, { event: 'logout', entityType: 'public_session', user: who.u, description: 'Signed out' });
+    }
     clearCookie(res, SESSION_COOKIE);
     noStore(res);
     res.redirect(303, `${basePath}/`);
@@ -403,6 +542,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   mountSso({
     prefix: '/admin',
     label: 'admin',
+    scope: 'read_user',
     oauthCookie: ADMIN_OAUTH_COOKIE,
     sessionCookie: ADMIN_COOKIE,
     sessionPath: adminCookiePath,

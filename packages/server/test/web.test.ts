@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -17,6 +17,8 @@ import { deriveKeys, hashPassword, open, seal, signToken, verifyPassword, verify
 import { SettingsStore } from '../src/settings-store.js';
 import { createWebPortal } from '../src/web.js';
 import { adminPage } from '../src/web-pages.js';
+import { renderMarkdown } from '../src/markdown.js';
+import { matchProject, redact } from '../src/docs.js';
 
 const SECRET = 'a-test-secret-with-enough-length';
 
@@ -147,10 +149,19 @@ describe('web portal', () => {
   const gitlabUsers: Record<string, object> = {
     'admin-code': { username: 'store', name: 'Store Admin', email: 'store@lumanet.info', state: 'active', is_admin: true },
     'dev-code': { username: 'dev', name: 'Some Dev', email: 'dev@example.com', state: 'active' },
+    'scope-code': { username: 'noscope', name: 'No Scope', email: 'ns@example.com', state: 'active' },
   };
 
   beforeAll(async () => {
     tmp = await mkdtemp(join(tmpdir(), 'mnemosyne-web-'));
+    const note = (project: string, id: string, title: string, body: string) =>
+      mkdir(join(tmp, 'nodes', project), { recursive: true }).then(() =>
+        writeFile(join(tmp, 'nodes', project, `${id}.md`), `---\nid: ${id}\ntitle: ${title}\ntype: howto\nstatus: working\nproject: ${project}\ncomponents: [web]\nlinks:\n  - rel: relates-to\n    target: alpha-second\nobserved_at: 2026-10-20\n---\n\n${body}\n`),
+      );
+    await note('alpha', 'alpha-first', 'Alpha first note', '## Setup\n\nRun `make` then **deploy**.\n\n<script>alert(1)</script>\n\n[ok](https://example.com) [bad](javascript:alert(1))\n\npassword: hunter2-secret-value\n\ntoken glpat-FIXTURE\n');
+    await note('alpha', 'alpha-second', 'Alpha second note', 'Second.');
+    await note('beta', 'beta-first', 'Beta private note', 'Only beta members.');
+    await note('lse', 'lse-first', 'Catch-all note', 'No single GitLab project.');
 
     fake = createServer((req: IncomingMessage, res: ServerResponse) => {
       const json = (status: number, body: object) => {
@@ -167,6 +178,17 @@ describe('web portal', () => {
           if (p.get('client_secret') !== 'csecret' || !verifierOk || !gitlabUsers[code]) json(400, { error: 'invalid_grant' });
           else json(200, { access_token: code });
         });
+      } else if (req.url?.startsWith('/api/v4/projects')) {
+        const t = (req.headers.authorization ?? '').replace('Bearer ', '');
+        if (t === 'scope-code') json(403, { message: '403 Forbidden - insufficient_scope' });
+        else if (!gitlabUsers[t]) json(401, { message: '401 Unauthorized' });
+        else
+          json(
+            200,
+            t === 'dev-code'
+              ? [{ id: 1, name: 'Alpha', path: 'alpha', path_with_namespace: 'grp/alpha', web_url: 'https://gl.example/grp/alpha' }]
+              : [],
+          );
       } else if (req.url === '/api/v4/user') {
         const t = (req.headers.authorization ?? '').replace('Bearer ', '');
         if (gitlabUsers[t]) json(200, gitlabUsers[t]!);
@@ -210,7 +232,7 @@ describe('web portal', () => {
     const authorize = new URL(login.headers.get('location')!);
     expect(authorize.pathname).toBe('/oauth/authorize');
     expect(authorize.searchParams.get('code_challenge_method')).toBe('S256');
-    expect(authorize.searchParams.get('scope')).toBe('read_user');
+    expect(authorize.searchParams.get('scope')).toBe(prefix === '/admin' ? 'read_user' : 'read_user read_api'); // admin asks only who you are; public also reads your GitLab projects
     expect(authorize.searchParams.get('redirect_uri')).toBe(`${base}${prefix}/auth/callback`);
     challenge = authorize.searchParams.get('code_challenge')!;
     const state = authorize.searchParams.get('state')!;
@@ -351,6 +373,66 @@ describe('web portal', () => {
       body,
     });
     expect(foreignOrigin.status).toBe(403);
+  });
+
+  it('shows a member only the projects they belong to in GitLab, and refuses the rest', async () => {
+    const cb = await signIn('dev-code');
+    const cookie = cookiesOf(cb);
+    const home = await (await fetch(`${base}/`, { headers: { cookie } })).text();
+    expect(home).toContain('Your projects');
+    expect(home).toContain('grp/alpha'); // matched by name to the GitLab project the user belongs to
+    expect(home).not.toContain('Beta');
+    expect(home).not.toContain('beta');
+    expect(home).not.toContain('Catch-all');
+
+    const project = await fetch(`${base}/p/alpha`, { headers: { cookie } });
+    expect(project.status).toBe(200);
+    expect(project.headers.get('content-security-policy')).toContain("script-src 'none'");
+    const list = await project.text();
+    expect(list).toContain('Alpha first note');
+    expect(list).toContain('How-tos');
+    expect(await (await fetch(`${base}/p/alpha?q=second`, { headers: { cookie } })).text()).not.toContain('Alpha first note');
+
+    // a project the user does not belong to, and the catch-all, look exactly like a missing page
+    for (const path of ['/p/beta', '/p/lse', '/p/beta/beta-first', '/p/lse/lse-first', '/p/alpha/beta-first', '/p/nope']) {
+      const r = await fetch(`${base}${path}`, { headers: { cookie } });
+      expect(r.status, path).toBe(404);
+      expect(await r.text()).not.toContain('Beta private note');
+    }
+    // not signed in: back to the login page, never content
+    expect((await fetch(`${base}/p/alpha`, { redirect: 'manual' })).status).toBe(302);
+  });
+
+  it('renders notes safely: no script, no javascript: links, credentials masked', async () => {
+    const cookie = cookiesOf(await signIn('dev-code'));
+    const html = await (await fetch(`${base}/p/alpha/alpha-first`, { headers: { cookie } })).text();
+    expect(html).toContain('<h3>Setup</h3>');
+    expect(html).toContain('<code>make</code>');
+    expect(html).toContain('<strong>deploy</strong>');
+    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+    expect(html).not.toContain('<script>alert');
+    expect(html).toContain('href="https://example.com"');
+    expect(html).not.toContain('href="javascript:');
+    expect(html).not.toContain('hunter2-secret-value');
+    expect(html).not.toContain('glpat-FIXTURE');
+    expect(html).toContain('[redacted');
+    expect(html).toContain('Alpha second note'); // related note, linked
+  });
+
+  it('lets a GitLab administrator see every project, marking those with no GitLab project', async () => {
+    const cookie = cookiesOf(await signIn('admin-code'));
+    const home = await (await fetch(`${base}/`, { headers: { cookie } })).text();
+    for (const name of ['alpha', 'beta', 'lse']) expect(home).toContain(`/p/${name}`);
+    expect(home).toContain('administrators only');
+    expect((await fetch(`${base}/p/lse/lse-first`, { headers: { cookie } })).status).toBe(200);
+  });
+
+  it('fails closed when GitLab does not share the project list (missing read_api scope)', async () => {
+    const cookie = cookiesOf(await signIn('scope-code'));
+    const home = await (await fetch(`${base}/`, { headers: { cookie } })).text();
+    expect(home).toContain('read_api');
+    expect(home).not.toContain('/p/alpha');
+    expect((await fetch(`${base}/p/alpha`, { headers: { cookie } })).status).toBe(404);
   });
 
   it('keeps the two sign-in systems apart: a public GitLab session never opens admin', async () => {
@@ -712,5 +794,35 @@ describe('admin page script', () => {
     for (const btn of ['auditRefresh', 'auditMore', 'cancel']) expect(typeof els.get(btn)!.handlers.click).toBe('function');
     expect(els.get('tab-audit')!.hidden).toBe(false); // #audit opens the Audit tab
     expect(els.get('tab-llm')!.hidden).toBe(true);
+  });
+});
+
+describe('documentation helpers', () => {
+  it('matches a notes project to a GitLab project by name, never by guess', () => {
+    const projects = [
+      { id: 1, name: 'CenTest', path: 'centest', fullPath: 'GCD-Group/centest', webUrl: '' },
+      { id: 2, name: 'SMM NodeJS', path: 'smm-nodejs', fullPath: 'LSE-Group/smm-nodejs', webUrl: '' },
+    ];
+    expect(matchProject('centest', projects)?.fullPath).toBe('GCD-Group/centest');
+    expect(matchProject('smm-nodejs', projects)?.id).toBe(2);
+    expect(matchProject('lse', projects)).toBeNull();
+    expect(matchProject('cen', projects)).toBeNull();
+  });
+
+  it('masks credentials in note text', () => {
+    const out = redact('db password: S3cretValue1\nBearer abcdefghijklmnopqrstuvwxyz0123\nkey AKIA-FIXTURE\n-----BEGIN RSA PRIVATE-KEY-FIXTURE-----\nxx\n-----END RSA PRIVATE KEY-----\nplain text stays');
+    expect(out).not.toMatch(/S3cretValue1|abcdefghijklmnopqrstuvwxyz0123|AKIA-FIXTURE|BEGIN RSA/);
+    expect(out).toContain('plain text stays');
+  });
+
+  it('renders markdown without letting any markup through', () => {
+    const html = renderMarkdown('# T\n\n- a\n- **b**\n\n| x | y |\n|---|---|\n| 1 | <b>2</b> |\n\n```\n<i>code</i>\n```\n\n[x](https://e.com/a?b=1&c=2) ![i](http://e.com/i.png) <img src=x onerror=alert(1)>');
+    expect(html).toContain('<h2>T</h2>');
+    expect(html).toContain('<ul>');
+    expect(html).toContain('<table>');
+    expect(html).toContain('&lt;b&gt;2&lt;/b&gt;');
+    expect(html).toContain('<pre><code>&lt;i&gt;code&lt;/i&gt;</code></pre>');
+    expect(html).not.toMatch(/<img|onerror=alert\(1\)>/);
+    expect(html).toContain('rel="noopener noreferrer nofollow"');
   });
 });
