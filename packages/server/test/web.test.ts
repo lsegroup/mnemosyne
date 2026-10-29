@@ -215,6 +215,7 @@ describe('web portal', () => {
       MNEMOSYNE_GITLAB_URL: gitlabUrl,
       MNEMOSYNE_GITLAB_CLIENT_ID: 'cid',
       MNEMOSYNE_GITLAB_CLIENT_SECRET: 'csecret',
+      MNEMOSYNE_AI_DAILY_LIMIT: '3',
     });
     portalApp = express();
     portalApp.use(express.json());
@@ -393,11 +394,13 @@ describe('web portal', () => {
 
     const project = await fetch(`${base}/p/alpha`, { headers: { cookie } });
     expect(project.status).toBe(200);
-    expect(project.headers.get('content-security-policy')).toContain("script-src 'none'");
-    const list = await project.text();
-    expect(list).toContain('Alpha first note');
-    expect(list).toContain('How-tos');
-    expect(await (await fetch(`${base}/p/alpha?q=second`, { headers: { cookie } })).text()).not.toContain('Alpha first note');
+    expect(project.headers.get('content-security-policy')).toContain("script-src 'nonce-");
+    const blank = await project.text();
+    expect(blank).toContain('No documentation has been generated yet'); // default blank page
+    expect(blank).not.toContain('Alpha first note'); // raw notes are not shown to members
+    expect(blank).not.toContain('data-ai='); // members cannot start AI generation
+    expect(blank).toContain('id="pdfBtn" disabled'); // PDF button inactive until a document exists
+    for (const path of ['/p/alpha/notes', '/p/alpha/alpha-first']) expect((await fetch(`${base}${path}`, { headers: { cookie } })).status, path).toBe(404);
 
     // a project the user does not belong to, and the catch-all, look exactly like a missing page
     for (const path of ['/p/beta', '/p/lse', '/p/beta/beta-first', '/p/lse/lse-first', '/p/alpha/beta-first', '/p/nope']) {
@@ -409,10 +412,10 @@ describe('web portal', () => {
     expect((await fetch(`${base}/p/alpha`, { redirect: 'manual' })).status).toBe(302);
   });
 
-  it('renders notes safely: no script, no javascript: links, credentials masked', async () => {
-    const cookie = cookiesOf(await signIn('dev-code'));
+  it('renders source notes (administrators only) safely: no script, no javascript: links, credentials masked', async () => {
+    const cookie = cookiesOf(await signIn('admin-code'));
     const html = await (await fetch(`${base}/p/alpha/alpha-first`, { headers: { cookie } })).text();
-    expect(html).toContain('<h3>Setup</h3>');
+    expect(html).toContain('<h3 id="h-setup">Setup</h3>');
     expect(html).toContain('<code>make</code>');
     expect(html).toContain('<strong>deploy</strong>');
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
@@ -439,6 +442,176 @@ describe('web portal', () => {
     expect(home).toContain('read_api');
     expect(home).not.toContain('/p/alpha');
     expect((await fetch(`${base}/p/alpha`, { headers: { cookie } })).status).toBe(404);
+  });
+
+  describe('AI documentation (agreement, spending guards, PDF)', () => {
+    let llm: Server;
+    let llmBase = '';
+    const calls = { chat: 0, image: 0 };
+    let png: Buffer;
+
+    beforeAll(async () => {
+      const sharp = (await import('sharp')).default;
+      png = await sharp({ create: { width: 64, height: 40, channels: 3, background: '#7a66e0' } }).png().toBuffer();
+      llm = createServer((req, res) => {
+        const reply = (body: object) => {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(body));
+        };
+        let raw = '';
+        req.on('data', (c) => (raw += c));
+        req.on('end', () => {
+          if (req.headers.authorization !== 'Bearer llm-key-1234567890') {
+            res.writeHead(401);
+            res.end('{}');
+          } else if (req.url === '/v1/chat/completions') {
+            calls.chat++;
+            const wantsBrief = raw.includes('IMAGE-GENERATION');
+            reply({
+              choices: [{ message: { content: wantsBrief ? 'A clean flow chart: Notes -> Article -> PDF' : '# Alpha\n\nAlpha is a test project.\n\n## Overview\n\nIt does **things**.\n\n## History\n\n- first\n- second\n\n## Known issues\n\nNone documented.' } }],
+              usage: { prompt_tokens: 1200, completion_tokens: 300 },
+            });
+          } else if (req.url === '/v1/images/generations') {
+            calls.image++;
+            reply({ data: [{ b64_json: png.toString('base64') }] });
+          } else {
+            res.writeHead(404);
+            res.end('{}');
+          }
+        });
+      });
+      await new Promise<void>((r) => llm.listen(0, '127.0.0.1', r));
+      llmBase = `http://127.0.0.1:${(llm.address() as AddressInfo).port}/v1`;
+    });
+    afterAll(() => llm?.close());
+
+    const hdr = (cookie: string) => ({ cookie, 'content-type': 'application/json', 'x-requested-with': 'mnemosyne-docs', origin: base.replace(/\/mnemosyne$/, '') });
+    const api = (cookie: string, path: string, method = 'GET', body?: object) =>
+      fetch(`${base}/p/alpha/api${path}`, { method, headers: hdr(cookie), body: body ? JSON.stringify(body) : undefined });
+    const waitIdle = async (cookie: string) => {
+      for (let i = 0; i < 60; i++) {
+        const st = await (await api(cookie, '/status')).json();
+        if (st.state !== 'running') return st;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      throw new Error('job did not finish');
+    };
+
+    it('needs models chosen first, and members cannot start anything', async () => {
+      const admin = cookiesOf(await signIn('admin-code'));
+      const store = new ProviderStore(join(tmp, '.mnemosyne', 'providers.enc'), deriveKeys(SECRET).enc);
+      await store.setAssignments({}); // earlier tests chose models; start from "nothing chosen"
+      const est = await api(admin, '/estimate?kind=wiki');
+      expect(est.status).toBe(400);
+      expect((await est.json()).error).toContain('Choose a model for Text');
+
+      const prov = await store.upsert({ label: 'Fake AI', kind: 'openai-compatible', baseUrl: llmBase, apiKey: 'llm-key-1234567890' });
+      await store.setModels(prov.id, ['text-model', 'image-model']);
+      await store.setAssignments({ text: { providerId: prov.id, model: 'text-model' }, image: { providerId: prov.id, model: 'image-model' } });
+
+      const dev = cookiesOf(await signIn('dev-code'));
+      expect((await api(dev, '/estimate?kind=wiki')).status).toBe(404); // admin-only: looks like a missing page
+      expect((await api(dev, '/generate', 'POST', { kind: 'wiki', token: 'x' })).status).toBe(404);
+      expect(calls.chat + calls.image).toBe(0);
+    });
+
+    it('never calls the AI without a valid agreement; a used or foreign agreement is refused', async () => {
+      const admin = cookiesOf(await signIn('admin-code'));
+      // no token / garbage token
+      for (const token of [undefined, 'garbage', 'a.b']) {
+        const r = await api(admin, '/generate', 'POST', { kind: 'wiki', token });
+        expect(r.status).toBe(403);
+      }
+      expect(calls.chat).toBe(0);
+
+      // the estimate shows model + size + cost and carries the one-time token
+      const est = await (await api(admin, '/estimate?kind=wiki')).json();
+      expect(est.what).toContain('costs'.slice(0, 0) + 'Fake AI');
+      expect(est.facts.map((f: string[]) => f[0])).toEqual(expect.arrayContaining(['Provider', 'Model', 'Notes sent', 'Size', 'Estimated cost']));
+      expect(typeof est.token).toBe('string');
+
+      // a token made for a different kind does not authorise this one
+      expect((await api(admin, '/generate', 'POST', { kind: 'diagram', token: est.token })).status).toBe(403);
+      expect(calls.chat).toBe(0);
+
+      // a valid agreement starts exactly one run ...
+      const ok = await api(admin, '/generate', 'POST', { kind: 'wiki', token: est.token });
+      expect(ok.status).toBe(202);
+      expect((await waitIdle(admin)).state).toBe('done');
+      expect(calls.chat).toBe(1);
+      // ... and cannot be replayed
+      expect((await api(admin, '/generate', 'POST', { kind: 'wiki', token: est.token })).status).toBe(403);
+      expect(calls.chat).toBe(1);
+
+      // cross-site calls are refused outright
+      const evil = await fetch(`${base}/p/alpha/api/generate`, { method: 'POST', headers: { ...hdr(admin), origin: 'https://evil.example' }, body: JSON.stringify({ kind: 'wiki', token: est.token }) });
+      expect(evil.status).toBe(403);
+    });
+
+    it('shows the article with its date stamp, then the diagram, and the PDF button becomes active', async () => {
+      const admin = cookiesOf(await signIn('admin-code'));
+      const page = await (await fetch(`${base}/p/alpha`, { headers: { cookie: admin } })).text();
+      expect(page).toContain('Alpha is a test project');
+      expect(page).toMatch(/generated <b>\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC<\/b>/);
+      expect(page).toContain('Fake AI / text-model');
+      expect(page).not.toContain('id="pdfBtn" disabled'); // active now
+      expect(page).toContain('Regenerate documentation');
+
+      // workflow diagram: two calls (brief + image), only after agreement
+      const est = await (await api(admin, '/estimate?kind=diagram')).json();
+      expect(est.facts.map((f: string[]) => f[0])).toEqual(expect.arrayContaining(['Text model', 'Image model', 'Estimated cost']));
+      expect((await api(admin, '/generate', 'POST', { kind: 'diagram', token: est.token })).status).toBe(202);
+      expect((await waitIdle(admin)).state).toBe('done');
+      expect(calls.image).toBe(1);
+      const after = await (await fetch(`${base}/p/alpha`, { headers: { cookie: admin } })).text();
+      const src = /<img src="([^"]+)" alt="Workflow diagram/.exec(after)?.[1];
+      expect(src).toContain('/p/alpha/diagram/');
+      const img = await fetch(`${new URL(base).origin}${src}`, { headers: { cookie: admin } });
+      expect(img.headers.get('content-type')).toBe('image/png');
+      expect(Buffer.from(await img.arrayBuffer()).subarray(1, 4).toString()).toBe('PNG');
+      expect((await fetch(`${new URL(base).origin}${src}`, { redirect: 'manual' })).status).toBe(302); // not signed in
+    });
+
+    it('any member can build the PDF (no AI): cover, index, article, diagram', async () => {
+      const dev = cookiesOf(await signIn('dev-code'));
+      const before = calls.chat + calls.image;
+      const made = await api(dev, '/pdf', 'POST', {});
+      expect(made.status).toBe(200);
+      const { id } = await made.json();
+      expect(calls.chat + calls.image).toBe(before); // building a PDF spends nothing
+      const pdf = await fetch(`${base}/p/alpha/pdf/${id}`, { headers: { cookie: dev } });
+      expect(pdf.headers.get('content-type')).toBe('application/pdf');
+      expect(pdf.headers.get('content-disposition')).toContain('alpha-documentation-');
+      const bytes = Buffer.from(await pdf.arrayBuffer());
+      expect(bytes.subarray(0, 5).toString()).toBe('%PDF-');
+      expect((bytes.toString('latin1').match(/\/Type \/Page\b/g) ?? []).length).toBeGreaterThanOrEqual(4); // cover, index, diagram, content
+      const page = await (await fetch(`${base}/p/alpha`, { headers: { cookie: dev } })).text();
+      expect(page).toContain('Download PDF');
+      expect(page).toContain('Workflow diagram');
+    });
+
+    it('stops at the daily limit and records every agreement in the audit trail', async () => {
+      const admin = cookiesOf(await signIn('admin-code'));
+      // two runs so far (wiki + diagram); the limit is 3
+      const e3 = await (await api(admin, '/estimate?kind=wiki')).json();
+      expect((await api(admin, '/generate', 'POST', { kind: 'wiki', token: e3.token })).status).toBe(202);
+      await waitIdle(admin);
+      const e4 = await (await api(admin, '/estimate?kind=wiki')).json();
+      const blocked = await api(admin, '/generate', 'POST', { kind: 'wiki', token: e4.token });
+      expect(blocked.status).toBe(429);
+      expect((await blocked.json()).error).toContain('daily limit');
+      expect(calls.chat).toBe(3); // article, diagram brief, second article; the fourth run never reached the provider
+
+      await new Promise((r) => setTimeout(r, 250)); // audit lines are written asynchronously
+      const audit = (await readFile(join(tmp, '.mnemosyne', 'audit.jsonl'), 'utf8')).split('\n').filter(Boolean).map((l) => JSON.parse(l));
+      const starts = audit.filter((e) => e.event === 'ai_start');
+      expect(starts.length).toBe(3);
+      expect(starts[0].description).toContain('Agreed to use AI');
+      expect(starts[0].description).toContain('Estimated cost');
+      expect(audit.filter((e) => e.event === 'ai_done').length).toBe(3);
+      expect(audit.some((e) => e.event === 'denied' && /daily limit/.test(e.description))).toBe(true);
+      expect(audit.some((e) => e.event === 'denied' && /no valid agreement/.test(e.description))).toBe(true);
+    });
   });
 
   it('keeps the two sign-in systems apart: a public GitLab session never opens admin', async () => {
@@ -823,7 +996,7 @@ describe('documentation helpers', () => {
 
   it('renders markdown without letting any markup through', () => {
     const html = renderMarkdown('# T\n\n- a\n- **b**\n\n| x | y |\n|---|---|\n| 1 | <b>2</b> |\n\n```\n<i>code</i>\n```\n\n[x](https://e.com/a?b=1&c=2) ![i](http://e.com/i.png) <img src=x onerror=alert(1)>');
-    expect(html).toContain('<h2>T</h2>');
+    expect(html).toContain('<h2 id="h-t">T</h2>');
     expect(html).toContain('<ul>');
     expect(html).toContain('<table>');
     expect(html).toContain('&lt;b&gt;2&lt;/b&gt;');

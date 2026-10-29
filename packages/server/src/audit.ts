@@ -104,6 +104,28 @@ export class AuditLog {
     await rename(this.file, `${this.file}.1`);
   }
 
+  /** How many events of this kind were written since `sinceIso` (used for the daily AI spending cap). */
+  async countSince(sinceIso: string, event: string): Promise<number> {
+    await this.queue;
+    let raw = '';
+    try {
+      raw = await readFile(this.file, 'utf8');
+    } catch {
+      return 0;
+    }
+    let n = 0;
+    for (const line of raw.split('\n')) {
+      if (!line.includes(`"event":"${event}"`)) continue;
+      try {
+        const e = JSON.parse(line) as AuditEvent;
+        if (e.event === event && e.time >= sinceIso) n++;
+      } catch {
+        /* ignore a torn line */
+      }
+    }
+    return n;
+  }
+
   /** Newest first. `q` matches any text field, case-insensitively. Reads the current file only. */
   async list(opts: { q?: string; offset?: number; limit?: number } = {}): Promise<{ events: AuditEvent[]; total: number }> {
     await this.queue;

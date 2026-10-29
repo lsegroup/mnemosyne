@@ -67,6 +67,10 @@ export interface MnemosyneConfig {
     settingsFile: string;
     /** Append-only audit trail (JSON lines) of sign-ins and admin changes. */
     auditFile: string;
+    /** Generated project documentation (articles, diagrams, PDFs), kept with their date stamps. */
+    docsDir: string;
+    /** Spending guard: most AI generation runs allowed per UTC day, across all projects. */
+    aiDailyLimit: number;
     /**
      * Built-in admin account so the portal can be configured before (or without) GitLab SSO.
      * Give either a `passwordHash` (`hashPassword()` output) or a plain `password`.
@@ -139,6 +143,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, repoOverride?: 
       providersFile: resolve(env.MNEMOSYNE_PROVIDERS_FILE ?? `${dirname(dbPath)}/providers.enc`),
       settingsFile: resolve(env.MNEMOSYNE_SETTINGS_FILE ?? `${dirname(dbPath)}/settings.enc`),
       auditFile: resolve(env.MNEMOSYNE_AUDIT_FILE ?? `${dirname(dbPath)}/audit.jsonl`),
+      docsDir: resolve(env.MNEMOSYNE_DOCS_DIR ?? `${dirname(dbPath)}/docs`),
+      aiDailyLimit: int(env.MNEMOSYNE_AI_DAILY_LIMIT, 20),
       localAdmin: {
         user: env.MNEMOSYNE_LOCAL_ADMIN_USER,
         passwordHash: env.MNEMOSYNE_LOCAL_ADMIN_PASSWORD_HASH,

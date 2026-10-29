@@ -14,9 +14,18 @@ function inline(text: string): string {
   return s;
 }
 
+/** URL-safe id for a heading, unique within one document (used for the table of contents). */
+export function headingId(text: string, seen: Map<string, number>): string {
+  const base = 'h-' + (text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'section');
+  const n = (seen.get(base) ?? 0) + 1;
+  seen.set(base, n);
+  return n === 1 ? base : `${base}-${n}`;
+}
+
 export function renderMarkdown(src: string): string {
   const lines = src.replace(/\r\n?/g, '\n').split('\n');
   const out: string[] = [];
+  const ids = new Map<string, number>();
   let i = 0;
   let list: 'ul' | 'ol' | null = null;
   const closeList = () => {
@@ -58,7 +67,7 @@ export function renderMarkdown(src: string): string {
     if (h) {
       closeList();
       const level = Math.min(6, h[1]!.length + 1); // page title is h1; note headings start at h2
-      out.push(`<h${level}>${inline(h[2]!)}</h${level}>`);
+      out.push(`<h${level} id="${headingId(h[2]!, ids)}">${inline(h[2]!)}</h${level}>`);
       i++;
       continue;
     }
@@ -108,4 +117,21 @@ export function renderMarkdown(src: string): string {
   }
   closeList();
   return out.join('\n');
+}
+
+/** Headings (as rendered: h2 and below) with the same ids renderMarkdown gives them, for a table of contents. */
+export function outline(src: string): { level: number; text: string; id: string }[] {
+  const ids = new Map<string, number>();
+  const out: { level: number; text: string; id: string }[] = [];
+  let fenced = false;
+  for (const line of src.replace(/\r\n?/g, '\n').split('\n')) {
+    if (/^\s*```/.test(line)) {
+      fenced = !fenced;
+      continue;
+    }
+    if (fenced) continue;
+    const h = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (h) out.push({ level: Math.min(6, h[1]!.length + 1), text: h[2]!.replace(/[*`]/g, ''), id: headingId(h[2]!, ids) });
+  }
+  return out;
 }

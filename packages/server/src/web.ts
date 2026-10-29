@@ -6,9 +6,13 @@ import { ProviderStore, ProviderValidationError } from './provider-store.js';
 import { fetchModels } from './llm-models.js';
 import { AuditLog, clientIp, diffLines, type AuditInput } from './audit.js';
 import { SettingsStore, SettingsValidationError, applyPortalInput, type GitLabSettings, type PortalSettings } from './settings-store.js';
-import { adminPage, docsNotFound, homePage, loginPage, nodePage, projectPage, type ProjectCard } from './web-pages.js';
+import { adminPage, docsNotFound, homePage, loginPage, nodePage, notesPage, projectHome, type ProjectCard } from './web-pages.js';
 import { NodeIndex, fetchMemberships, matchProject, redact, type GitLabProject } from './docs.js';
-import { renderMarkdown } from './markdown.js';
+import { outline, renderMarkdown } from './markdown.js';
+import { DocStore, IMAGE_PRICE_USD, approxTokens, buildDiagramBriefPrompt, buildWikiPrompt, estimateText, toPdfImage, type DocMeta } from './docgen.js';
+import { chat } from './llm-call-chat.js';
+import { generateImage } from './llm-call-image.js';
+import { buildPdf } from './pdf.js';
 import { LOGO_WEBP_BASE64 } from './web-assets.js';
 
 // Two independent sign-in systems: the public page (cookie below) and the admin area
@@ -371,35 +375,101 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     res.status(404).send(docsNotFound(basePath, { name: ds.s.n, username: ds.s.u }, msg));
   };
 
-  router.get('/p/:project', async (req, res) => {
+  // --------------------------------------------------------------------------
+  // Project area. The project page is blank until documentation has been generated. Generating
+  // (AI, costs money) is for GitLab administrators only and needs an explicit agreement every time:
+  // the server only hands out a one-time consent token together with the cost estimate, and refuses
+  // to start without it. A daily cap and "one AI job at a time" bound the spending.
+  // --------------------------------------------------------------------------
+  const docStore = keys ? new DocStore(cfg.web.docsDir) : null;
+  const jobs = new Map<string, { kind: string; state: 'running' | 'done' | 'error'; startedAt: number; error?: string }>();
+  const usedConsents = new Map<string, number>();
+  const CONSENT_TTL_S = 600;
+
+  /** Signed-in reader of an existing project they may see; otherwise answers and returns null. */
+  const gate = async (req: Request, res: Response, adminOnly = false) => {
     const ds = docsSession(req);
-    if (!ds || !nodeIndex) {
+    if (!ds || !nodeIndex || !docStore) {
       res.redirect(`${basePath}/`);
-      return;
+      return null;
     }
     const project = String(req.params.project);
-    if (!canRead(ds.m, project)) {
-      void rec(req, { event: 'denied', entityType: 'docs_project', entityName: project, user: ds.s.u, description: 'Project documentation refused (not a member of the matching GitLab project)' });
-      notFound(res, ds, 'This project does not exist, or you are not a member of it in GitLab.');
-      return;
+    const refuse = (why: string) => {
+      void rec(req, { event: 'denied', entityType: 'docs_project', entityName: project, user: ds.s.u, description: why });
+      notFound(res, ds, 'This page does not exist, or you do not have access to it.');
+      return null;
+    };
+    if (!canRead(ds.m, project)) return refuse('Project documentation refused (not a member of the matching GitLab project)');
+    if (adminOnly && !ds.m.admin) return refuse('Administrator-only page refused');
+    if (!(await nodeIndex.inProject(project)).length) {
+      notFound(res, ds, 'This page does not exist, or you do not have access to it.');
+      return null;
     }
-    const all = await nodeIndex.inProject(project);
-    if (!all.length) {
-      notFound(res, ds, 'This project does not exist, or you are not a member of it in GitLab.');
-      return;
+    const gl = ds.m.projects ? matchProject(project, ds.m.projects) : null;
+    return { ds, project, gl, subtitle: gl ? `GitLab project ${gl.fullPath}` : 'No matching GitLab project — visible to GitLab administrators only' };
+  };
+
+  const docsApiOk = (req: Request, res: Response) => {
+    if (req.method !== 'GET' && (req.header('x-requested-with') !== 'mnemosyne-docs' || !originOk(req))) {
+      res.status(403).json({ error: 'cross-site request refused' });
+      return false;
     }
+    return true;
+  };
+  const fail400 = (res: Response, error: string, status = 400) => res.status(status).json({ error });
+
+  router.get('/p/:project', async (req, res) => {
+    const g = await gate(req, res);
+    if (!g) return;
+    const { ds, project } = g;
+    const wikis = await docStore!.list(project, 'wiki');
+    const wanted = typeof req.query.v === 'string' ? wikis.find((m) => m.id === req.query.v) : wikis[0];
+    let wiki = null;
+    if (wanted) {
+      const text = redact((await docStore!.read(wanted)).toString('utf8'));
+      wiki = { meta: wanted, html: renderMarkdown(text), toc: outline(text) };
+    }
+    const diagrams = await docStore!.list(project, 'diagram');
+    const pdfs = await docStore!.list(project, 'pdf');
+    const job = jobs.get(project);
+    const nonce = randomBytes(16).toString('base64');
+    void rec(req, { event: 'view', entityType: 'docs_project', entityName: project, user: ds.s.u, description: 'Opened project documentation' });
+    pageHeaders(res, nonce);
+    res.send(
+      projectHome({
+        basePath,
+        nonce,
+        user: { name: ds.s.n, username: ds.s.u },
+        project,
+        subtitle: g.subtitle,
+        isAdmin: ds.m.admin,
+        wiki,
+        wikiVersions: wikis,
+        diagram: diagrams[0] ?? null,
+        diagramVersions: diagrams,
+        pdf: pdfs[0] ?? null,
+        pdfVersions: pdfs,
+        busy: job?.state === 'running' ? job.kind : null,
+      }),
+    );
+  });
+
+  // Raw notes: administrators only (they hold internal rules and infrastructure details).
+  router.get('/p/:project/notes', async (req, res) => {
+    const g = await gate(req, res, true);
+    if (!g) return;
+    const all = await nodeIndex!.inProject(g.project);
     const q = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 200) : '';
     const needle = q.toLowerCase();
     const hits = needle ? all.filter((n) => [n.title, n.body, ...n.components].some((t) => t.toLowerCase().includes(needle))) : all;
-    const gl = ds.m.projects ? matchProject(project, ds.m.projects) : null;
-    void rec(req, { event: 'view', entityType: 'docs_project', entityName: project, user: ds.s.u, description: q ? `Searched project documentation for “${q}”` : 'Opened project documentation' });
+    void rec(req, { event: 'view', entityType: 'docs_notes', entityName: g.project, user: g.ds.s.u, description: q ? `Searched source notes for “${q}”` : 'Opened source notes' });
     pageHeaders(res);
     res.send(
-      projectPage({
+      notesPage({
         basePath,
-        user: { name: ds.s.n, username: ds.s.u },
-        project,
-        subtitle: gl ? `GitLab project ${gl.fullPath}` : 'No matching GitLab project — visible to GitLab administrators only',
+        user: { name: g.ds.s.n, username: g.ds.s.u },
+        project: g.project,
+        subtitle: g.subtitle,
         q,
         total: all.length,
         notes: hits
@@ -409,21 +479,206 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     );
   });
 
+  router.get('/p/:project/diagram/:id', async (req, res) => {
+    const g = await gate(req, res);
+    if (!g) return;
+    const meta = await docStore!.get(g.project, 'diagram', String(req.params.id));
+    if (!meta) return notFound(res, g.ds, 'This diagram does not exist.');
+    res.setHeader('Content-Type', meta.ext === 'png' ? 'image/png' : meta.ext === 'jpg' ? 'image/jpeg' : 'image/webp');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(await docStore!.read(meta));
+  });
+
+  router.get('/p/:project/pdf/:id', async (req, res) => {
+    const g = await gate(req, res);
+    if (!g) return;
+    const meta = await docStore!.get(g.project, 'pdf', String(req.params.id));
+    if (!meta) return notFound(res, g.ds, 'This PDF does not exist.');
+    void rec(req, { event: 'view', entityType: 'docs_pdf', entityId: meta.id, entityName: g.project, user: g.ds.s.u, description: 'Downloaded the project PDF' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${g.project.replace(/[^a-z0-9._-]/gi, '-')}-documentation-${meta.id}.pdf"`);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.send(await docStore!.read(meta));
+  });
+
+  // Which models would be used, and what it would cost — plus the one-time consent token.
+  const describeJob = async (project: string, kind: string) => {
+    const text = await providers!.getAssigned('text');
+    if (!text) return { error: 'Choose a model for Text in Admin → LLM first.' };
+    if (kind === 'wiki') {
+      const gl = null as null;
+      const prompt = buildWikiPrompt(project, gl, await nodeIndex!.inProject(project));
+      const est = estimateText(text.model, prompt.inputTokens, 12000);
+      return {
+        key: `${text.provider.id}:${text.model}`,
+        what: `Mnemosyne will send this project's notes (credentials masked first) to ${text.provider.label} and ask the AI to write a complete Wikipedia-style article about the project.`,
+        facts: [
+          ['Provider', `${text.provider.label}`],
+          ['Model', text.model],
+          ['Notes sent', `${prompt.noteCount}`],
+          ['Size', `about ${prompt.inputTokens.toLocaleString('en-US')} tokens in, up to 12,000 out`],
+          ['Estimated cost', est.usd === null ? 'unknown (no list price for this model)' : `about $${est.usd < 0.01 ? '<0.01' : est.usd.toFixed(2)}`],
+        ],
+        usd: est.usd,
+      };
+    }
+    const wiki = await docStore!.latest(project, 'wiki');
+    if (!wiki) return { error: 'Generate the documentation first.' };
+    const image = await providers!.getAssigned('image');
+    if (!image) return { error: 'Choose a model for Images in Admin → LLM first.' };
+    const wikiChars = Math.min((await docStore!.read(wiki)).length, 60_000);
+    const est = estimateText(text.model, approxTokens(wikiChars) + 400, 600);
+    const usd = (est.usd ?? 0) + IMAGE_PRICE_USD;
+    return {
+      key: `${text.provider.id}:${text.model}|${image.provider.id}:${image.model}`,
+      what: `Two AI calls: ${text.provider.label} first turns the article into a drawing brief, then ${image.provider.label} draws the workflow diagram from it.`,
+      facts: [
+        ['Text model', `${text.provider.label} / ${text.model}`],
+        ['Image model', `${image.provider.label} / ${image.model}`],
+        ['Based on', `the article from ${wiki.generatedAt.slice(0, 16).replace('T', ' ')} UTC`],
+        ['Estimated cost', `about $${usd.toFixed(2)} (one image at about $${IMAGE_PRICE_USD.toFixed(2)})`],
+      ],
+      usd,
+    };
+  };
+
+  router.get('/p/:project/api/estimate', async (req, res) => {
+    const g = await gate(req, res, true);
+    if (!g || !docsApiOk(req, res)) return;
+    const kind = req.query.kind === 'diagram' ? 'diagram' : req.query.kind === 'wiki' ? 'wiki' : null;
+    if (!kind) return void fail400(res, 'unknown kind');
+    const d = await describeJob(g.project, kind);
+    if ('error' in d) return void fail400(res, d.error as string);
+    const nonce = randomBytes(12).toString('base64url');
+    const token = signToken(keys!.sign, { p: g.project, k: kind, m: d.key, u: g.ds.s.u, n: nonce, exp: Math.floor(Date.now() / 1000) + CONSENT_TTL_S });
+    res.json({ kind, what: d.what, facts: d.facts, token });
+  });
+
+  const stripFence = (t: string) => t.trim().replace(/^```(?:markdown|md)?\n([\s\S]*?)\n```$/i, '$1').trim();
+
+  const runJob = async (project: string, kind: 'wiki' | 'diagram', user: string, ip: string, glName: string | null) => {
+    const started = Date.now();
+    jobs.set(project, { kind, state: 'running', startedAt: started });
+    const log = (e: AuditInput) => audit?.log({ ip, user, entityType: `docs_${kind}`, entityName: project, ...e });
+    try {
+      const text = (await providers!.getAssigned('text'))!;
+      if (kind === 'wiki') {
+        const prompt = buildWikiPrompt(project, glName, await nodeIndex!.inProject(project));
+        const out = await chat(text.provider, text.model, prompt.system, prompt.user, { maxTokens: 12000 });
+        const meta = await docStore!.save(
+          { kind: 'wiki', project, model: `${text.provider.label} / ${text.model}`, by: user, noteCount: prompt.noteCount, inputTokens: out.inputTokens, outputTokens: out.outputTokens, ext: 'md' },
+          redact(stripFence(out.text)),
+        );
+        void log({ event: 'ai_done', entityId: meta.id, description: `Article written by ${meta.model} from ${prompt.noteCount} notes (${out.inputTokens} tokens in, ${out.outputTokens} out)` });
+      } else {
+        const wiki = (await docStore!.latest(project, 'wiki'))!;
+        const image = (await providers!.getAssigned('image'))!;
+        const wikiText = (await docStore!.read(wiki)).toString('utf8');
+        const brief = buildDiagramBriefPrompt(project, wikiText);
+        const prompt = await chat(text.provider, text.model, brief.system, brief.user, { maxTokens: 700 });
+        const img = await generateImage(image.provider, image.model, redact(prompt.text.trim()).slice(0, 3500));
+        const ext = img.mime === 'image/png' ? 'png' : img.mime === 'image/jpeg' ? 'jpg' : 'webp';
+        const meta = await docStore!.save(
+          { kind: 'diagram', project, model: `${image.provider.label} / ${image.model}`, by: user, basedOn: wiki.id, inputTokens: prompt.inputTokens, outputTokens: prompt.outputTokens, ext },
+          img.bytes,
+        );
+        void log({ event: 'ai_done', entityId: meta.id, description: `Workflow diagram drawn by ${meta.model} (brief by ${text.model}: ${prompt.inputTokens} in, ${prompt.outputTokens} out)` });
+      }
+      jobs.set(project, { kind, state: 'done', startedAt: started });
+    } catch (err) {
+      const msg = err instanceof ProviderValidationError ? err.message : 'The generation failed unexpectedly.';
+      jobs.set(project, { kind, state: 'error', startedAt: started, error: msg });
+      void log({ event: 'ai_failed', description: msg });
+    }
+  };
+
+  router.post('/p/:project/api/generate', async (req, res) => {
+    const g = await gate(req, res, true);
+    if (!g || !docsApiOk(req, res)) return;
+    const kind = req.body?.kind === 'diagram' ? 'diagram' : req.body?.kind === 'wiki' ? 'wiki' : null;
+    if (!kind) return void fail400(res, 'unknown kind');
+    // 1) the person must have agreed: a valid, unused, unexpired consent token for exactly this job
+    const c = verifyToken<{ p: string; k: string; m: string; u: string; n: string; exp: number }>(keys!.sign, typeof req.body?.token === 'string' ? req.body.token : undefined);
+    const d = await describeJob(g.project, kind);
+    if (!c || c.p !== g.project || c.k !== kind || c.u !== g.ds.s.u || 'error' in d || c.m !== d.key || usedConsents.has(c.n)) {
+      void rec(req, { event: 'denied', entityType: `docs_${kind}`, entityName: g.project, user: g.ds.s.u, description: 'AI generation refused: no valid agreement (consent token missing, expired, reused or for a different job)' });
+      return void fail400(res, 'The agreement has expired or does not match. Please start again and agree to the estimate.', 403);
+    }
+    // 2) spending guards
+    if ([...jobs.values()].some((j) => j.state === 'running')) return void fail400(res, 'An AI generation is already running. Please wait for it to finish.', 409);
+    const dayStart = new Date().toISOString().slice(0, 10) + 'T00:00:00.000Z';
+    if ((await audit!.countSince(dayStart, 'ai_start')) >= cfg.web.aiDailyLimit) {
+      void rec(req, { event: 'denied', entityType: `docs_${kind}`, entityName: g.project, user: g.ds.s.u, description: `AI generation refused: daily limit of ${cfg.web.aiDailyLimit} runs reached` });
+      return void fail400(res, `The daily limit of ${cfg.web.aiDailyLimit} AI runs has been reached. It resets at 00:00 UTC.`, 429);
+    }
+    usedConsents.set(c.n, c.exp);
+    for (const [n, exp] of usedConsents) if (exp < Date.now() / 1000) usedConsents.delete(n);
+    void rec(req, {
+      event: 'ai_start',
+      entityType: `docs_${kind}`,
+      entityName: g.project,
+      user: g.ds.s.u,
+      description: `Agreed to use AI (${d.facts.map((f) => `${f[0]}: ${f[1]}`).join('; ')})`,
+    });
+    void runJob(g.project, kind, g.ds.s.u, clientIp(req), g.gl?.name ?? null);
+    res.status(202).json({ started: true });
+  });
+
+  router.get('/p/:project/api/status', async (req, res) => {
+    const g = await gate(req, res);
+    if (!g) return;
+    const j = jobs.get(g.project);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(j ? { state: j.state, kind: j.kind, seconds: Math.round((Date.now() - j.startedAt) / 1000), error: j.error } : { state: 'idle' });
+  });
+
+  // PDF: no AI, no cost — cover, index, article and the latest diagram.
+  router.post('/p/:project/api/pdf', async (req, res) => {
+    const g = await gate(req, res);
+    if (!g || !docsApiOk(req, res)) return;
+    const wiki = await docStore!.latest(g.project, 'wiki');
+    if (!wiki) return void fail400(res, 'Generate the documentation first.');
+    if ([...jobs.values()].some((j) => j.state === 'running' && j.kind === 'pdf')) return void fail400(res, 'A PDF is already being built.', 409);
+    jobs.set(g.project + ':pdf', { kind: 'pdf', state: 'running', startedAt: Date.now() });
+    try {
+      const diagram = await docStore!.latest(g.project, 'diagram');
+      let png: Buffer | null = null;
+      if (diagram) {
+        const bytes = await docStore!.read(diagram);
+        png = await toPdfImage({ bytes, mime: diagram.ext === 'png' ? 'image/png' : diagram.ext === 'jpg' ? 'image/jpeg' : 'image/webp' });
+      }
+      const markdown = redact((await docStore!.read(wiki)).toString('utf8'));
+      const pdf = await buildPdf({
+        title: g.project,
+        subtitle: g.subtitle,
+        generatedAt: wiki.generatedAt,
+        model: wiki.model,
+        noteCount: wiki.noteCount ?? 0,
+        markdown,
+        diagram: diagram && png ? { png, caption: `Created ${diagram.generatedAt.slice(0, 16).replace('T', ' ')} UTC by ${diagram.model}` } : undefined,
+      });
+      const meta: DocMeta = await docStore!.save({ kind: 'pdf', project: g.project, model: wiki.model, by: g.ds.s.u, basedOn: wiki.id, diagram: png ? diagram?.id : undefined, noteCount: wiki.noteCount, ext: 'pdf' }, pdf);
+      void rec(req, { event: 'create', entityType: 'docs_pdf', entityId: meta.id, entityName: g.project, user: g.ds.s.u, description: `Project PDF built from the article of ${wiki.generatedAt.slice(0, 16).replace('T', ' ')} UTC${png ? ' with the workflow diagram' : ''}` });
+      res.json({ id: meta.id });
+    } catch (err) {
+      console.error('pdf:', (err as Error).message);
+      fail400(res, 'The PDF could not be built.', 500);
+    } finally {
+      jobs.delete(g.project + ':pdf');
+    }
+  });
+
+  // One raw note (administrators only).
   router.get('/p/:project/:id', async (req, res) => {
-    const ds = docsSession(req);
-    if (!ds || !nodeIndex) {
-      res.redirect(`${basePath}/`);
-      return;
-    }
-    const project = String(req.params.project);
-    const note = canRead(ds.m, project) ? await nodeIndex.get(project, String(req.params.id)) : null;
-    if (!note) {
-      if (!canRead(ds.m, project)) void rec(req, { event: 'denied', entityType: 'docs_note', entityName: project, entityId: String(req.params.id), user: ds.s.u, description: 'Note refused (not a member of the matching GitLab project)' });
-      notFound(res, ds, 'This note does not exist, or you are not a member of its project in GitLab.');
-      return;
-    }
+    const g = await gate(req, res, true);
+    if (!g) return;
+    const { ds, project } = g;
+    const note = await nodeIndex!.get(project, String(req.params.id));
+    if (!note) return notFound(res, ds, 'This note does not exist.');
     const related = await Promise.all(
-      note.links.map(async (l) => ({ rel: l.rel, id: l.target, title: (await nodeIndex.get(project, l.target))?.title ?? null })),
+      note.links.map(async (l) => ({ rel: l.rel, id: l.target, title: (await nodeIndex!.get(project, l.target))?.title ?? null })),
     );
     void rec(req, { event: 'view', entityType: 'docs_note', entityId: note.id, entityName: note.title, user: ds.s.u, description: `Opened a note of ${project}` });
     pageHeaders(res);

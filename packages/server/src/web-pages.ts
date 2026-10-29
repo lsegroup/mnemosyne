@@ -1,6 +1,7 @@
 /** HTML for the web portal. Dark theme, no external assets, no inline handlers. */
 
 import { esc } from './html.js';
+import type { DocMeta } from './docgen.js';
 export { esc };
 
 const CSS = `
@@ -628,7 +629,7 @@ export interface NoteRow {
   observed_at: string | null;
 }
 
-export function projectPage(v: { basePath: string; user: DocsUser; project: string; subtitle: string; q: string; notes: NoteRow[]; total: number }): string {
+export function notesPage(v: { basePath: string; user: DocsUser; project: string; subtitle: string; q: string; notes: NoteRow[]; total: number }): string {
   const base = esc(v.basePath);
   const enc = encodeURIComponent(v.project);
   const groups = new Map<string, NoteRow[]>();
@@ -688,4 +689,176 @@ ${v.authors.length ? `<p class="lead">Recorded by ${esc(v.authors.join(', '))}</
 
 export function docsNotFound(basePath: string, user: DocsUser, message: string): string {
   return docsShell('Not found · Mnemosyne', basePath, user, `<h1>Not available</h1><div class="notice">${esc(message)}</div><p><a class="btn" href="${esc(basePath)}/">Back to your projects</a></p>`);
+}
+
+// ----------------------------------------------------------------------------
+// Project home: blank by default; shows the generated article, diagram and PDF once they exist.
+// AI actions (administrators only) always go through an explicit agreement popup.
+// ----------------------------------------------------------------------------
+export interface ProjectHomeView {
+  basePath: string;
+  nonce: string;
+  user: DocsUser;
+  project: string;
+  subtitle: string;
+  isAdmin: boolean;
+  /** Text and image models are chosen in Admin → LLM; the buttons explain what is missing. */
+  wiki: { meta: DocMeta; html: string; toc: { level: number; text: string; id: string }[] } | null;
+  wikiVersions: DocMeta[];
+  diagram: DocMeta | null;
+  diagramVersions: DocMeta[];
+  pdf: DocMeta | null;
+  pdfVersions: DocMeta[];
+  /** A generation is already running for this project. */
+  busy: string | null;
+}
+
+const when = (iso: string) => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
+
+const HOME_CSS = `
+.actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}.btn.primary:hover{background:var(--accent-h)}
+.btn[disabled]{opacity:.45;cursor:not-allowed}.btn[disabled]:hover{border-color:var(--line)}
+.btn.ai::after{content:"AI";margin-left:8px;padding:0 6px;border-radius:99px;border:1px solid currentColor;font-size:10px;letter-spacing:.5px}
+.blank{display:flex;flex-direction:column;align-items:center;gap:8px;padding:70px 20px;border:1px dashed var(--line);border-radius:14px;color:var(--muted);text-align:center}
+.blank strong{color:var(--text);font-size:18px}
+.banner{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;padding:12px 16px;border:1px solid var(--line);border-radius:12px;background:var(--panel2);font-size:13.5px;color:var(--muted)}
+.banner b{color:var(--text)}
+.toc{padding:14px 18px;border:1px solid var(--line);border-radius:12px;background:var(--panel2);max-width:420px}
+.toc strong{color:var(--teal)}.toc ol,.toc ul{margin:6px 0 0;padding-left:18px}.toc li{margin:2px 0;font-size:14px}.toc a{color:var(--text);text-decoration:none}.toc a:hover{color:var(--teal)}
+.toc ul{padding-left:16px;list-style:circle;color:var(--muted)}
+figure{margin:0;padding:16px;border:1px solid var(--line);border-radius:14px;background:#fff}
+figure img{display:block;max-width:100%;height:auto;margin:0 auto}
+figcaption{margin-top:10px;font-size:12.5px;color:#555a6b;text-align:center}
+.versions{font-size:13px;color:var(--muted)}.versions a{margin-right:10px}
+.overlay{position:fixed;inset:0;background:rgba(5,6,10,.72);display:flex;align-items:center;justify-content:center;padding:20px;z-index:50}
+.overlay[hidden]{display:none}
+.modal{width:100%;max-width:560px;border:1px solid var(--line);border-radius:16px;background:var(--panel);padding:26px;box-shadow:0 30px 80px rgba(0,0,0,.6)}
+.modal h2{margin:0 0 10px;font:600 24px/1.2 "Palatino Linotype","Book Antiqua",Palatino,Georgia,serif;color:var(--title)}
+.modal p{margin:8px 0;color:#c9cdda;font-size:14.5px}
+.modal .facts{margin:14px 0;padding:12px 14px;border-radius:10px;background:var(--panel2);border:1px solid var(--line);font-size:14px}
+.modal .facts div{display:flex;justify-content:space-between;gap:14px;padding:3px 0}.modal .facts span:first-child{color:var(--muted)}
+.modal .warn{color:#f0c36a}
+.modal label{display:flex;gap:10px;align-items:flex-start;margin:16px 0;font-size:14.5px;color:var(--text);cursor:pointer}
+.modal label input{margin-top:3px;width:18px;height:18px;accent-color:#7a66e0}
+.modal .row{display:flex;justify-content:flex-end;gap:10px}
+.spin{display:inline-block;width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--teal);border-radius:50%;animation:sp 1s linear infinite;vertical-align:-3px;margin-right:8px}
+@keyframes sp{to{transform:rotate(360deg)}}
+#status{min-height:22px;font-size:14px}.ok{color:#4ade80}.err{color:#ff8b8b}`;
+
+export function projectHome(v: ProjectHomeView): string {
+  const base = esc(v.basePath);
+  const enc = encodeURIComponent(v.project);
+  const api = `${v.basePath}/p/${enc}/api`;
+  const has = Boolean(v.wiki);
+  const vers = (items: DocMeta[], path: string, label: string) =>
+    items.length > 1
+      ? `<p class="versions">Earlier ${label}: ${items
+          .slice(1, 8)
+          .map((m) => `<a href="${path}${esc(m.id)}">${esc(when(m.generatedAt))}</a>`)
+          .join('')}</p>`
+      : '';
+
+  const article = v.wiki
+    ? `<div class="banner"><span><b>Documentation</b> generated <b>${esc(when(v.wiki.meta.generatedAt))}</b></span><span>by ${esc(v.wiki.meta.model)}</span><span>from ${v.wiki.meta.noteCount ?? '?'} project notes</span></div>
+${v.wikiVersions.length > 1 ? `<p class="versions">Other versions: ${v.wikiVersions.slice(0, 8).map((m, i) => (m.id === v.wiki!.meta.id ? `<b>${esc(when(m.generatedAt))}</b>` : `<a href="${base}/p/${enc}?v=${esc(m.id)}">${esc(when(m.generatedAt))}${i === 0 ? ' (latest)' : ''}</a>`)).join(' · ')}</p>` : ''}
+${v.diagram ? `<figure><img src="${base}/p/${enc}/diagram/${esc(v.diagram.id)}" alt="Workflow diagram of ${esc(v.project)}"><figcaption>Workflow diagram · created ${esc(when(v.diagram.generatedAt))} by ${esc(v.diagram.model)}</figcaption></figure>${vers(v.diagramVersions, `${base}/p/${enc}/diagram/`, 'diagrams')}` : ''}
+${v.wiki.toc.length > 2 ? `<nav class="toc"><strong>Contents</strong><ul>${v.wiki.toc.filter((t) => t.level === 2).map((t) => `<li><a href="#${esc(t.id)}">${esc(t.text)}</a></li>`).join('')}</ul></nav>` : ''}
+<article>${v.wiki.html}</article>`
+    : `<div class="blank"><strong>No documentation has been generated yet</strong><span>${v.isAdmin ? 'Use “Generate documentation” to write the project article from all its notes.' : 'An administrator can generate it from the project notes.'}</span></div>`;
+
+  const pdfLine = v.pdf
+    ? `<p class="versions">Project PDF · created <b>${esc(when(v.pdf.generatedAt))}</b> · <a href="${base}/p/${enc}/pdf/${esc(v.pdf.id)}">Download PDF</a>${vers(v.pdfVersions, `${base}/p/${enc}/pdf/`, 'PDFs').replace(/^<p class="versions">/, ' · ').replace(/<\/p>$/, '')}</p>`
+    : '';
+
+  const body = `<div class="crumbs"><a href="${base}/">Projects</a> / ${esc(v.project)}</div>
+<h1>${esc(v.project)}</h1>
+<p class="lead">${esc(v.subtitle)}</p>
+<div class="actions">
+  ${v.isAdmin ? `<button class="btn primary ai" type="button" data-ai="wiki"${v.busy ? ' disabled' : ''}>${has ? 'Regenerate documentation' : 'Generate documentation'}</button>
+  <button class="btn ai" type="button" data-ai="diagram"${has && !v.busy ? '' : ' disabled'} title="${has ? '' : 'Generate the documentation first'}">Create workflow diagram</button>` : ''}
+  <button class="btn" type="button" id="pdfBtn"${has && !v.busy ? '' : ' disabled'} title="${has ? '' : 'Becomes active once the documentation exists'}">Create project PDF</button>
+  ${v.isAdmin ? `<a class="btn" href="${base}/p/${enc}/notes">Source notes</a>` : ''}
+</div>
+<div id="status">${v.busy ? `<span class="spin"></span>Working on it (${esc(v.busy)})… this page updates when it is done.` : ''}</div>
+${pdfLine}
+${article}
+<div class="overlay" id="consent" hidden role="dialog" aria-modal="true" aria-labelledby="cTitle"><div class="modal">
+  <h2 id="cTitle">Use AI to generate this?</h2>
+  <p id="cWhat"></p>
+  <div class="facts" id="cFacts"></div>
+  <p class="warn">This calls an external AI service and <strong>costs money</strong>. Nothing is sent or spent unless you agree below.</p>
+  <label><input type="checkbox" id="cAgree"><span>I agree to use AI to generate this and accept the estimated cost.</span></label>
+  <div class="row"><button class="btn" type="button" id="cCancel">Cancel</button><button class="btn primary" type="button" id="cGo" disabled>Generate with AI</button></div>
+</div></div>
+<script nonce="${esc(v.nonce)}">${HOME_JS(api, v.busy)}</script>`;
+  return shell(`${v.project} · Mnemosyne`, docsShellBody(v.basePath, v.user, body), DOCS_CSS + HOME_CSS);
+}
+
+function docsShellBody(basePath: string, user: DocsUser, body: string): string {
+  const base = esc(basePath);
+  return `<header class="top"><a class="brand" href="${base}/">Mnemosyne</a>
+  <div class="right"><span>${esc(user.name)} <span>@${esc(user.username)}</span></span>
+  <form method="post" action="${base}/auth/logout"><button class="btn small" type="submit">Sign out</button></form></div></header>
+<main class="docs">${body}</main>`;
+}
+
+function HOME_JS(api: string, busy: string | null): string {
+  return `
+(function(){
+  var API=${JSON.stringify(api)};
+  var $=function(id){return document.getElementById(id)};
+  var pending=null,poll=null;
+  function call(method,path,body){
+    return fetch(API+path,{method:method,credentials:'same-origin',headers:{'Content-Type':'application/json','X-Requested-With':'mnemosyne-docs'},body:body?JSON.stringify(body):undefined})
+      .then(function(r){return r.json().catch(function(){return {}}).then(function(j){if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j})});
+  }
+  function status(t,cls){var s=$('status');s.className=cls||'';s.textContent=t||''}
+  function working(t){var s=$('status');s.className='';s.innerHTML='<span class="spin"></span>';s.appendChild(document.createTextNode(t))}
+  function row(k,v){var d=document.createElement('div'),a=document.createElement('span'),b=document.createElement('span');a.textContent=k;b.textContent=v;d.appendChild(a);d.appendChild(b);return d}
+  function closeModal(){$('consent').hidden=true;$('cAgree').checked=false;$('cGo').disabled=true;pending=null}
+
+  // 1) ask the server what this would do and cost; the answer carries the one-time consent token
+  Array.prototype.forEach.call(document.querySelectorAll('[data-ai]'),function(b){
+    b.addEventListener('click',function(){
+      var kind=b.getAttribute('data-ai');status('');
+      call('GET','/estimate?kind='+kind).then(function(e){
+        pending={kind:kind,token:e.token};
+        $('cWhat').textContent=e.what;
+        var f=$('cFacts');f.textContent='';
+        e.facts.forEach(function(x){f.appendChild(row(x[0],x[1]))});
+        $('consent').hidden=false;$('cAgree').focus();
+      }).catch(function(err){status(err.message,'err')});
+    });
+  });
+  $('cAgree').addEventListener('change',function(){$('cGo').disabled=!$('cAgree').checked});
+  $('cCancel').addEventListener('click',closeModal);
+  $('consent').addEventListener('click',function(ev){if(ev.target===$('consent'))closeModal()});
+  document.addEventListener('keydown',function(ev){if(ev.key==='Escape'&&!$('consent').hidden)closeModal()});
+
+  // 2) only after the person ticked "I agree" and pressed the button is anything started
+  $('cGo').addEventListener('click',function(){
+    if(!pending||!$('cAgree').checked)return;
+    var p=pending;closeModal();
+    working('Generating with AI… this can take a few minutes. You can leave this page open.');
+    call('POST','/generate',{kind:p.kind,token:p.token}).then(watch).catch(function(err){status(err.message,'err')});
+  });
+  function watch(){
+    clearInterval(poll);
+    poll=setInterval(function(){
+      call('GET','/status').then(function(s){
+        if(s.state==='running'){working('Working on it ('+s.kind+')… '+s.seconds+' s')}
+        else{clearInterval(poll);if(s.state==='error'){status(s.error,'err')}else{status('Done. Reloading…','ok');location.reload()}}
+      }).catch(function(){});
+    },3000);
+  }
+  ${busy ? 'watch();' : ''}
+
+  // PDF: no AI, no cost
+  var pb=$('pdfBtn');
+  if(pb)pb.addEventListener('click',function(){
+    pb.disabled=true;working('Building the PDF…');
+    call('POST','/pdf',{}).then(function(){status('PDF created. Reloading…','ok');location.reload()}).catch(function(err){status(err.message,'err');pb.disabled=false});
+  });
+})();`;
 }
