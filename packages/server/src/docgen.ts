@@ -145,7 +145,7 @@ export function buildWikiPrompt(project: string, gitlabName: string | null, note
     parts.push(block);
   }
   const system = [
-    'You are a technical writer producing an encyclopedia-style article about one software project.',
+    'You are a technical writer producing encyclopedia-style product and disaster-recovery documentation for one software project.',
     'Write ONLY from the notes you are given. Do not invent facts, versions, numbers or names. If something important is not covered by the notes, say it is "not documented".',
     'Never write passwords, tokens, API keys or private keys, even if a note seems to contain one.',
     'Output GitHub-flavoured Markdown only, with no preamble and no closing remarks.',
@@ -153,19 +153,16 @@ export function buildWikiPrompt(project: string, gitlabName: string | null, note
   const user = [
     `Project: ${gitlabName ?? project}`,
     '',
-    'Write a complete, Wikipedia-style article about this project for engineers who have never seen it. Use this structure:',
-    '# <Project name>',
-    'A short lead paragraph (what it is, what it is for, current state).',
-    'A Markdown table "At a glance" with rows such as Purpose, Main components, Technology, Status, Last updated (use only facts from the notes).',
-    '## Overview',
-    '## History and milestones   (chronological, with dates from the notes)',
-    '## Architecture and components',
-    '## How it works / operations   (numbered steps where the notes describe a procedure)',
-    '## Decisions and rules   (each decision with its reason)',
-    '## Known issues and gotchas',
-    '## Current status and open work',
-    '## See also   (only other projects or documents that the notes mention)',
-    'Keep each section factual and scannable: short paragraphs, bullet lists, and tables where they help. Mention the date of the most recent note.',
+    'Write the project documentation page. Do NOT write a title heading (the page already shows the name) and do NOT write a change history or timeline (the server adds the list of the latest notes itself). Use exactly this structure:',
+    '1. FIRST, with no heading: one product-description paragraph (3 to 6 sentences) saying what the product is, who uses it, what it does and its current state.',
+    '2. "## Hardware and software requirements": one paragraph or short bullet list of the hardware (hosts, CPU/RAM/disk/network where the notes say) and software (OS, runtimes, databases, services, versions, licences, external dependencies) it needs. Say "not documented" for anything the notes do not state.',
+    '3. "## Disaster recovery": complete recovery documentation, written so an engineer who has never seen the system can rebuild it. Use these sub-headings:',
+    '   "### What is required" (accounts, repositories, secrets by NAME only and where they are stored, DNS/certificates, backups, hosts)',
+    '   "### Installation / rebuild steps" (a numbered list in the order to execute, with the real hostnames, paths, service names and commands from the notes)',
+    '   "### Access" (how to reach it: URLs, ports, login method, which role/account type, which host to connect to; never write passwords or tokens)',
+    '   "### Testing and verification" (numbered checks that prove the system works after a rebuild, with the expected result)',
+    '   "### Known gotchas" (only issues from the notes that matter for a rebuild)',
+    'Keep it factual and scannable: short paragraphs, numbered steps, tables where they help. Where the notes conflict, prefer the newer note.',
     '',
     `There are ${parts.length} notes. Here they are, newest first:`,
     '',
@@ -203,4 +200,42 @@ export async function toPdfImage(img: ImageResult): Promise<Buffer | null> {
     console.error('docgen: WebP to PNG conversion failed:', (err as Error).message);
     return null;
   }
+}
+
+// ----------------------------------------------------------------------------
+// Change history: built by the server from the newest notes, never written by the AI.
+// ----------------------------------------------------------------------------
+export interface HistoryEntry {
+  id: string;
+  date: string;
+  title: string;
+  type: string;
+  status: string;
+}
+
+export const HISTORY_LIMIT = 20;
+
+export function changeHistory(notes: MemoryNode[], limit = HISTORY_LIMIT): HistoryEntry[] {
+  return [...notes]
+    .sort((a, b) => (b.observed_at ?? '').localeCompare(a.observed_at ?? '') || a.title.localeCompare(b.title))
+    .slice(0, limit)
+    .map((n) => ({ id: n.id, date: n.observed_at ? `${n.observed_at.slice(0, 10)} ${n.observed_at.slice(11, 16)}`.trim() : 'unknown', title: redact(n.title), type: n.type, status: n.status }));
+}
+
+/** Markdown for the PDF: a rule, the heading and a table (the web page renders its own, linked, version). */
+export function historyMarkdown(entries: HistoryEntry[]): string {
+  const cell = (t: string) => t.replace(/\|/g, '/').replace(/\s+/g, ' ');
+  return [
+    '',
+    '---',
+    '',
+    '## Change history',
+    '',
+    `The ${entries.length} most recently submitted notes, newest first, show what was changed or deployed last.`,
+    '',
+    '| Date (UTC) | Note | Type |',
+    '| --- | --- | --- |',
+    ...entries.map((e) => `| ${e.date} | ${cell(e.title)} | ${e.type} |`),
+    '',
+  ].join('\n');
 }

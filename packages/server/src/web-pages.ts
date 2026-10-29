@@ -1,7 +1,7 @@
 /** HTML for the web portal. Dark theme, no external assets, no inline handlers. */
 
 import { esc } from './html.js';
-import type { DocMeta } from './docgen.js';
+import type { DocMeta, HistoryEntry } from './docgen.js';
 export { esc };
 
 const CSS = `
@@ -704,6 +704,9 @@ export interface ProjectHomeView {
   isAdmin: boolean;
   /** Text and image models are chosen in Admin → LLM; the buttons explain what is missing. */
   wiki: { meta: DocMeta; html: string; toc: { level: number; text: string; id: string }[] } | null;
+  /** The newest notes (built by the server, not the AI). */
+  history: HistoryEntry[];
+  glUrl: string | null;
   wikiVersions: DocMeta[];
   diagram: DocMeta | null;
   diagramVersions: DocMeta[];
@@ -727,9 +730,21 @@ const HOME_CSS = `
 .toc{padding:14px 18px;border:1px solid var(--line);border-radius:12px;background:var(--panel2);max-width:420px}
 .toc strong{color:var(--teal)}.toc ol,.toc ul{margin:6px 0 0;padding-left:18px}.toc li{margin:2px 0;font-size:14px}.toc a{color:var(--text);text-decoration:none}.toc a:hover{color:var(--teal)}
 .toc ul{padding-left:16px;list-style:circle;color:var(--muted)}
-figure{margin:0;padding:16px;border:1px solid var(--line);border-radius:14px;background:#fff}
-figure img{display:block;max-width:100%;height:auto;margin:0 auto}
-figcaption{margin-top:10px;font-size:12.5px;color:#555a6b;text-align:center}
+.wp{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:28px;align-items:start;margin-top:18px}
+@media(max-width:900px){.wp{grid-template-columns:minmax(0,1fr)}.wp .card{order:-1}}
+.card{border:1px solid var(--line);border-radius:12px;background:var(--panel2);overflow:hidden}
+.card h3{margin:0;padding:11px 14px;text-align:center;font:600 18px/1.2 "Palatino Linotype","Book Antiqua",Palatino,Georgia,serif;color:var(--title);border-bottom:1px solid var(--line)}
+.card .pic{display:block;margin:12px;padding:6px;border-radius:8px;background:#fff;cursor:zoom-in}
+.card .pic img{display:block;width:100%;height:auto}
+.card .cap{margin:0 12px 12px;font-size:12px;color:var(--muted);text-align:center}
+.card .noimg{margin:12px;padding:30px 12px;border:1px dashed var(--line);border-radius:8px;text-align:center;color:var(--muted);font-size:13px}
+.card dl{margin:0;padding:4px 14px 12px;font-size:13px}.card dt{margin-top:9px;color:var(--teal);font-weight:600}.card dd{margin:2px 0 0;color:var(--text);overflow-wrap:anywhere}
+.card a{color:var(--teal)}
+.wp article h2{margin-top:26px}
+hr.rule{border:0;border-top:1px solid var(--line);margin:34px 0 8px}
+.hist table{width:100%;border-collapse:collapse;font-size:13.5px}.hist th,.hist td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}.hist th{color:var(--teal);font-weight:600}.hist td:first-child{white-space:nowrap;color:var(--muted)}
+#lightbox{position:fixed;inset:0;z-index:60;background:rgba(5,6,10,.88);display:flex;align-items:center;justify-content:center;padding:24px;cursor:zoom-out}
+#lightbox[hidden]{display:none}#lightbox img{max-width:100%;max-height:100%;background:#fff;border-radius:8px}
 .versions{font-size:13px;color:var(--muted)}.versions a{margin-right:10px}
 .overlay{position:fixed;inset:0;background:rgba(5,6,10,.72);display:flex;align-items:center;justify-content:center;padding:20px;z-index:50}
 .overlay[hidden]{display:none}
@@ -759,13 +774,24 @@ export function projectHome(v: ProjectHomeView): string {
           .join('')}</p>`
       : '';
 
+  const hist = `<hr class="rule"><section class="hist"><h2>Change history</h2><p class="versions">The ${v.history.length} most recently submitted notes, newest first, show what was changed or deployed last. ${v.isAdmin ? `Open a note, or search all of them under <a href="${base}/p/${enc}/notes">Source notes</a>, for the details.` : 'An administrator can open the source notes for the details.'}</p><table><thead><tr><th>Date (UTC)</th><th>Note</th><th>Type</th></tr></thead><tbody>${v.history
+    .map((e) => `<tr><td>${esc(e.date)}</td><td>${v.isAdmin ? `<a href="${base}/p/${enc}/${encodeURIComponent(e.id)}">${esc(e.title)}</a>` : esc(e.title)}</td><td>${esc(e.type)}</td></tr>`)
+    .join('')}</tbody></table></section>`;
+
+  const card = v.wiki
+    ? `<aside class="card"><h3>${esc(v.project)}</h3>${
+        v.diagram
+          ? `<a class="pic" id="pic" href="${base}/p/${enc}/diagram/${esc(v.diagram.id)}" target="_blank" rel="noopener"><img src="${base}/p/${enc}/diagram/${esc(v.diagram.id)}" alt="Workflow diagram of ${esc(v.project)}"></a><p class="cap">Workflow diagram · click to enlarge<br>created ${esc(when(v.diagram.generatedAt))} by ${esc(v.diagram.model)}</p>${vers(v.diagramVersions, `${base}/p/${enc}/diagram/`, 'diagrams')}`
+          : `<div class="noimg">Workflow diagram<br>not created yet${v.isAdmin ? '<br>Use “Create workflow diagram” above.' : ''}</div>`
+      }<dl><dt>Documentation</dt><dd>${esc(when(v.wiki.meta.generatedAt))}</dd><dt>Written by</dt><dd>${esc(v.wiki.meta.model)}</dd><dt>Source notes</dt><dd>${v.wiki.meta.noteCount ?? '?'} notes</dd><dt>Latest note</dt><dd>${esc(v.history[0]?.date ?? 'unknown')} UTC</dd>${v.glUrl ? `<dt>GitLab project</dt><dd><a href="${esc(v.glUrl)}" rel="noopener noreferrer">${esc(v.glUrl.replace(/^https?:\/\//, ''))}</a></dd>` : ''}</dl></aside>`
+    : '';
+
   const article = v.wiki
     ? `<div class="banner"><span><b>Documentation</b> generated <b>${esc(when(v.wiki.meta.generatedAt))}</b></span><span>by ${esc(v.wiki.meta.model)}</span><span>from ${v.wiki.meta.noteCount ?? '?'} project notes</span></div>
 ${v.wikiVersions.length > 1 ? `<p class="versions">Other versions: ${v.wikiVersions.slice(0, 8).map((m, i) => (m.id === v.wiki!.meta.id ? `<b>${esc(when(m.generatedAt))}</b>` : `<a href="${base}/p/${enc}?v=${esc(m.id)}">${esc(when(m.generatedAt))}${i === 0 ? ' (latest)' : ''}</a>`)).join(' · ')}</p>` : ''}
-${v.diagram ? `<figure><img src="${base}/p/${enc}/diagram/${esc(v.diagram.id)}" alt="Workflow diagram of ${esc(v.project)}"><figcaption>Workflow diagram · created ${esc(when(v.diagram.generatedAt))} by ${esc(v.diagram.model)}</figcaption></figure>${vers(v.diagramVersions, `${base}/p/${enc}/diagram/`, 'diagrams')}` : ''}
-${v.wiki.toc.length > 2 ? `<nav class="toc"><strong>Contents</strong><ul>${v.wiki.toc.filter((t) => t.level === 2).map((t) => `<li><a href="#${esc(t.id)}">${esc(t.text)}</a></li>`).join('')}</ul></nav>` : ''}
-<article>${v.wiki.html}</article>`
-    : `<div class="blank"><strong>No documentation has been generated yet</strong><span>${v.isAdmin ? 'Use “Generate documentation” to write the project article from all its notes.' : 'An administrator can generate it from the project notes.'}</span></div>`;
+<div class="wp"><div class="main"><article>${v.wiki.html}</article>${hist}</div>${card}</div>
+${v.diagram ? `<div id="lightbox" hidden><img alt="Workflow diagram of ${esc(v.project)}"></div>` : ''}`
+    : `<div class="blank"><strong>No documentation has been generated yet</strong><span>${v.isAdmin ? 'Use “Generate documentation” to write the project page from all its notes.' : 'An administrator can generate it from the project notes.'}</span></div>`;
 
   const pdfLine = v.pdf
     ? `<p class="versions">Project PDF · created <b>${esc(when(v.pdf.generatedAt))}</b> · <a href="${base}/p/${enc}/pdf/${esc(v.pdf.id)}">Download PDF</a>${vers(v.pdfVersions, `${base}/p/${enc}/pdf/`, 'PDFs').replace(/^<p class="versions">/, ' · ').replace(/<\/p>$/, '')}</p>`
@@ -853,6 +879,14 @@ function HOME_JS(api: string, busy: string | null): string {
     },3000);
   }
   ${busy ? 'watch();' : ''}
+
+  // click the small diagram to see it large
+  var pic=$('pic'),lb=$('lightbox');
+  if(pic&&lb){
+    pic.addEventListener('click',function(ev){ev.preventDefault();lb.querySelector('img').src=pic.getAttribute('href');lb.hidden=false});
+    lb.addEventListener('click',function(){lb.hidden=true});
+    document.addEventListener('keydown',function(ev){if(ev.key==='Escape')lb.hidden=true});
+  }
 
   // PDF: no AI, no cost
   var pb=$('pdfBtn');

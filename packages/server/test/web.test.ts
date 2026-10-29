@@ -570,6 +570,29 @@ describe('web portal', () => {
       expect(img.headers.get('content-type')).toBe('image/png');
       expect(Buffer.from(await img.arrayBuffer()).subarray(1, 4).toString()).toBe('PNG');
       expect((await fetch(`${new URL(base).origin}${src}`, { redirect: 'manual' })).status).toBe(302); // not signed in
+
+      // layout: article left, infobox card right with the small clickable diagram, rule, then the change history
+      expect(after).toMatch(/<div class="wp"><div class="main"><article>[\s\S]*<\/article><hr class="rule"><section class="hist"><h2>Change history<\/h2>[\s\S]*<\/section><\/div><aside class="card">/);
+      expect(after).toMatch(/<aside class="card">[\s\S]*<a class="pic" id="pic" href="[^"]*\/p\/alpha\/diagram\/[^"]*"[\s\S]*click to enlarge/);
+      expect(after).toContain('id="lightbox"');
+      expect((after.match(/<tr><td>\d{4}-\d{2}-\d{2}/g) ?? []).length).toBeLessThanOrEqual(20);
+      expect((after.match(/<tr><td>\d{4}-\d{2}-\d{2}/g) ?? []).length).toBeGreaterThan(0);
+    });
+
+    it('asks the AI for description, requirements and disaster recovery, and builds the change history itself', async () => {
+      const { buildWikiPrompt, changeHistory, historyMarkdown } = await import('../src/docgen.js');
+      const mk = (i: number) => ({ id: `n${i}`, title: `Note ${i}`, type: 'event', status: 'active', project: 'alpha', components: [], links: [], body: 'x', observed_at: `2026-10-${String(10 + (i % 20)).padStart(2, '0')}T10:00:00Z` }) as never;
+      const notes = Array.from({ length: 30 }, (_, i) => mk(i));
+      const p = buildWikiPrompt('alpha', null, notes);
+      for (const must of ['product-description paragraph', '## Hardware and software requirements', '## Disaster recovery', '### Installation / rebuild steps', '### Access', '### Testing and verification']) expect(p.user).toContain(must);
+      expect(p.user).toContain('do NOT write a change history');
+      const h = changeHistory(notes);
+      expect(h).toHaveLength(20);
+      expect(h[0]!.date >= h[19]!.date).toBe(true); // newest first
+      const md = historyMarkdown(h);
+      expect(md).toContain('\n---\n');
+      expect(md).toContain('## Change history');
+      expect(md.split('\n').filter((l) => l.startsWith('| 2026')).length).toBe(20);
     });
 
     it('any member can build the PDF (no AI): cover, index, article, diagram', async () => {

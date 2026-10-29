@@ -9,7 +9,7 @@ import { SettingsStore, SettingsValidationError, applyPortalInput, type GitLabSe
 import { adminPage, docsNotFound, homePage, loginPage, nodePage, notesPage, projectHome, type ProjectCard } from './web-pages.js';
 import { NodeIndex, fetchMemberships, matchProject, redact, type GitLabProject } from './docs.js';
 import { outline, renderMarkdown } from './markdown.js';
-import { DocStore, IMAGE_PRICE_USD, approxTokens, buildDiagramBriefPrompt, buildWikiPrompt, estimateText, toPdfImage, type DocMeta } from './docgen.js';
+import { DocStore, IMAGE_PRICE_USD, approxTokens, buildDiagramBriefPrompt, buildWikiPrompt, changeHistory, estimateText, historyMarkdown, toPdfImage, type DocMeta } from './docgen.js';
 import { chat } from './llm-call-chat.js';
 import { generateImage } from './llm-call-image.js';
 import { buildPdf } from './pdf.js';
@@ -444,6 +444,8 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         subtitle: g.subtitle,
         isAdmin: ds.m.admin,
         wiki,
+        history: changeHistory(await nodeIndex!.inProject(project)),
+        glUrl: g.gl?.webUrl ?? null,
         wikiVersions: wikis,
         diagram: diagrams[0] ?? null,
         diagramVersions: diagrams,
@@ -513,7 +515,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       const est = estimateText(text.model, prompt.inputTokens, 12000);
       return {
         key: `${text.provider.id}:${text.model}`,
-        what: `Mnemosyne will send this project's notes (credentials masked first) to ${text.provider.label} and ask the AI to write a complete Wikipedia-style article about the project.`,
+        what: `Mnemosyne will send this project's notes (credentials masked first) to ${text.provider.label} and ask the AI to write the project page: product description, hardware and software requirements, and disaster-recovery documentation.`,
         facts: [
           ['Provider', `${text.provider.label}`],
           ['Model', text.model],
@@ -649,7 +651,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         const bytes = await docStore!.read(diagram);
         png = await toPdfImage({ bytes, mime: diagram.ext === 'png' ? 'image/png' : diagram.ext === 'jpg' ? 'image/jpeg' : 'image/webp' });
       }
-      const markdown = redact((await docStore!.read(wiki)).toString('utf8'));
+      const markdown = redact((await docStore!.read(wiki)).toString('utf8')) + historyMarkdown(changeHistory(await nodeIndex!.inProject(g.project)));
       const pdf = await buildPdf({
         title: g.project,
         subtitle: g.subtitle,
