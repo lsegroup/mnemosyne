@@ -207,6 +207,15 @@ describe('web portal', () => {
     expect((await fetch(`${base}/admin/api/providers`)).status).toBe(401);
   });
 
+  it('admin page GitLab link starts the ADMIN flow (own login route and callback)', async () => {
+    const html = await (await fetch(`${base}/admin/`)).text();
+    const href = /<a class="btn[^"]*" href="([^"]+)">Sign in with GitLab/.exec(html)?.[1];
+    expect(href).toBe(`${new URL(base).pathname}/admin/auth/login`);
+    const res = await fetch(new URL(href!, base), { redirect: 'manual' });
+    expect(res.status).toBe(302);
+    expect(new URL(res.headers.get('location')!).searchParams.get('redirect_uri')).toBe(`${base}/admin/auth/callback`);
+  });
+
   it('rejects a callback with a bad or missing state', async () => {
     const res = await fetch(`${base}/auth/callback?code=admin-code&state=forged`, { redirect: 'manual' });
     expect(res.status).toBe(302);
@@ -427,6 +436,21 @@ describe('local admin account and GitLab SSO settings', () => {
     const cookie = cookieOf(ok);
     expect((await fetch(`${base}/admin`, { headers: { cookie } })).status).toBe(200);
     expect(await (await fetch(`${base}/admin`)).text()).not.toContain('LLM providers');
+  });
+
+  it('submits the admin form exactly as the page defines it (action URL must be a live route)', async () => {
+    const { base } = await start();
+    const html = await (await fetch(`${base}/admin/`)).text();
+    const action = /<form class="local" method="post" action="([^"]+)"/.exec(html)?.[1];
+    expect(action).toBe(`${new URL(base).pathname}/admin/auth/local`);
+    const res = await fetch(new URL(action!, base), {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ username: 'admin', password: 'mnemosyne' }),
+    });
+    expect(res.status).toBe(303);
+    expect(res.headers.get('location')).toBe(`${new URL(base).pathname}/admin/`);
   });
 
   it('locks a client out after five misses, even with the right password', async () => {

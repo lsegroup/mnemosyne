@@ -59,9 +59,9 @@ export function loginPage(v: LoginView): string {
     action = `<p class="who">Signed in as <strong>${esc(v.user.name)}</strong> <span class="muted">@${esc(v.user.username)}</span></p>
       <form method="post" action="${base}/auth/logout"><button class="btn" type="submit">Sign out</button></form>`;
   } else if (v.configured && v.admin && (v.sso || v.local)) {
-    const sso = v.sso ? `<a class="btn${v.local ? '' : ' primary'}" href="${base}/auth/login?to=admin">Sign in with GitLab</a>` : '';
+    const sso = v.sso ? `<a class="btn${v.local ? '' : ' primary'}" href="${base}/admin/auth/login">Sign in with GitLab</a>` : '';
     const local = v.local
-      ? `<form class="local" method="post" action="${base}/auth/local">
+      ? `<form class="local" method="post" action="${base}/admin/auth/local">
         <input name="username" autocomplete="username" placeholder="Admin user name" required maxlength="100">
         <input name="password" type="password" autocomplete="current-password" placeholder="Password" required maxlength="200">
         <button class="btn primary" type="submit">Sign in</button></form>`
