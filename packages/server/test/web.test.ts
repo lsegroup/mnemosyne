@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
+import { Script, createContext } from 'node:vm';
 import { join } from 'node:path';
 import express from 'express';
 import { simpleGit } from 'simple-git';
@@ -15,6 +16,7 @@ import { MnemosyneService } from '../src/service.js';
 import { deriveKeys, hashPassword, open, seal, signToken, verifyPassword, verifyToken } from '../src/secrets.js';
 import { SettingsStore } from '../src/settings-store.js';
 import { createWebPortal } from '../src/web.js';
+import { adminPage } from '../src/web-pages.js';
 
 const SECRET = 'a-test-secret-with-enough-length';
 
@@ -659,5 +661,47 @@ describe('local admin account and GitLab SSO settings', () => {
     expect(html).not.toContain('GitLab admins');
     expect(html).not.toContain('id="adminUsers"');
     expect(html).toContain('only a GitLab administrator');
+  });
+});
+
+describe('admin page script', () => {
+  // The page's inline script is generated from a template literal; an escape mistake there is a
+  // SyntaxError in the browser and the whole page goes dead. Compile it and run it against a stub page.
+  it('compiles, runs, and wires every form and tab handler', async () => {
+    const html = adminPage({ basePath: '/mnemosyne', nonce: 'n', user: { name: 'A', username: 'a' }, redirectUris: ['u1', 'u2'] });
+    const js = /<script nonce="n">([\s\S]*?)<\/script>/.exec(html)![1]!;
+    const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]!);
+    const make = (id: string) => {
+      const el: Record<string, unknown> & { handlers: Record<string, unknown> } = {
+        id, handlers: {}, style: {}, hidden: false, className: '', textContent: '', value: '', disabled: false, placeholder: '', children: [] as unknown[],
+        appendChild(c: unknown) { (el.children as unknown[]).push(c); return c; },
+        addEventListener(type: string, fn: unknown) { el.handlers[type] = fn; },
+        scrollIntoView() {}, getAttribute: () => 'llm', reset() {},
+      };
+      return el;
+    };
+    const els = new Map(ids.map((id) => [id, make(id)]));
+    const missing: string[] = [];
+    const ok = { status: 200, ok: true, json: async () => ({ providers: [], assignments: {}, events: [], total: 0, gitlabUrl: '', clientId: '', hasSecret: false }) };
+    const sandbox = {
+      document: { getElementById: (id: string) => els.get(id) ?? (missing.push(id), null), createElement: () => make('new'), querySelectorAll: () => [make('a')] },
+      window: { addEventListener() {} },
+      location: { hash: '#audit', href: '' },
+      fetch: async () => ok,
+      confirm: () => true,
+      Intl,
+      Date,
+      setInterval: () => 0,
+      setTimeout,
+      clearTimeout,
+      encodeURIComponent,
+    };
+    new Script(js).runInContext(createContext(sandbox)); // throws on a SyntaxError or a top-level error
+    await new Promise((r) => setTimeout(r, 50));
+    expect(missing).toEqual([]);
+    for (const form of ['form', 'assign', 'ssoForm']) expect(typeof els.get(form)!.handlers.submit).toBe('function');
+    for (const btn of ['auditRefresh', 'auditMore', 'cancel']) expect(typeof els.get(btn)!.handlers.click).toBe('function');
+    expect(els.get('tab-audit')!.hidden).toBe(false); // #audit opens the Audit tab
+    expect(els.get('tab-llm')!.hidden).toBe(true);
   });
 });

@@ -483,7 +483,7 @@ function ADMIN_JS(basePath: string): string {
   $('auditTz').textContent=Intl.DateTimeFormat().resolvedOptions().timeZone;
   function changeCell(td,text){
     if(!text)return;var pre=document.createElement('pre');pre.className='chg';
-    text.split('\n').forEach(function(l,i){var sp=document.createElement('span');sp.className=l.charAt(0)==='+'?'p':l.charAt(0)==='-'?'m':'';sp.textContent=(i?'\n':'')+l;pre.appendChild(sp)});
+    text.split('\\n').forEach(function(l,i){var sp=document.createElement('span');sp.className=l.charAt(0)==='+'?'p':l.charAt(0)==='-'?'m':'';sp.textContent=(i?'\\n':'')+l;pre.appendChild(sp)});
     td.appendChild(pre);
   }
   function auditRow(e){
