@@ -770,13 +770,13 @@ describe('web portal', () => {
       const mk = (i: number) => ({ id: `n${i}`, title: `Note ${i}`, type: 'event', status: 'active', project: 'alpha', components: [], links: [], body: 'x', observed_at: `2026-10-${String(10 + (i % 20)).padStart(2, '0')}T10:00:00Z` }) as never;
       const notes = Array.from({ length: 30 }, (_, i) => mk(i));
       const p = buildWikiPrompt('alpha', null, notes);
-      for (const must of ['product-description paragraph', '## Hardware and software requirements', '## Disaster recovery', '### Installation / rebuild steps', '### Access', '### Testing and verification']) expect(p.user).toContain(must);
+      for (const must of ['product-description paragraph', '## Features and how it works', '## Specifications', '## Hardware and software requirements', '## Disaster recovery', '### Installation / rebuild steps', '### Access', '### Testing and verification']) expect(p.user).toContain(must);
       expect(p.user).toContain('do NOT write a change history');
       const h = changeHistory(notes);
       expect(h).toHaveLength(20);
       const { missingSections } = await import('../src/docgen.js');
-      expect(missingSections('Intro\n\n## Overview\n')).toHaveLength(5);
-      expect(missingSections('## Hardware and software requirements\n## Disaster recovery\n### Installation / rebuild steps\n### Access\n### Testing and verification')).toEqual([]);
+      expect(missingSections('Intro\n\n## Overview\n')).toHaveLength(7);
+      expect(missingSections('## Features and how it works\n## Specifications\n## Hardware and software requirements\n## Disaster recovery\n### Installation / rebuild steps\n### Access\n### Testing and verification')).toEqual([]);
       expect(h[0]!.date >= h[19]!.date).toBe(true); // newest first
       const md = historyMarkdown(h);
       expect(md).toContain('\n---\n');

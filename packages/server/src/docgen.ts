@@ -148,14 +148,16 @@ export const DEFAULT_WIKI_USER = [
   '',
   'Write the project documentation page. Do NOT write a title heading (the page already shows the name) and do NOT write a change history or timeline (the server adds the list of the latest notes itself). Use exactly this structure:',
   '1. FIRST, with no heading: one product-description paragraph (3 to 6 sentences) saying what the product is, who uses it, what it does and its current state.',
-  '2. "## Hardware and software requirements": one paragraph or short bullet list of the hardware (hosts, CPU/RAM/disk/network where the notes say) and software (OS, runtimes, databases, services, versions, licences, external dependencies) it needs. Say "not documented" for anything the notes do not state.',
-  '3. "## Disaster recovery": complete recovery documentation, written so an engineer who has never seen the system can rebuild it. Use these sub-headings:',
+  '2. "## Features and how it works": the functions of the product as a person would use or operate them - every feature, screen, workflow, role and interface that the notes describe, in the order a user meets them, as short sub-sections or bullet lists; explain how the parts work together (what happens when X is done, which component does what). Include current limits and what is planned but not built yet, clearly marked.',
+  '3. "## Specifications": the hard details in tables and lists - components with their versions, ports, URLs and paths, API endpoints and tools with their parameters, commands, configuration and environment variable NAMES with defaults, data and file formats, files and databases the system keeps, limits and numbers (sizes, timeouts, quotas), integrations and the interfaces between components. Use the exact names, numbers and values from the notes; do not leave a specific out because it looks minor.',
+  '4. "## Hardware and software requirements": one paragraph or short bullet list of the hardware (hosts, CPU/RAM/disk/network where the notes say) and software (OS, runtimes, databases, services, versions, licences, external dependencies) it needs. Say "not documented" for anything the notes do not state.',
+  '5. "## Disaster recovery": complete recovery documentation, written so an engineer who has never seen the system can rebuild it. Use these sub-headings:',
   '   "### What is required" (accounts, repositories, secrets by NAME only and where they are stored, DNS/certificates, backups, hosts)',
   '   "### Installation / rebuild steps" (a numbered list in the order to execute, with the real hostnames, paths, service names and commands from the notes)',
   '   "### Access" (how to reach it: URLs, ports, login method, which role/account type, which host to connect to; never write passwords or tokens)',
   '   "### Testing and verification" (numbered checks that prove the system works after a rebuild, with the expected result)',
   '   "### Known gotchas" (only issues from the notes that matter for a rebuild)',
-  'Keep it factual and scannable: short paragraphs, numbered steps, tables where they help. Where the notes conflict, prefer the newer note.',
+  'Be thorough: this page is the reference people rely on, so completeness matters more than brevity - use the whole answer length you need and never summarise away specifics that the notes contain. Keep it factual and scannable: short paragraphs, numbered steps, tables where they help. Where the notes conflict, prefer the newer note.',
   '',
   'There are {{notes_count}} notes. Here they are, newest first:',
   '',
@@ -262,6 +264,8 @@ export function historyMarkdown(entries: HistoryEntry[]): string {
 /** The sections the owner's layout requires; the AI is asked for them but cannot be forced, so the result is checked. */
 export function missingSections(markdown: string): string[] {
   const need: [string, RegExp][] = [
+    ['Features and how it works', /^##\s+Features and how it works\b/im],
+    ['Specifications', /^##\s+Specifications\b/im],
     ['Hardware and software requirements', /^##\s+Hardware and software requirements\b/im],
     ['Disaster recovery', /^##\s+Disaster recovery\b/im],
     ['Installation / rebuild steps', /^###\s+Installation/im],
