@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 import { Router, urlencoded, type NextFunction, type Request, type Response } from 'express';
 import type { MnemosyneConfig } from './config.js';
 import { MIN_SECRET_LENGTH, deriveKeys, hashPassword, signToken, verifyPassword, verifyToken, type DerivedKeys } from './secrets.js';
@@ -331,6 +332,25 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   /** Administrators see every project; others only those that match a GitLab project they belong to. */
   const canRead = (m: { admin: boolean; projects: GitLabProject[] | null }, project: string) =>
     m.admin || (m.projects !== null && matchProject(project, m.projects) !== null);
+
+  // text responses are gzip-compressed: the pages are large and the visitors are far away (every round trip costs ~0.3 s)
+  router.use((req, res, next) => {
+    if (!/\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''))) return next();
+    const send = res.send.bind(res);
+    res.send = ((body?: unknown) => {
+      if (typeof body === 'string' && body.length > 1024 && !res.getHeader('Content-Encoding')) {
+        const type = String(res.getHeader('Content-Type') ?? 'text/html; charset=utf-8');
+        if (/^text\/|json/.test(type)) {
+          res.setHeader('Content-Type', type);
+          res.setHeader('Content-Encoding', 'gzip');
+          res.setHeader('Vary', 'Accept-Encoding');
+          return send(gzipSync(body));
+        }
+      }
+      return send(body as never);
+    }) as typeof res.send;
+    next();
+  });
 
   router.get('/', async (req, res) => {
     const ds = docsSession(req);

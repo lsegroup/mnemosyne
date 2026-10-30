@@ -584,13 +584,38 @@ describe('web portal', () => {
     it('lists every GitLab project of the person, also those without notes, with a blank page', async () => {
       const dev = cookiesOf(await signIn('dev-code'));
       const home = await (await fetch(`${base}/`, { headers: { cookie: dev } })).text();
-      expect(home).toMatch(/<span class="c zero" aria-label="0 notes">0<\/span>\s*<span class="t">Zeta/);
-      expect(home).toMatch(/<span class="c" aria-label="\d+ notes">[1-9]\d*<\/span>/);
+      expect(home).toMatch(/<span class="c" aria-label="project \d+">\d+<\/span>\s*<span class="t">Zeta/);
+      expect(home).toContain('no notes yet');
+      // the ring counts projects 1..N in order
+      const rings = [...home.matchAll(/<span class="c" aria-label="project (\d+)">(\d+)<\/span>/g)].map((m) => Number(m[2]));
+      expect(rings.length).toBeGreaterThan(1);
+      expect(rings).toEqual(rings.map((_, i) => i + 1));
+      expect(home).toMatch(/<b>\d+ projects\.<\/b>/);
       expect(home).toContain(`href="${base.replace(new URL(base).origin, '')}/p/zeta"`);
       const page = await fetch(`${base}/p/zeta`, { headers: { cookie: dev } });
       expect(page.status).toBe(200);
       expect(await page.text()).toContain('No documentation has been generated yet');
       expect((await fetch(`${base}/p/not-a-project`, { headers: { cookie: dev } })).status).toBe(404);
+    });
+
+    it('compresses large pages with gzip when the browser accepts it', async () => {
+      const dev = cookiesOf(await signIn('dev-code'));
+      const plain = await fetch(`${base}/`, { headers: { cookie: dev, 'accept-encoding': 'identity' } });
+      expect(plain.headers.get('content-encoding')).toBeNull();
+      const raw = await new Promise<{ enc: string | undefined; bytes: number }>((resolve, reject) => {
+        const u = new URL(`${base}/`);
+        import('node:http').then(({ request }) => {
+          const r = request({ host: u.hostname, port: u.port, path: u.pathname, headers: { cookie: dev, 'accept-encoding': 'gzip' } }, (res) => {
+            let n = 0;
+            res.on('data', (c: Buffer) => (n += c.length));
+            res.on('end', () => resolve({ enc: res.headers['content-encoding'] as string | undefined, bytes: n }));
+          });
+          r.on('error', reject);
+          r.end();
+        });
+      });
+      expect(raw.enc).toBe('gzip');
+      expect(raw.bytes).toBeLessThan((await plain.text()).length);
     });
 
     it('asks the AI for description, requirements and disaster recovery, and builds the change history itself', async () => {
