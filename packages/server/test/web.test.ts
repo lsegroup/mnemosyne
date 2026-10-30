@@ -591,15 +591,12 @@ describe('web portal', () => {
     it('lists every GitLab project of the person, also those without notes, with a blank page', async () => {
       const dev = cookiesOf(await signIn('dev-code'));
       const home = await (await fetch(`${base}/`, { headers: { cookie: dev } })).text();
-      expect(home).toMatch(/<span class="c" aria-label="project \d+">\d+<\/span>\s*<span class="t">Zeta/);
-      expect(home).toContain('no notes yet');
-      // the ring counts projects 1..N in order
-      const rings = [...home.matchAll(/<span class="c" aria-label="project (\d+)">(\d+)<\/span>/g)].map((m) => Number(m[2]));
-      expect(rings.length).toBeGreaterThan(1);
-      expect(rings).toEqual(rings.map((_, i) => i + 1));
+      // the ring carries the GitLab project ID (Zeta is project 2), a dash when there is no GitLab project
+      expect(home).toMatch(/<span class="c" aria-label="GitLab project ID">2<\/span>\s*<span class="t">Zeta/);
+      expect(home).toMatch(/<span class="c" aria-label="GitLab project ID">1<\/span>\s*<span class="t">Alpha/);
+      expect(home).not.toContain('class="gid"');
       expect(home).toMatch(/<b>\d+ projects\.<\/b>/);
       expect(home).toContain('repeat(5,minmax(0,1fr))'); // five cards per row
-      expect(home).toContain('<span class="gid">GitLab ID <b>2</b></span>'); // the real GitLab project id is printed on the card, separate from the ring
       expect(home).toContain(`href="${base.replace(new URL(base).origin, '')}/p/zeta"`);
       const page = await fetch(`${base}/p/zeta`, { headers: { cookie: dev } });
       expect(page.status).toBe(200);

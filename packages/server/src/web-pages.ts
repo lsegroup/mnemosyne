@@ -609,17 +609,18 @@ function docsShell(title: string, basePath: string, user: DocsUser, body: string
 }
 
 export function homePage(v: { basePath: string; user: DocsUser; cards: ProjectCard[]; notice?: string; isAdmin: boolean }): string {
-  // the ring in the corner is the running project number (1..N), so the list can be counted at a glance
-  const card = (c: ProjectCard, i: number) => `<a class="card" href="${esc(c.href)}" title="${c.count === 0 ? 'No notes yet' : `${c.count} ${c.count === 1 ? 'note' : 'notes'}`}">
-    <span class="c" aria-label="project ${i + 1}">${i + 1}</span>
-    <span class="t">${esc(c.title)}</span><span class="s">${esc(c.sub)}</span>${c.glId !== undefined ? `<span class="gid">GitLab ID <b>${c.glId}</b></span>` : ''}
+  // the ring in the corner is the project's ID in GitLab ("-" when no GitLab project matches)
+  const card = (c: ProjectCard) => `<a class="card" href="${esc(c.href)}" title="${c.glId !== undefined ? `GitLab project ID ${c.glId}` : 'No GitLab project'}">
+    <span class="c" aria-label="GitLab project ID">${c.glId !== undefined ? c.glId : '–'}</span>
+    <span class="t">${esc(c.title)}</span><span class="s">${esc(c.sub)}</span>
     <span class="n">${c.count === 0 ? 'no notes yet' : `${c.count} ${c.count === 1 ? 'note' : 'notes'}`}${c.updated ? ` · updated ${esc(c.updated)}` : ''}</span>
     ${c.adminOnly ? '<span class="badge admin">administrators only</span>' : ''}</a>`;
+
   // five cards per row (easier to count); fewer on narrower windows
   const body = `<style>main.docs{max-width:1760px}.grid{grid-template-columns:repeat(5,minmax(0,1fr))}@media(max-width:1500px){.grid{grid-template-columns:repeat(4,minmax(0,1fr))}}@media(max-width:1150px){.grid{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:800px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:520px){.grid{grid-template-columns:1fr}}</style><h1>Your projects</h1>
 <p class="lead">Documentation for the projects you belong to in GitLab${v.isAdmin ? ' — as a GitLab administrator you see every project' : ''}.${v.cards.length ? ` <b>${v.cards.length} projects.</b>` : ''}</p>
 ${v.notice ? `<div class="notice">${esc(v.notice)}</div>` : ''}
-${v.cards.length ? `<div class="grid">${v.cards.map((c, i) => card(c, i)).join('')}</div>` : v.notice ? '' : '<div class="notice">No documentation exists yet for the projects you belong to.</div>'}`;
+${v.cards.length ? `<div class="grid">${v.cards.map((c) => card(c)).join('')}</div>` : v.notice ? '' : '<div class="notice">No documentation exists yet for the projects you belong to.</div>'}`;
   return docsShell('Mnemosyne', v.basePath, v.user, body);
 }
 
