@@ -2,7 +2,7 @@
 
 import { esc } from './html.js';
 import type { DocMeta, HistoryEntry } from './docgen.js';
-import { JOB_DEFS } from './ai-jobs.js';
+import { JOB_DEFS, MAX_OUTPUT_TOKENS } from './ai-jobs.js';
 export { esc };
 
 const CSS = `
@@ -282,7 +282,7 @@ function jobBlocks(): string {
         : '';
       const ai = d.usesAi
         ? `<div class="nums">
-      <label>Max output tokens<input id="maxTokens-${role}" inputmode="numeric" placeholder="${fmt(d.defaults.maxTokens)}" autocomplete="off"><span class="hint">The most the AI may write in one call. You pay per token written, so this is the cost ceiling of a call; the agreement popup shows the worst case. Big projects and reasoning models need a high limit. Default ${fmt(d.defaults.maxTokens)}, allowed 256 to 200,000.</span></label>
+      <label>Max output tokens<input id="maxTokens-${role}" inputmode="numeric" placeholder="${fmt(d.defaults.maxTokens)}" autocomplete="off"><span class="hint">The most the AI may write in one call. You pay per token written, so this is the cost ceiling of a call; the agreement popup shows the worst case. Big projects and reasoning models need a high limit. Default ${fmt(d.defaults.maxTokens)}, allowed 256 to ${fmt(MAX_OUTPUT_TOKENS)}.</span></label>
       <label>Temperature<input id="temperature-${role}" inputmode="decimal" placeholder="provider default" autocomplete="off"><span class="hint">0 to 2. Lower = more factual and repeatable, higher = more varied. Empty = the provider's own default (the value is not sent).</span></label>
       <label>Top-p<input id="topP-${role}" inputmode="decimal" placeholder="provider default" autocomplete="off"><span class="hint">0.01 to 1. The share of most-likely words the AI may choose from; lower = safer wording. Empty = the provider's own default (not sent).</span></label>
       <label>Time limit per call (minutes)<input id="timeoutMinutes-${role}" inputmode="numeric" placeholder="${d.defaults.timeoutMinutes}" autocomplete="off"><span class="hint">A call that takes longer is stopped. Default ${d.defaults.timeoutMinutes}, allowed 1 to 60.</span></label>

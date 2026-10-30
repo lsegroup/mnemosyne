@@ -21,6 +21,9 @@ export interface JobSettings {
   userPrompt?: string;
 }
 
+/** Highest output limit an administrator may set per call (Meta's Muse models accept up to 1 million output tokens). */
+export const MAX_OUTPUT_TOKENS = 1_000_000;
+
 export type JobsFile = Partial<Record<Role, JobSettings>>;
 
 export interface Placeholder {
@@ -121,7 +124,7 @@ function num(v: unknown, field: string, min: number, max: number, integer: boole
 export function validateJobSettings(role: Role, input: Record<string, unknown>): JobSettings {
   const def = JOB_DEFS[role];
   const out: JobSettings = {};
-  const maxTokens = num(input.maxTokens, 'Max output tokens', 256, 200_000, true);
+  const maxTokens = num(input.maxTokens, 'Max output tokens', 256, MAX_OUTPUT_TOKENS, true);
   if (maxTokens !== undefined && maxTokens !== def.defaults.maxTokens) out.maxTokens = maxTokens;
   const temperature = num(input.temperature, 'Temperature', 0, 2, false);
   if (temperature !== undefined) out.temperature = temperature;

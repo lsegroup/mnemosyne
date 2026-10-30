@@ -776,11 +776,14 @@ describe('web portal', () => {
       expect(jobs.text.def.placeholders.map((p: { name: string }) => p.name)).toEqual(['project', 'notes_count', 'notes']);
       expect(jobs.image.def.placeholders.map((p: { name: string }) => p.name)).toEqual(['project', 'article']);
       expect(jobs.pdf.def.usesAi).toBe(false);
+      expect((await put('image', { model: jobs.image.assignment, maxTokens: 1_000_000 })).status).toBe(200); // Meta allows up to 1 million output tokens per call
+      expect((await get()).image.settings.maxTokens).toBe(1_000_000);
+      await put('image', { model: jobs.image.assignment }); // back to the defaults
       const model = jobs.text.assignment;
       expect(model.model).toBe('text-model');
 
       // refused: out-of-range numbers, text, a missing or unknown placeholder, an unknown job
-      for (const bad of [{ maxTokens: 10 }, { maxTokens: 'abc' }, { maxTokens: 9_999_999 }, { temperature: 5 }, { topP: 0 }, { timeoutMinutes: 999 }, { userPrompt: 'no placeholder here' }, { userPrompt: 'x {{notes}} {{bogus}}' }]) {
+      for (const bad of [{ maxTokens: 10 }, { maxTokens: 'abc' }, { maxTokens: 1_000_001 }, { temperature: 5 }, { topP: 0 }, { timeoutMinutes: 999 }, { userPrompt: 'no placeholder here' }, { userPrompt: 'x {{notes}} {{bogus}}' }]) {
         expect((await put('text', { model, ...bad })).status, JSON.stringify(bad)).toBe(400);
       }
       expect((await put('nope', {})).status).toBe(400);
