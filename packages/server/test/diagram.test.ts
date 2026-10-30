@@ -132,7 +132,7 @@ describe('drawing the plan', () => {
 });
 
 describe('the diagram in the PDF', () => {
-  it('is painted as vectors on a landscape page when it is wide, and the other pages stay portrait', async () => {
+  it('is painted as vectors, turned a quarter turn on a portrait page when it is wide: every page of the PDF stays portrait A4', async () => {
     const plan = parsePlan(fixture('load-balancer'), 'lb');
     const scene = layout(plan);
     let drawn = 0;
@@ -148,9 +148,17 @@ describe('the diagram in the PDF', () => {
     });
     expect(drawn).toBe(1);
     const text = pdf.toString('latin1');
-    expect(text).toContain('/MediaBox [0 0 841.89 595.28]'); // the landscape page
-    expect(text).toContain('/MediaBox [0 0 595.28 841.89]'); // cover and article stay portrait
+    expect(text).not.toContain('/MediaBox [0 0 841.89 595.28]'); // no landscape page
+    expect((text.match(/\/MediaBox \[0 0 595\.28 841\.89\]/g) ?? []).length).toBeGreaterThanOrEqual(4); // cover, index, diagram, article
+    expect(text).toMatch(/\b0 -1 1 0 [\d.]+ [\d.]+ cm\b/); // the quarter turn (counter-clockwise: text reads bottom to top)
     expect(text).not.toContain('NaN');
+
+    // a diagram that is not wide stays upright on its page
+    const small = parsePlan(JSON.stringify({ columns: [{ nodes: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }, { id: 'c', label: 'C' }, { id: 'd', label: 'D' }] }], links: [{ from: 'a', to: 'b' }, { from: 'b', to: 'c' }, { from: 'c', to: 'd' }] }), 'x');
+    const sc = layout(small);
+    expect(sc.width / sc.height).toBeLessThan(1.25);
+    const upright = await buildPdf({ title: 'T', subtitle: '', generatedAt: new Date().toISOString(), model: 'm', noteCount: 1, markdown: '## Overview\n\nText.', compress: false, diagram: { vector: { width: sc.width, height: sc.height, draw: (d, x, y, s) => drawScene(d, sc, x, y, s) }, caption: 'c' } });
+    expect(upright.toString('latin1')).not.toMatch(/\b0 -1 1 0 [\d.]+ [\d.]+ cm\b/);
   });
 });
 

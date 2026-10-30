@@ -174,9 +174,9 @@ export function buildPdf(input: PdfInput): Promise<Buffer> {
   // ---- reserved index pages (filled once the page numbers are known) ----
   for (let i = 0; i < tocPages; i++) doc.addPage();
 
-  // ---- content ---- (a wide drawing gets a landscape page of its own, so its text stays readable)
+  // ---- content ---- (every page stays portrait A4; a wide drawing is turned a quarter turn so it runs up the whole page)
   const wide = !!input.diagram?.vector && input.diagram.vector.width / input.diagram.vector.height >= 1.25;
-  doc.addPage(wide ? { size: 'A4', layout: 'landscape', margins: M } : undefined);
+  doc.addPage();
   let outlineH2: ReturnType<typeof doc.outline.addItem> | null = null;
   const heading = (level: number, text: string) => {
     const size = level <= 2 ? 19 : level === 3 ? 14 : 12;
@@ -232,7 +232,28 @@ export function buildPdf(input: PdfInput): Promise<Buffer> {
     doc.y = y + lh;
   };
 
-  if (input.diagram) {
+  if (input.diagram && input.diagram.vector && wide) {
+    // The page is turned a quarter turn counter-clockwise (text reads bottom to top, the top of the picture is at the left edge):
+    // inside the turned frame the heading, the caption and the drawing are laid out like on a landscape page, but the frame is
+    // as long as the whole page, so the picture is as large as it can be.
+    const d = input.diagram;
+    const v = d.vector!;
+    const side = 24;
+    const footer = 56;
+    const frameW = doc.page.height - side - footer; // along the page height
+    const frameH = doc.page.width - 2 * side; // across the page
+    doc.outline.addItem('Workflow diagram');
+    doc.save();
+    doc.translate(side, doc.page.height - footer).rotate(-90);
+    doc.font('Helvetica-Bold').fontSize(19).fillColor(COLOURS.violet).text('Workflow diagram', 0, 0, { lineBreak: false });
+    doc.moveTo(0, 27).lineTo(frameW, 27).lineWidth(0.6).strokeColor(COLOURS.line).stroke();
+    doc.font('Helvetica').fontSize(9).fillColor(COLOURS.muted).text(pdfText(d.caption), 0, 33, { lineBreak: false });
+    const top = 54;
+    const s = Math.min(frameW / v.width, (frameH - top) / v.height);
+    v.draw(doc, (frameW - v.width * s) / 2, top, s);
+    doc.restore();
+    doc.addPage();
+  } else if (input.diagram) {
     heading(2, 'Workflow diagram');
     doc.font('Helvetica').fontSize(9).fillColor(COLOURS.muted).text(pdfText(input.diagram.caption), M.left, doc.y, { width: W });
     doc.moveDown(0.6);

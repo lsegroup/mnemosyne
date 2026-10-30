@@ -814,7 +814,7 @@ describe('web portal', () => {
       const bytes = Buffer.from(await pdf.arrayBuffer());
       expect(bytes.subarray(0, 5).toString()).toBe('%PDF-');
       expect((bytes.toString('latin1').match(/\/Type \/Page\b/g) ?? []).length).toBeGreaterThanOrEqual(4); // cover, index, diagram, content
-      expect(bytes.toString('latin1')).toContain('/MediaBox [0 0 841.89 595.28]'); // the wide diagram has a landscape page of its own
+      expect(bytes.toString('latin1')).not.toContain('/MediaBox [0 0 841.89 595.28]'); // every page stays portrait; a wide diagram is turned on its page
       const page = await (await fetch(`${base}/p/alpha`, { headers: { cookie: dev } })).text();
       expect(page).toContain('Download PDF');
       expect(page).toContain('Workflow diagram');
