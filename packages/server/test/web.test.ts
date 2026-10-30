@@ -455,7 +455,7 @@ describe('web portal', () => {
   describe('AI documentation (agreement, spending guards, PDF)', () => {
     let llm: Server;
     let llmBase = '';
-    const calls = { chat: 0, image: 0, briefMax: 0 };
+    const calls = { chat: 0, image: 0, briefMax: 0, limits: [] as number[] };
     const dropped = { once: false };
     let png: Buffer;
 
@@ -473,6 +473,14 @@ describe('web portal', () => {
           if (req.headers.authorization !== 'Bearer llm-key-1234567890') {
             res.writeHead(401);
             res.end('{}');
+          } else if (req.url === '/v1/chat/completions' && raw.includes('LIMIT-TEST')) {
+            const b = JSON.parse(raw) as { max_tokens?: number; max_completion_tokens?: number };
+            const asked = b.max_tokens ?? b.max_completion_tokens ?? 0;
+            calls.limits.push(asked);
+            if (asked > 16000) {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: { message: 'max_tokens is too large: this model supports at most 16000 output tokens' } }));
+            } else reply({ choices: [{ message: { content: 'ok within the model limit' }, finish_reason: 'stop' }], usage: { prompt_tokens: 5, completion_tokens: 5 } });
           } else if (req.url === '/v1/chat/completions' && raw.includes('DROP-ALWAYS')) {
             req.socket.destroy(); // connection reset, every time
           } else if (req.url === '/v1/chat/completions' && raw.includes('DROP-ONCE') && !dropped.once) {
@@ -678,6 +686,19 @@ describe('web portal', () => {
       await expect(chat(provider, 'm', 'sys', 'DROP-ALWAYS hello', { maxTokens: 100 })).rejects.toThrow(/Could not reach the provider \((?!network error)[^)]+\)/);
       calls.chat = before;
     }, 20_000);
+
+    it('asks for up to 50,000 tokens, falls back to the model maximum when the provider refuses, and shows the worst case cost', async () => {
+      const { chat } = await import('../src/llm-call-chat.js');
+      const provider = { id: 'x', label: 'Fake', kind: 'openai-compatible', baseUrl: llmBase, apiKey: 'llm-key-1234567890' } as never;
+      const r = await chat(provider, 'm', 'sys', 'LIMIT-TEST please', { maxTokens: 50_000 });
+      expect(r.text).toContain('within the model limit');
+      expect(calls.limits.slice(-5)).toEqual([50_000, 50_000, 16_000]); // refused twice (both field names), then the model maximum worked
+      const admin = cookiesOf(await signIn('admin-code'));
+      const est = await (await api(admin, '/estimate?kind=wiki')).json();
+      const facts = Object.fromEntries(est.facts as string[][]);
+      expect(facts['Size']).toContain('up to 50,000 out');
+      expect(facts['Estimated cost']).toBeTruthy(); // the fake model has no list price, so it says so; priced models add 'at most $X'
+    });
 
     it('compresses large pages with gzip when the browser accepts it', async () => {
       const dev = cookiesOf(await signIn('dev-code'));

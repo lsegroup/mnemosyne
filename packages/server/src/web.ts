@@ -26,8 +26,11 @@ const OAUTH_COOKIE = 'mnemosyne_oauth';
 const ADMIN_OAUTH_COOKIE = 'mnemosyne_admin_oauth';
 const SESSION_TTL_S = 8 * 3600;
 /** The documentation area stays signed in for a month; GitLab is re-checked silently every 12 h (refresh token). */
-/** Output limit of the drawing-brief call. Reasoning models (muse-spark) think first; 700 left nothing for the answer. */
-const DIAGRAM_BRIEF_TOKENS = 6000;
+/** Output limit of the drawing-brief call. Reasoning models (muse-spark) think first; 700, then 6000, were too small. */
+const DIAGRAM_BRIEF_TOKENS = 50_000;
+/** Output limit of the article call: major projects (hundreds of notes) need long answers. */
+const WIKI_MAX_TOKENS = 50_000;
+const money = (usd: number) => (usd < 0.01 ? '<0.01' : usd.toFixed(2));
 const DOCS_SESSION_TTL_S = 30 * 24 * 3600;
 const MEMBER_FRESH_MS = 12 * 3600 * 1000;
 const OAUTH_TTL_S = 10 * 60;
@@ -610,7 +613,8 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       if (!(await nodeIndex!.inProject(project)).length) return { error: 'This project has no notes yet, so there is nothing to write the documentation from.' };
       const gl = null as null;
       const prompt = buildWikiPrompt(project, gl, await nodeIndex!.inProject(project));
-      const est = estimateText(text.model, prompt.inputTokens, 12000);
+      const est = estimateText(text.model, prompt.inputTokens, 12_000); // typical answer
+      const max = estimateText(text.model, prompt.inputTokens, WIKI_MAX_TOKENS); // whole limit used
       return {
         key: `${text.provider.id}:${text.model}`,
         what: `Mnemosyne will send this project's notes (credentials masked first) to ${text.provider.label} and ask the AI to write the project page: product description, hardware and software requirements, and disaster-recovery documentation.`,
@@ -618,10 +622,10 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
           ['Provider', `${text.provider.label}`],
           ['Model', text.model],
           ['Notes sent', `${prompt.noteCount}`],
-          ['Size', `about ${prompt.inputTokens.toLocaleString('en-US')} tokens in, up to 12,000 out`],
-          ['Estimated cost', est.usd === null ? 'unknown (no list price for this model)' : `about $${est.usd < 0.01 ? '<0.01' : est.usd.toFixed(2)}`],
+          ['Size', `about ${prompt.inputTokens.toLocaleString('en-US')} tokens in, the AI may write up to ${WIKI_MAX_TOKENS.toLocaleString('en-US')} out (a large project can take several minutes)`],
+          ['Estimated cost', est.usd === null || max.usd === null ? 'unknown (no list price for this model)' : `about $${money(est.usd)} (at most $${money(max.usd)} if the whole ${WIKI_MAX_TOKENS.toLocaleString('en-US')}-token limit is used)`],
         ],
-        usd: est.usd,
+        usd: max.usd,
       };
     }
     const wiki = await docStore!.latest(project, 'wiki');
@@ -629,8 +633,10 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     const image = await providers!.getAssigned('image');
     if (!image) return { error: 'Choose a model for Images in Admin → LLM first.' };
     const wikiChars = Math.min((await docStore!.read(wiki)).length, 60_000);
-    const est = estimateText(text.model, approxTokens(wikiChars) + 400, DIAGRAM_BRIEF_TOKENS);
-    const usd = (est.usd ?? 0) + IMAGE_PRICE_USD;
+    const typical = estimateText(text.model, approxTokens(wikiChars) + 400, 4000); // the first real brief used 2,692 tokens
+    const worst = estimateText(text.model, approxTokens(wikiChars) + 400, DIAGRAM_BRIEF_TOKENS);
+    const usd = (typical.usd ?? 0) + IMAGE_PRICE_USD;
+    const usdMax = (worst.usd ?? 0) + IMAGE_PRICE_USD;
     return {
       key: `${text.provider.id}:${text.model}|${image.provider.id}:${image.model}`,
       what: `Two AI calls: ${text.provider.label} first turns the article into a drawing brief, then ${image.provider.label} draws the workflow diagram from it.`,
@@ -638,9 +644,9 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         ['Text model', `${text.provider.label} / ${text.model}`],
         ['Image model', `${image.provider.label} / ${image.model}`],
         ['Based on', `the article from ${wiki.generatedAt.slice(0, 16).replace('T', ' ')} UTC`],
-        ['Estimated cost', `about $${usd.toFixed(2)} (one image at about $${IMAGE_PRICE_USD.toFixed(2)})`],
+        ['Estimated cost', `about $${money(usd)} (one image at about $${money(IMAGE_PRICE_USD)}; at most $${money(usdMax)} if the whole ${DIAGRAM_BRIEF_TOKENS.toLocaleString('en-US')}-token limit of the drawing brief is used)`],
       ],
-      usd,
+      usd: usdMax,
     };
   };
 
@@ -667,7 +673,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       const text = (await providers!.getAssigned('text'))!;
       if (kind === 'wiki') {
         const prompt = buildWikiPrompt(project, glName, await nodeIndex!.inProject(project));
-        const out = await chat(text.provider, text.model, prompt.system, prompt.user, { maxTokens: 12000 });
+        const out = await chat(text.provider, text.model, prompt.system, prompt.user, { maxTokens: WIKI_MAX_TOKENS });
         const meta = await docStore!.save(
           { kind: 'wiki', project, model: `${text.provider.label} / ${text.model}`, by: user, noteCount: prompt.noteCount, inputTokens: out.inputTokens, outputTokens: out.outputTokens, ext: 'md' },
           redact(stripFence(out.text)),
