@@ -117,6 +117,12 @@ export function estimateText(model: string, inputTokens: number, outputTokens: n
 // ----------------------------------------------------------------------------
 const MAX_NOTE_CHARS = 3_000_000; // ~750k tokens: stays inside a 1M-token context
 
+/** Prompt overrides set by an administrator; an empty value means the built-in default. */
+export interface PromptTemplates {
+  system?: string;
+  user?: string;
+}
+
 export interface WikiPrompt {
   system: string;
   user: string;
@@ -124,8 +130,40 @@ export interface WikiPrompt {
   inputTokens: number;
 }
 
+/** Replaces {{name}} placeholders; values are inserted as they are and never scanned again. */
+export function fillTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (m, k: string) => (k in vars ? vars[k]! : m));
+}
+
+/** What the AI is told when it writes a project's documentation page. Editable in Admin -> LLM (job Text). */
+export const DEFAULT_WIKI_SYSTEM = [
+  'You are a technical writer producing encyclopedia-style product and disaster-recovery documentation for one software project.',
+  'Write ONLY from the notes you are given. Do not invent facts, versions, numbers or names. If something important is not covered by the notes, say it is "not documented".',
+  'Never write passwords, tokens, API keys or private keys, even if a note seems to contain one.',
+  'Output GitHub-flavoured Markdown only, with no preamble and no closing remarks.',
+].join(' ');
+
+export const DEFAULT_WIKI_USER = [
+  'Project: {{project}}',
+  '',
+  'Write the project documentation page. Do NOT write a title heading (the page already shows the name) and do NOT write a change history or timeline (the server adds the list of the latest notes itself). Use exactly this structure:',
+  '1. FIRST, with no heading: one product-description paragraph (3 to 6 sentences) saying what the product is, who uses it, what it does and its current state.',
+  '2. "## Hardware and software requirements": one paragraph or short bullet list of the hardware (hosts, CPU/RAM/disk/network where the notes say) and software (OS, runtimes, databases, services, versions, licences, external dependencies) it needs. Say "not documented" for anything the notes do not state.',
+  '3. "## Disaster recovery": complete recovery documentation, written so an engineer who has never seen the system can rebuild it. Use these sub-headings:',
+  '   "### What is required" (accounts, repositories, secrets by NAME only and where they are stored, DNS/certificates, backups, hosts)',
+  '   "### Installation / rebuild steps" (a numbered list in the order to execute, with the real hostnames, paths, service names and commands from the notes)',
+  '   "### Access" (how to reach it: URLs, ports, login method, which role/account type, which host to connect to; never write passwords or tokens)',
+  '   "### Testing and verification" (numbered checks that prove the system works after a rebuild, with the expected result)',
+  '   "### Known gotchas" (only issues from the notes that matter for a rebuild)',
+  'Keep it factual and scannable: short paragraphs, numbered steps, tables where they help. Where the notes conflict, prefer the newer note.',
+  '',
+  'There are {{notes_count}} notes. Here they are, newest first:',
+  '',
+  '{{notes}}',
+  ].join('\n');
+
 /** The notes are masked (credentials) before they ever leave this server. */
-export function buildWikiPrompt(project: string, gitlabName: string | null, notes: MemoryNode[]): WikiPrompt {
+export function buildWikiPrompt(project: string, gitlabName: string | null, notes: MemoryNode[], tpl: PromptTemplates = {}): WikiPrompt {
   const ordered = [...notes].sort((a, b) => (b.observed_at ?? '').localeCompare(a.observed_at ?? ''));
   let used = 0;
   const parts: string[] = [];
@@ -144,49 +182,30 @@ export function buildWikiPrompt(project: string, gitlabName: string | null, note
     used += block.length;
     parts.push(block);
   }
-  const system = [
-    'You are a technical writer producing encyclopedia-style product and disaster-recovery documentation for one software project.',
-    'Write ONLY from the notes you are given. Do not invent facts, versions, numbers or names. If something important is not covered by the notes, say it is "not documented".',
-    'Never write passwords, tokens, API keys or private keys, even if a note seems to contain one.',
-    'Output GitHub-flavoured Markdown only, with no preamble and no closing remarks.',
-  ].join(' ');
-  const user = [
-    `Project: ${gitlabName ?? project}`,
-    '',
-    'Write the project documentation page. Do NOT write a title heading (the page already shows the name) and do NOT write a change history or timeline (the server adds the list of the latest notes itself). Use exactly this structure:',
-    '1. FIRST, with no heading: one product-description paragraph (3 to 6 sentences) saying what the product is, who uses it, what it does and its current state.',
-    '2. "## Hardware and software requirements": one paragraph or short bullet list of the hardware (hosts, CPU/RAM/disk/network where the notes say) and software (OS, runtimes, databases, services, versions, licences, external dependencies) it needs. Say "not documented" for anything the notes do not state.',
-    '3. "## Disaster recovery": complete recovery documentation, written so an engineer who has never seen the system can rebuild it. Use these sub-headings:',
-    '   "### What is required" (accounts, repositories, secrets by NAME only and where they are stored, DNS/certificates, backups, hosts)',
-    '   "### Installation / rebuild steps" (a numbered list in the order to execute, with the real hostnames, paths, service names and commands from the notes)',
-    '   "### Access" (how to reach it: URLs, ports, login method, which role/account type, which host to connect to; never write passwords or tokens)',
-    '   "### Testing and verification" (numbered checks that prove the system works after a rebuild, with the expected result)',
-    '   "### Known gotchas" (only issues from the notes that matter for a rebuild)',
-    'Keep it factual and scannable: short paragraphs, numbered steps, tables where they help. Where the notes conflict, prefer the newer note.',
-    '',
-    `There are ${parts.length} notes. Here they are, newest first:`,
-    '',
-    parts.join('\n\n'),
-  ].join('\n');
+  const system = tpl.system?.trim() ? tpl.system : DEFAULT_WIKI_SYSTEM;
+  const user = fillTemplate(tpl.user?.trim() ? tpl.user : DEFAULT_WIKI_USER, { project: gitlabName ?? project, notes_count: String(parts.length), notes: parts.join('\n\n') });
   return { system, user, noteCount: parts.length, inputTokens: approxTokens(system.length + user.length) };
 }
 
-export function buildDiagramBriefPrompt(project: string, wiki: string): { system: string; user: string } {
+/** What the text model is told when it writes the drawing brief for the image model. Editable in Admin -> LLM (job Images). */
+export const DEFAULT_BRIEF_SYSTEM = 'You write prompts for an image-generation model. Output only the prompt text, in English, no quotes, no markdown, no explanations.';
+export const DEFAULT_BRIEF_USER = [
+  'Below is an article about the software project "{{project}}".',
+  'Write ONE prompt that makes an image model draw a clear WORKFLOW / ARCHITECTURE DIAGRAM of it:',
+  '- a clean flow chart on a plain white background, dark navy lines and boxes with violet and teal accent colours, flat vector style, landscape orientation',
+  '- boxes for the main components or steps (at most 12), connected by labelled arrows that show the real flow of work or data from start to finish',
+  '- short, legible English labels taken from the article; no paragraphs of text, no logos, no people, no photographs',
+  '- a title at the top with the project name',
+  'Name each box and each arrow label explicitly in the prompt so the model does not invent its own.',
+  '',
+  '--- ARTICLE ---',
+  '{{article}}',
+].join('\n');
+
+export function buildDiagramBriefPrompt(project: string, wiki: string, tpl: PromptTemplates = {}): { system: string; user: string } {
   return {
-    system:
-      'You write prompts for an image-generation model. Output only the prompt text, in English, no quotes, no markdown, no explanations.',
-    user: [
-      `Below is an article about the software project "${project}".`,
-      'Write ONE prompt that makes an image model draw a clear WORKFLOW / ARCHITECTURE DIAGRAM of it:',
-      '- a clean flow chart on a plain white background, dark navy lines and boxes with violet and teal accent colours, flat vector style, landscape orientation',
-      '- boxes for the main components or steps (at most 12), connected by labelled arrows that show the real flow of work or data from start to finish',
-      '- short, legible English labels taken from the article; no paragraphs of text, no logos, no people, no photographs',
-      '- a title at the top with the project name',
-      'Name each box and each arrow label explicitly in the prompt so the model does not invent its own.',
-      '',
-      '--- ARTICLE ---',
-      wiki.slice(0, 60_000),
-    ].join('\n'),
+    system: tpl.system?.trim() ? tpl.system : DEFAULT_BRIEF_SYSTEM,
+    user: fillTemplate(tpl.user?.trim() ? tpl.user : DEFAULT_BRIEF_USER, { project, article: wiki.slice(0, 60_000) }),
   };
 }
 

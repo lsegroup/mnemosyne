@@ -3,11 +3,12 @@ import { gzipSync } from 'node:zlib';
 import { Router, urlencoded, type NextFunction, type Request, type Response } from 'express';
 import type { MnemosyneConfig } from './config.js';
 import { MIN_SECRET_LENGTH, deriveKeys, hashPassword, signToken, verifyPassword, verifyToken, type DerivedKeys } from './secrets.js';
-import { ProviderStore, ProviderValidationError } from './provider-store.js';
+import { ProviderStore, ProviderValidationError, ROLES, type Role } from './provider-store.js';
 import { fetchModels } from './llm-models.js';
 import { AuditLog, clientIp, diffLines, type AuditInput } from './audit.js';
 import { SettingsStore, SettingsValidationError, applyPortalInput, type GitLabSettings, type PortalSettings } from './settings-store.js';
 import { adminPage, docsNotFound, homePage, loginPage, nodePage, notesPage, projectHome, type ProjectCard } from './web-pages.js';
+import { JOB_DEFS, effectiveJob, validateJobSettings, type JobSettings } from './ai-jobs.js';
 import { MemberStore, type MemberEntry } from './member-store.js';
 import { NodeIndex, fetchMemberships, matchProject, redact, slug, type GitLabProject } from './docs.js';
 import { outline, renderMarkdown } from './markdown.js';
@@ -26,10 +27,6 @@ const OAUTH_COOKIE = 'mnemosyne_oauth';
 const ADMIN_OAUTH_COOKIE = 'mnemosyne_admin_oauth';
 const SESSION_TTL_S = 8 * 3600;
 /** The documentation area stays signed in for a month; GitLab is re-checked silently every 12 h (refresh token). */
-/** Output limit of the drawing-brief call. Reasoning models (muse-spark) think first; 700, then 6000, were too small. */
-const DIAGRAM_BRIEF_TOKENS = 50_000;
-/** Output limit of the article call: major projects (hundreds of notes) need long answers. */
-const WIKI_MAX_TOKENS = 50_000;
 const money = (usd: number) => (usd < 0.01 ? '<0.01' : usd.toFixed(2));
 const DOCS_SESSION_TTL_S = 30 * 24 * 3600;
 const MEMBER_FRESH_MS = 12 * 3600 * 1000;
@@ -609,21 +606,24 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   const describeJob = async (project: string, kind: string) => {
     const text = await providers!.getAssigned('text');
     if (!text) return { error: 'Choose a model for Text in Admin → LLM first.' };
+    const jobs = await providers!.getJobs();
+    const tj = effectiveJob('text', jobs.text);
+    const ij = effectiveJob('image', jobs.image);
     if (kind === 'wiki') {
       if (!(await nodeIndex!.inProject(project)).length) return { error: 'This project has no notes yet, so there is nothing to write the documentation from.' };
       const gl = null as null;
-      const prompt = buildWikiPrompt(project, gl, await nodeIndex!.inProject(project));
-      const est = estimateText(text.model, prompt.inputTokens, 12_000); // typical answer
-      const max = estimateText(text.model, prompt.inputTokens, WIKI_MAX_TOKENS); // whole limit used
+      const prompt = buildWikiPrompt(project, gl, await nodeIndex!.inProject(project), { system: tj.systemPrompt, user: tj.userPrompt });
+      const est = estimateText(text.model, prompt.inputTokens, Math.min(12_000, tj.maxTokens)); // typical answer
+      const max = estimateText(text.model, prompt.inputTokens, tj.maxTokens); // whole limit used
       return {
-        key: `${text.provider.id}:${text.model}`,
+        key: `${text.provider.id}:${text.model}:${tj.maxTokens}:${tj.userPrompt.length}:${tj.systemPrompt.length}`,
         what: `Mnemosyne will send this project's notes (credentials masked first) to ${text.provider.label} and ask the AI to write the project page: product description, hardware and software requirements, and disaster-recovery documentation.`,
         facts: [
           ['Provider', `${text.provider.label}`],
           ['Model', text.model],
           ['Notes sent', `${prompt.noteCount}`],
-          ['Size', `about ${prompt.inputTokens.toLocaleString('en-US')} tokens in, the AI may write up to ${WIKI_MAX_TOKENS.toLocaleString('en-US')} out (a large project can take several minutes)`],
-          ['Estimated cost', est.usd === null || max.usd === null ? 'unknown (no list price for this model)' : `about $${money(est.usd)} (at most $${money(max.usd)} if the whole ${WIKI_MAX_TOKENS.toLocaleString('en-US')}-token limit is used)`],
+          ['Size', `about ${prompt.inputTokens.toLocaleString('en-US')} tokens in, the AI may write up to ${tj.maxTokens.toLocaleString('en-US')} out (a large project can take several minutes)`],
+          ['Estimated cost', est.usd === null || max.usd === null ? 'unknown (no list price for this model)' : `about $${money(est.usd)} (at most $${money(max.usd)} if the whole ${tj.maxTokens.toLocaleString('en-US')}-token limit is used)`],
         ],
         usd: max.usd,
       };
@@ -633,18 +633,18 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     const image = await providers!.getAssigned('image');
     if (!image) return { error: 'Choose a model for Images in Admin → LLM first.' };
     const wikiChars = Math.min((await docStore!.read(wiki)).length, 60_000);
-    const typical = estimateText(text.model, approxTokens(wikiChars) + 400, 4000); // the first real brief used 2,692 tokens
-    const worst = estimateText(text.model, approxTokens(wikiChars) + 400, DIAGRAM_BRIEF_TOKENS);
+    const typical = estimateText(text.model, approxTokens(wikiChars) + 400, Math.min(4000, ij.maxTokens)); // the first real brief used 2,692 tokens
+    const worst = estimateText(text.model, approxTokens(wikiChars) + 400, ij.maxTokens);
     const usd = (typical.usd ?? 0) + IMAGE_PRICE_USD;
     const usdMax = (worst.usd ?? 0) + IMAGE_PRICE_USD;
     return {
-      key: `${text.provider.id}:${text.model}|${image.provider.id}:${image.model}`,
+      key: `${text.provider.id}:${text.model}|${image.provider.id}:${image.model}:${ij.maxTokens}:${ij.userPrompt.length}:${ij.systemPrompt.length}`,
       what: `Two AI calls: ${text.provider.label} first turns the article into a drawing brief, then ${image.provider.label} draws the workflow diagram from it.`,
       facts: [
         ['Text model', `${text.provider.label} / ${text.model}`],
         ['Image model', `${image.provider.label} / ${image.model}`],
         ['Based on', `the article from ${wiki.generatedAt.slice(0, 16).replace('T', ' ')} UTC`],
-        ['Estimated cost', `about $${money(usd)} (one image at about $${money(IMAGE_PRICE_USD)}; at most $${money(usdMax)} if the whole ${DIAGRAM_BRIEF_TOKENS.toLocaleString('en-US')}-token limit of the drawing brief is used)`],
+        ['Estimated cost', `about $${money(usd)} (one image at about $${money(IMAGE_PRICE_USD)}; at most $${money(usdMax)} if the whole ${ij.maxTokens.toLocaleString('en-US')}-token limit of the drawing brief is used)`],
       ],
       usd: usdMax,
     };
@@ -672,8 +672,9 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     try {
       const text = (await providers!.getAssigned('text'))!;
       if (kind === 'wiki') {
-        const prompt = buildWikiPrompt(project, glName, await nodeIndex!.inProject(project));
-        const out = await chat(text.provider, text.model, prompt.system, prompt.user, { maxTokens: WIKI_MAX_TOKENS });
+        const tj = effectiveJob('text', (await providers!.getJobs()).text);
+        const prompt = buildWikiPrompt(project, glName, await nodeIndex!.inProject(project), { system: tj.systemPrompt, user: tj.userPrompt });
+        const out = await chat(text.provider, text.model, prompt.system, prompt.user, { maxTokens: tj.maxTokens, temperature: tj.temperature, topP: tj.topP, timeoutMs: tj.timeoutMinutes * 60_000 });
         const meta = await docStore!.save(
           { kind: 'wiki', project, model: `${text.provider.label} / ${text.model}`, by: user, noteCount: prompt.noteCount, inputTokens: out.inputTokens, outputTokens: out.outputTokens, ext: 'md' },
           redact(stripFence(out.text)),
@@ -685,7 +686,8 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         const wiki = (await docStore!.latest(project, 'wiki'))!;
         const image = (await providers!.getAssigned('image'))!;
         const wikiText = (await docStore!.read(wiki)).toString('utf8');
-        const brief = buildDiagramBriefPrompt(project, wikiText);
+        const ij = effectiveJob('image', (await providers!.getJobs()).image);
+        const brief = buildDiagramBriefPrompt(project, wikiText, { system: ij.systemPrompt, user: ij.userPrompt });
         const step = async <T,>(label: string, fn: () => Promise<T>): Promise<T> => {
           try {
             return await fn();
@@ -694,8 +696,8 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
             throw err;
           }
         };
-        const prompt = await step('Step 1 of 2 (drawing brief, text model)', () => chat(text.provider, text.model, brief.system, brief.user, { maxTokens: DIAGRAM_BRIEF_TOKENS }));
-        const img = await step('Step 2 of 2 (picture, image model)', () => generateImage(image.provider, image.model, redact(prompt.text.trim()).slice(0, 3500)));
+        const prompt = await step('Step 1 of 2 (drawing brief, text model)', () => chat(text.provider, text.model, brief.system, brief.user, { maxTokens: ij.maxTokens, temperature: ij.temperature, topP: ij.topP, timeoutMs: ij.timeoutMinutes * 60_000 }));
+        const img = await step('Step 2 of 2 (picture, image model)', () => generateImage(image.provider, image.model, redact(prompt.text.trim()).slice(0, 3500), Math.max(4, Math.min(ij.timeoutMinutes, 15)) * 60_000));
         const ext = img.mime === 'image/png' ? 'png' : img.mime === 'image/jpeg' ? 'jpg' : 'webp';
         const meta = await docStore!.save(
           { kind: 'diagram', project, model: `${image.provider.label} / ${image.model}`, by: user, basedOn: wiki.id, inputTokens: prompt.inputTokens, outputTokens: prompt.outputTokens, ext },
@@ -1001,6 +1003,50 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   const who = (req: Request) => adminSession(req)?.u ?? 'unknown';
 
   api.get('/providers', handle(() => providers!.list()));
+
+  // Step 3: every job (text / images / pdf) as one block - model, limits, sampling values and the prompts, all editable.
+  const jobView = async () => {
+    const list = await providers!.list();
+    return Object.fromEntries(
+      ROLES.map((role) => [role, { def: JOB_DEFS[role], settings: list.jobs[role] ?? {}, effective: effectiveJob(role, list.jobs[role]), assignment: list.assignments[role] ?? null }]),
+    );
+  };
+  api.get('/llm/jobs', handle(async () => ({ jobs: await jobView() })));
+  api.put(
+    '/llm/jobs/:role',
+    handle(async (req) => {
+      const role = String(req.params.role) as Role;
+      if (!ROLES.includes(role)) throw new ProviderValidationError('unknown job');
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const settings = validateJobSettings(role, body);
+      const names = new Map((await providers!.list()).providers.map((p) => [p.id, p.label]));
+      const flat = (a: { providerId: string; model: string } | undefined | null, st: JobSettings): Record<string, unknown> => {
+        const e = effectiveJob(role, st);
+        const chars = (t: string, d: string) => (t === d ? 'built-in default' : `${t.length} characters: ${JSON.stringify(t.slice(0, 70))}…`);
+        return {
+          model: a ? `${names.get(a.providerId) ?? a.providerId} / ${a.model}` : undefined,
+          maxTokens: e.maxTokens,
+          temperature: e.temperature ?? 'provider default',
+          topP: e.topP ?? 'provider default',
+          timeoutMinutes: e.timeoutMinutes,
+          systemPrompt: chars(e.systemPrompt, JOB_DEFS[role].defaults.systemPrompt),
+          userPrompt: chars(e.userPrompt, JOB_DEFS[role].defaults.userPrompt),
+        };
+      };
+      const before = await providers!.list();
+      const saved = await providers!.setJob(role, (body.model ?? null) as { providerId?: unknown; model?: unknown } | null, settings);
+      void rec(req, {
+        event: 'update',
+        entityType: 'llm_job',
+        entityId: role,
+        entityName: JOB_DEFS[role].title,
+        user: who(req),
+        changes: diffLines(flat(before.assignments[role], before.jobs[role] ?? {}), flat(saved.assignment, saved.settings)),
+        description: `AI job “${JOB_DEFS[role].title}”: model, limits and prompts saved`,
+      });
+      return { jobs: await jobView() };
+    }),
+  );
   api.post(
     '/providers',
     handle(async (req) => {

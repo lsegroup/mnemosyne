@@ -1,3 +1,4 @@
+import type { JobsFile, JobSettings } from './ai-jobs.js';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -43,6 +44,8 @@ export interface ProviderInput {
 interface StoreFile {
   providers: Provider[];
   assignments: Assignments;
+  /** Per-job AI settings (limits, sampling, prompts) set in the admin UI; see ai-jobs.ts. */
+  jobs?: JobsFile;
   /** Legacy (single "active" provider with one model); migrated on read. */
   activeId?: string | null;
 }
@@ -103,7 +106,7 @@ export class ProviderStore {
   private async write(data: StoreFile): Promise<void> {
     await mkdir(dirname(this.file), { recursive: true });
     const tmp = `${this.file}.${process.pid}.tmp`;
-    const clean: StoreFile = { providers: data.providers.map(({ ...p }) => p), assignments: data.assignments };
+    const clean: StoreFile = { providers: data.providers.map(({ ...p }) => p), assignments: data.assignments, jobs: data.jobs ?? {} };
     await writeFile(tmp, seal(this.encKey, JSON.stringify(clean)), { mode: 0o600 });
     await rename(tmp, this.file);
   }
@@ -120,9 +123,35 @@ export class ProviderStore {
     return run;
   }
 
-  async list(): Promise<{ providers: ProviderPublic[]; assignments: Assignments }> {
+  async list(): Promise<{ providers: ProviderPublic[]; assignments: Assignments; jobs: JobsFile }> {
     const data = await this.read();
-    return { providers: data.providers.map(toPublic), assignments: data.assignments };
+    return { providers: data.providers.map(toPublic), assignments: data.assignments, jobs: data.jobs ?? {} };
+  }
+
+  /** The stored (non-default) settings of every job. */
+  async getJobs(): Promise<JobsFile> {
+    return (await this.read()).jobs ?? {};
+  }
+
+  /**
+   * Saves one job: its model (providerId + model, or null to clear it) and its settings. Other jobs stay untouched.
+   * The model must be one the provider reported.
+   */
+  setJob(role: Role, assignment: { providerId?: unknown; model?: unknown } | null, settings: JobSettings): Promise<{ assignment: Assignments[Role]; settings: JobSettings }> {
+    return this.mutate((data) => {
+      if (assignment && (assignment.providerId || assignment.model)) {
+        const provider = data.providers.find((p) => p.id === assignment.providerId);
+        if (!provider) throw new ProviderValidationError(`${role}: unknown provider`);
+        if (typeof assignment.model !== 'string' || !provider.models.includes(assignment.model)) {
+          throw new ProviderValidationError(`${role}: model is not one of the models this provider reported`);
+        }
+        data.assignments[role] = { providerId: provider.id, model: assignment.model };
+      } else delete data.assignments[role];
+      data.jobs ??= {};
+      if (Object.keys(settings).length) data.jobs[role] = settings;
+      else delete data.jobs[role];
+      return { assignment: data.assignments[role], settings: data.jobs[role] ?? {} };
+    });
   }
 
   /** A provider including its key, for server-side use only (fetching models, later: LLM calls). */

@@ -95,7 +95,7 @@ export async function chat(
   model: string,
   system: string,
   user: string,
-  opts: { maxTokens?: number; timeoutMs?: number } = {},
+  opts: { maxTokens?: number; timeoutMs?: number; temperature?: number; topP?: number } = {},
 ): Promise<ChatResult> {
   const maxTokens = opts.maxTokens ?? 8000;
   const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${p.apiKey}` };
@@ -105,10 +105,12 @@ export async function chat(
   }
 
   const send = async (limitField: 'max_tokens' | 'max_completion_tokens', limit: number) => {
+    // temperature / top_p are sent only when an administrator set them; otherwise the provider's own default applies
+    const sampling = { ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}), ...(opts.topP !== undefined ? { top_p: opts.topP } : {}) };
     const body =
       p.kind === 'anthropic-messages'
-        ? { model, system, max_tokens: limit, messages: [{ role: 'user', content: user }] }
-        : { model, [limitField]: limit, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] };
+        ? { model, system, max_tokens: limit, ...sampling, messages: [{ role: 'user', content: user }] }
+        : { model, [limitField]: limit, ...sampling, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] };
     return fetchWithRetry(endpoint(p), { method: 'POST', headers, body: JSON.stringify(body) }, opts.timeoutMs ?? DEFAULT_TIMEOUT_MS, 'the provider');
   };
 

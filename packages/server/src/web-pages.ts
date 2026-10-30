@@ -2,6 +2,7 @@
 
 import { esc } from './html.js';
 import type { DocMeta, HistoryEntry } from './docgen.js';
+import { JOB_DEFS } from './ai-jobs.js';
 export { esc };
 
 const CSS = `
@@ -243,8 +244,14 @@ input,select{padding:10px 12px;border-radius:8px;border:1px solid var(--line);ba
 input:focus,select:focus{outline:none;border-color:var(--accent)}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .msg{min-height:22px;font-size:14px}.ok{color:#4ade80}.err{color:#ff8b8b}
-.roles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
-.roles .hint{font-size:12px;color:var(--muted)}
+.jobs{display:flex;flex-direction:column;gap:18px;margin-top:14px}
+.job{display:flex;flex-direction:column;gap:14px;padding:18px 20px;border:1px solid var(--line);border-radius:12px;background:var(--panel2)}
+.jobhead{display:flex;align-items:center;gap:12px}.jobhead h4{margin:0;font:600 20px/1.2 "Palatino Linotype","Book Antiqua",Palatino,Georgia,serif;color:var(--title)}
+.tag{padding:2px 10px;border-radius:99px;border:1px solid var(--line);font-size:12px;color:var(--muted)}.tag.ai{border-color:#d8a84a;color:#f0c36a}
+.job .sub{margin:0;color:var(--muted);font-size:13.5px;line-height:1.5}
+.job .nums{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 22px}
+.job .hint{font-size:12px;line-height:1.45;color:var(--muted)}.job .hint code{color:var(--teal)}
+.job textarea{font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;min-height:120px;resize:vertical;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text)}
 .layout>main{min-width:0}.tab>.step{min-width:0}
 .tablewrap{overflow-x:auto;max-width:100%}
 table.audit{font-size:13px;width:100%;min-width:900px}
@@ -259,9 +266,41 @@ table.audit td.desc{min-width:170px;max-width:280px}
 pre.chg{margin:0;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
 pre.chg .p{color:#6ee7a0}pre.chg .m{color:#ff9a9a}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#a3a8b8}
-@media(max-width:860px){.layout{grid-template-columns:1fr}.side{flex-direction:row;position:static}.roles,form.grid{grid-template-columns:1fr}}`;
+@media(max-width:860px){.layout{grid-template-columns:1fr}.side{flex-direction:row;position:static}.job .nums,form.grid{grid-template-columns:1fr}}`;
 
 /** Admin shell; the interactive part lives in {@link ADMIN_JS}, run under the CSP nonce. */
+
+/** Step 3 of the LLM tab: one stacked block per AI job (model, limits, sampling values, prompts). Texts come from ai-jobs.ts. */
+function jobBlocks(): string {
+  const def = (role: 'text' | 'image' | 'pdf') => JOB_DEFS[role];
+  const fmt = (n: number) => n.toLocaleString('en-US');
+  return (['text', 'image', 'pdf'] as const)
+    .map((role) => {
+      const d = def(role);
+      const ph = d.placeholders.length
+        ? `<span class="hint">Placeholders the server fills in: ${d.placeholders.map((p) => `<code>{{${esc(p.name)}}}</code> = ${esc(p.meaning)}${p.required ? ' <b>(required)</b>' : ''}`).join(' · ')}</span>`
+        : '';
+      const ai = d.usesAi
+        ? `<div class="nums">
+      <label>Max output tokens<input id="maxTokens-${role}" inputmode="numeric" placeholder="${fmt(d.defaults.maxTokens)}" autocomplete="off"><span class="hint">The most the AI may write in one call. You pay per token written, so this is the cost ceiling of a call; the agreement popup shows the worst case. Big projects and reasoning models need a high limit. Default ${fmt(d.defaults.maxTokens)}, allowed 256 to 200,000.</span></label>
+      <label>Temperature<input id="temperature-${role}" inputmode="decimal" placeholder="provider default" autocomplete="off"><span class="hint">0 to 2. Lower = more factual and repeatable, higher = more varied. Empty = the provider's own default (the value is not sent).</span></label>
+      <label>Top-p<input id="topP-${role}" inputmode="decimal" placeholder="provider default" autocomplete="off"><span class="hint">0.01 to 1. The share of most-likely words the AI may choose from; lower = safer wording. Empty = the provider's own default (not sent).</span></label>
+      <label>Time limit per call (minutes)<input id="timeoutMinutes-${role}" inputmode="numeric" placeholder="${d.defaults.timeoutMinutes}" autocomplete="off"><span class="hint">A call that takes longer is stopped. Default ${d.defaults.timeoutMinutes}, allowed 1 to 60.</span></label>
+    </div>
+    <label class="wide">${esc(d.systemLabel)}<textarea id="sys-${role}" rows="6" spellcheck="false"></textarea></label>
+    <label class="wide">${esc(d.userLabel)}<textarea id="usr-${role}" rows="14" spellcheck="false"></textarea>${ph}</label>`
+        : '';
+      return `<form class="job" data-role="${role}" id="job-${role}">
+    <div class="jobhead"><h4>${esc(d.title)}</h4><span class="tag${d.usesAi ? ' ai' : ''}">${d.usesAi ? 'AI call · costs money' : 'no AI call yet'}</span></div>
+    <p class="sub">${esc(d.summary)}</p>
+    <label class="wide">Model<select id="m-${role}"></select><span class="hint">Picked from the models your keys can use (step 2).</span></label>
+    ${ai}
+    <div class="row"><button class="btn primary" type="submit">Save ${esc(d.title)} settings</button>${d.usesAi ? `<button class="btn" type="button" data-reset="${role}">Reset to defaults</button>` : ''}<span id="msg-${role}" class="msg"></span></div>
+  </form>`;
+    })
+    .join('\n  ');
+}
+
 export function adminPage(v: AdminView): string {
   const base = esc(v.basePath);
   return shell(
@@ -309,16 +348,11 @@ export function adminPage(v: AdminView): string {
       </div>
 
       <div class="step off" id="step3">
-        <h3><span class="num">3</span> Choose a model for each job</h3>
-        <p class="sub">One model each for text, images and PDF handbooks, picked from the lists above.</p>
-        <form id="assign">
-          <div class="roles">
-            <label>Text<select id="role-text"></select><span class="hint">Documentation, summaries, answers</span></label>
-            <label>Images<select id="role-image"></select><span class="hint">Diagrams and illustrations</span></label>
-            <label>PDF<select id="role-pdf"></select><span class="hint">PDF handbooks</span></label>
-          </div>
-          <div class="row" style="margin-top:16px"><button class="btn primary" type="submit" id="saveRoles">Save choices</button><span id="assignMsg" class="msg"></span></div>
-        </form>
+        <h3><span class="num">3</span> Choose the model and settings for each job</h3>
+        <p class="sub">Every value the AI calls use is set here, nothing is fixed in the program. Leave a number empty to use the default; “Reset to defaults” puts the built-in prompts back. A change applies to the next run (the agreement popup then shows the new worst-case cost).</p>
+        <div class="jobs">
+  ${jobBlocks()}
+        </div>
       </div>
     </section>
 
@@ -426,30 +460,52 @@ function ADMIN_JS(basePath: string): string {
   function ordered(role,ids){
     var re=HINTS[role],hit=[],rest=[];ids.forEach(function(i){(re.test(i)?hit:rest).push(i)});return hit.concat(rest);
   }
+  var JOBS={};
+  function modelOptions(role,sel,any){
+    sel.textContent='';sel.disabled=!any;
+    var none=document.createElement('option');none.value='';none.textContent='— not set —';sel.appendChild(none);
+    data.providers.forEach(function(p){
+      if(!p.models.length)return;
+      var g=document.createElement('optgroup');g.label=p.label;
+      ordered(role,p.models).forEach(function(mid){var o=document.createElement('option');o.value=p.id+'::'+mid;o.textContent=mid;g.appendChild(o)});
+      sel.appendChild(g);
+    });
+  }
+  function fillJob(role){
+    var j=JOBS[role];if(!j)return;
+    var a=j.assignment;if(a)$('m-'+role).value=a.providerId+'::'+a.model;
+    if(!j.def.usesAi)return;
+    var st=j.settings||{},e=j.effective;
+    ['maxTokens','temperature','topP','timeoutMinutes'].forEach(function(k){$(k+'-'+role).value=st[k]===undefined?'':st[k]});
+    $('sys-'+role).value=e.systemPrompt;$('usr-'+role).value=e.userPrompt;
+  }
   function renderRoles(){
     var any=data.providers.some(function(p){return p.models.length});
     $('step3').className='step'+(any?'':' off');
-    ROLES.forEach(function(role){
-      var sel=$('role-'+role);sel.textContent='';sel.disabled=!any;
-      var none=document.createElement('option');none.value='';none.textContent='— not set —';sel.appendChild(none);
-      data.providers.forEach(function(p){
-        if(!p.models.length)return;
-        var g=document.createElement('optgroup');g.label=p.label;
-        ordered(role,p.models).forEach(function(mid){var o=document.createElement('option');o.value=p.id+'::'+mid;o.textContent=mid;g.appendChild(o)});
-        sel.appendChild(g);
-      });
-      var a=data.assignments[role];if(a)sel.value=a.providerId+'::'+a.model;
-    });
-    $('saveRoles').disabled=!any;
+    ROLES.forEach(function(role){modelOptions(role,$('m-'+role),any);fillJob(role)});
+    Array.prototype.forEach.call(document.querySelectorAll('#step3 .job button[type=submit]'),function(b){b.disabled=!any});
   }
-  $('assign').addEventListener('submit',function(ev){
-    ev.preventDefault();note('assignMsg','');
-    var body={};
-    ROLES.forEach(function(role){var v=$('role-'+role).value;if(v){var i=v.indexOf('::');body[role]={providerId:v.slice(0,i),model:v.slice(i+2)}}});
-    call('PUT','/llm/assignments',body).then(function(){note('assignMsg','Saved.',true);return load()}).catch(function(e){note('assignMsg',e.message)});
+  ROLES.forEach(function(role){
+    $('job-'+role).addEventListener('submit',function(ev){
+      ev.preventDefault();note('msg-'+role,'');
+      var body={},v=$('m-'+role).value;
+      if(v){var i=v.indexOf('::');body.model={providerId:v.slice(0,i),model:v.slice(i+2)}}
+      if(JOBS[role]&&JOBS[role].def.usesAi){
+        ['maxTokens','temperature','topP','timeoutMinutes'].forEach(function(k){body[k]=$(k+'-'+role).value.trim()});
+        body.systemPrompt=$('sys-'+role).value;body.userPrompt=$('usr-'+role).value;
+      }
+      call('PUT','/llm/jobs/'+role,body).then(function(r){JOBS=r.jobs;data.assignments={};ROLES.forEach(function(x){if(JOBS[x].assignment)data.assignments[x]=JOBS[x].assignment});fillJob(role);note('msg-'+role,'Saved. It applies to the next run.',true)}).catch(function(e){note('msg-'+role,e.message)});
+    });
+    var rb=document.querySelector('[data-reset="'+role+'"]');
+    if(rb)rb.addEventListener('click',function(){
+      var d=JOBS[role].def.defaults;
+      ['maxTokens','temperature','topP','timeoutMinutes'].forEach(function(k){$(k+'-'+role).value=''});
+      $('sys-'+role).value=d.systemPrompt;$('usr-'+role).value=d.userPrompt;
+      note('msg-'+role,'Defaults filled in - press Save to keep them.',true);
+    });
   });
 
-  function load(){return call('GET','/providers').then(function(d){data=d;renderRows();renderRoles()}).catch(function(e){note('fetchMsg',e.message)})}
+  function load(){return Promise.all([call('GET','/providers'),call('GET','/llm/jobs')]).then(function(r){data=r[0];JOBS=(r[1]&&r[1].jobs)||{};renderRows();renderRoles()}).catch(function(e){note('fetchMsg',e.message)})}
 
   // --- step 1: connect ---
   function startEdit(p){

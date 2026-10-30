@@ -320,7 +320,7 @@ describe('web portal', () => {
     expect(html).toContain('id="tab-llm"');
     expect(html).toContain('data-tab="llm"'); // left menu: LLM
     expect(html).toContain('data-tab="sso"'); // left menu: SSO
-    expect(html).toContain('Choose a model for each job');
+    expect(html).toContain('Choose the model and settings for each job');
     expect(html).toContain('--title:#8473de'); // login palette: purple main titles
     expect(html).toContain('--teal:#3cc4cc'); // turquoise second-level titles
     expect(html).toContain('Store Admin');
@@ -455,7 +455,7 @@ describe('web portal', () => {
   describe('AI documentation (agreement, spending guards, PDF)', () => {
     let llm: Server;
     let llmBase = '';
-    const calls = { chat: 0, image: 0, briefMax: 0, limits: [] as number[] };
+    const calls = { chat: 0, image: 0, briefMax: 0, limits: [] as number[], lastChat: null as null | { max_tokens?: number; max_completion_tokens?: number; temperature?: number; top_p?: number; messages: { role: string; content: string }[] } };
     const dropped = { once: false };
     let png: Buffer;
 
@@ -488,6 +488,7 @@ describe('web portal', () => {
             req.socket.destroy(); // connection reset on the first try only
           } else if (req.url === '/v1/chat/completions') {
             calls.chat++;
+            calls.lastChat = JSON.parse(raw);
             const wantsBrief = /image-generation/i.test(raw);
             if (wantsBrief) {
               const b = JSON.parse(raw) as { max_tokens?: number; max_completion_tokens?: number };
@@ -690,6 +691,9 @@ describe('web portal', () => {
     it('asks for up to 50,000 tokens, falls back to the model maximum when the provider refuses, and shows the worst case cost', async () => {
       const { chat } = await import('../src/llm-call-chat.js');
       const provider = { id: 'x', label: 'Fake', kind: 'openai-compatible', baseUrl: llmBase, apiKey: 'llm-key-1234567890' } as never;
+      const store = new ProviderStore(join(tmp, '.mnemosyne', 'providers.enc'), deriveKeys(SECRET).enc);
+      const cur = (await store.list()).assignments.text!;
+      await store.setJob('text', cur, {}); // back to the defaults
       const r = await chat(provider, 'm', 'sys', 'LIMIT-TEST please', { maxTokens: 50_000 });
       expect(r.text).toContain('within the model limit');
       expect(calls.limits.slice(-5)).toEqual([50_000, 50_000, 16_000]); // refused twice (both field names), then the model maximum worked
@@ -757,12 +761,76 @@ describe('web portal', () => {
       expect(page).toContain('Workflow diagram');
     });
 
+    it('every AI value is editable in the admin (limits, sampling, prompts): validated, saved per job, and it invalidates an old agreement', async () => {
+      const admin = cookiesOf(await signIn('admin-code'));
+      const adminArea = cookiesOf(await signIn('admin-code', '/admin'));
+      const h = { cookie: adminArea, 'content-type': 'application/json', 'x-requested-with': 'mnemosyne-admin' };
+      const get = async () => (await (await fetch(`${base}/admin/api/llm/jobs`, { headers: h })).json()).jobs;
+      const put = (role: string, body: object) => fetch(`${base}/admin/api/llm/jobs/${role}`, { method: 'PUT', headers: h, body: JSON.stringify(body) });
+
+      let jobs = await get();
+      expect(Object.keys(jobs)).toEqual(['text', 'image', 'pdf']);
+      expect(jobs.text.effective.maxTokens).toBe(50_000);
+      expect(jobs.text.effective.systemPrompt).toContain('technical writer');
+      expect(jobs.text.effective.userPrompt).toContain('{{notes}}');
+      expect(jobs.text.def.placeholders.map((p: { name: string }) => p.name)).toEqual(['project', 'notes_count', 'notes']);
+      expect(jobs.image.def.placeholders.map((p: { name: string }) => p.name)).toEqual(['project', 'article']);
+      expect(jobs.pdf.def.usesAi).toBe(false);
+      const model = jobs.text.assignment;
+      expect(model.model).toBe('text-model');
+
+      // refused: out-of-range numbers, text, a missing or unknown placeholder, an unknown job
+      for (const bad of [{ maxTokens: 10 }, { maxTokens: 'abc' }, { maxTokens: 9_999_999 }, { temperature: 5 }, { topP: 0 }, { timeoutMinutes: 999 }, { userPrompt: 'no placeholder here' }, { userPrompt: 'x {{notes}} {{bogus}}' }]) {
+        expect((await put('text', { model, ...bad })).status, JSON.stringify(bad)).toBe(400);
+      }
+      expect((await put('nope', {})).status).toBe(400);
+      expect((await put('image', { model: jobs.image.assignment, userPrompt: 'no article placeholder' })).status).toBe(400);
+
+      // an agreement given for the old settings
+      const oldEst = await (await api(admin, '/estimate?kind=wiki')).json();
+      expect(oldEst.facts.find((f: string[]) => f[0] === 'Size')[1]).toContain('up to 50,000 out');
+
+      const saved = await put('text', { model, maxTokens: '20000', temperature: '0.2', topP: '0.9', timeoutMinutes: '5', systemPrompt: 'CUSTOM-SYSTEM write short.', userPrompt: 'Project {{project}} CUSTOM-USER\n{{notes}}' });
+      expect(saved.status).toBe(200);
+      jobs = await get();
+      expect(jobs.text.settings).toMatchObject({ maxTokens: 20_000, temperature: 0.2, topP: 0.9, timeoutMinutes: 5 });
+      expect(jobs.text.effective.systemPrompt).toBe('CUSTOM-SYSTEM write short.');
+      expect(jobs.image.assignment).toBeTruthy(); // saving one job leaves the others alone
+      expect(jobs.image.settings).toEqual({});
+
+      // the agreement popup shows the new limit, and the old agreement no longer fits
+      const est = await (await api(admin, '/estimate?kind=wiki')).json();
+      expect(est.facts.find((f: string[]) => f[0] === 'Size')[1]).toContain('up to 20,000 out');
+      const stale = await api(admin, '/generate', 'POST', { kind: 'wiki', token: oldEst.token });
+      expect(stale.status).toBe(403);
+
+      // unchanged defaults are not stored (later improvements of the defaults still apply)
+      const same = await put('image', { model: jobs.image.assignment, maxTokens: '50000', systemPrompt: jobs.image.effective.systemPrompt, userPrompt: jobs.image.effective.userPrompt });
+      expect(same.status).toBe(200);
+      expect((await get()).image.settings).toEqual({});
+
+      // the change is in the audit trail without secrets
+      await new Promise((r) => setTimeout(r, 250));
+      const audit = (await readFile(join(tmp, '.mnemosyne', 'audit.jsonl'), 'utf8')).split('\n').filter(Boolean).map((l) => JSON.parse(l));
+      const ev = audit.filter((e) => e.event === 'update' && e.entityType === 'llm_job' && e.entityId === 'text').pop();
+      expect(ev.changes).toContain('+ maxTokens: 20000');
+      expect(ev.changes).toContain('+ temperature: 0.2');
+    });
+
     it('stops at the daily limit and records every agreement in the audit trail', async () => {
       const admin = cookiesOf(await signIn('admin-code'));
       // two runs so far (wiki + diagram); the limit is 3
       const e3 = await (await api(admin, '/estimate?kind=wiki')).json();
       expect((await api(admin, '/generate', 'POST', { kind: 'wiki', token: e3.token })).status).toBe(202);
       await waitIdle(admin);
+      // that run used the values set in the admin: limit, sampling and both prompts
+      const sent = calls.lastChat!;
+      expect(sent.max_tokens ?? sent.max_completion_tokens).toBe(20_000);
+      expect(sent.temperature).toBe(0.2);
+      expect(sent.top_p).toBe(0.9);
+      expect(sent.messages[0]!.content).toBe('CUSTOM-SYSTEM write short.');
+      expect(sent.messages[1]!.content).toContain('CUSTOM-USER');
+      expect(sent.messages[1]!.content).toContain('Alpha first note'); // {{notes}} was replaced by the project's notes
       const e4 = await (await api(admin, '/estimate?kind=wiki')).json();
       const blocked = await api(admin, '/generate', 'POST', { kind: 'wiki', token: e4.token });
       expect(blocked.status).toBe(429);
@@ -1121,7 +1189,7 @@ describe('admin page script', () => {
     const missing: string[] = [];
     const ok = { status: 200, ok: true, json: async () => ({ providers: [], assignments: {}, events: [], total: 0, gitlabUrl: '', clientId: '', hasSecret: false }) };
     const sandbox = {
-      document: { getElementById: (id: string) => els.get(id) ?? (missing.push(id), null), createElement: () => make('new'), querySelectorAll: () => [make('a')] },
+      document: { getElementById: (id: string) => els.get(id) ?? (missing.push(id), null), createElement: () => make('new'), querySelectorAll: () => [make('a')], querySelector: () => make('r') },
       window: { addEventListener() {} },
       location: { hash: '#audit', href: '' },
       fetch: async () => ok,
@@ -1136,7 +1204,7 @@ describe('admin page script', () => {
     new Script(js).runInContext(createContext(sandbox)); // throws on a SyntaxError or a top-level error
     await new Promise((r) => setTimeout(r, 50));
     expect(missing).toEqual([]);
-    for (const form of ['form', 'assign', 'ssoForm']) expect(typeof els.get(form)!.handlers.submit).toBe('function');
+    for (const form of ['form', 'job-text', 'job-image', 'job-pdf', 'ssoForm']) expect(typeof els.get(form)!.handlers.submit).toBe('function');
     for (const btn of ['auditRefresh', 'auditMore', 'cancel']) expect(typeof els.get(btn)!.handlers.click).toBe('function');
     expect(els.get('tab-audit')!.hidden).toBe(false); // #audit opens the Audit tab
     expect(els.get('tab-llm')!.hidden).toBe(true);
