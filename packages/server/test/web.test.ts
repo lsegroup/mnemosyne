@@ -456,6 +456,7 @@ describe('web portal', () => {
     let llm: Server;
     let llmBase = '';
     const calls = { chat: 0, image: 0, briefMax: 0 };
+    const dropped = { once: false };
     let png: Buffer;
 
     beforeAll(async () => {
@@ -472,6 +473,11 @@ describe('web portal', () => {
           if (req.headers.authorization !== 'Bearer llm-key-1234567890') {
             res.writeHead(401);
             res.end('{}');
+          } else if (req.url === '/v1/chat/completions' && raw.includes('DROP-ALWAYS')) {
+            req.socket.destroy(); // connection reset, every time
+          } else if (req.url === '/v1/chat/completions' && raw.includes('DROP-ONCE') && !dropped.once) {
+            dropped.once = true;
+            req.socket.destroy(); // connection reset on the first try only
           } else if (req.url === '/v1/chat/completions') {
             calls.chat++;
             const wantsBrief = /image-generation/i.test(raw);
@@ -662,6 +668,16 @@ describe('web portal', () => {
       await expect(chat(provider, 'm', 'sys', 'EMPTY-REASONING please', { maxTokens: 700 })).rejects.toThrow(/finish reason: length.*only produced reasoning.*700 tokens was used up/);
       calls.chat = before; // this direct call must not count against the spending-guard assertions below
     });
+
+    it('retries a dropped connection and reports the technical reason when it keeps failing', async () => {
+      const { chat } = await import('../src/llm-call-chat.js');
+      const provider = { id: 'x', label: 'Fake', kind: 'openai-compatible', baseUrl: llmBase, apiKey: 'llm-key-1234567890' } as never;
+      const before = calls.chat;
+      const ok = await chat(provider, 'm', 'sys', 'DROP-ONCE hello', { maxTokens: 100 });
+      expect(ok.text.length).toBeGreaterThan(0); // the second try went through
+      await expect(chat(provider, 'm', 'sys', 'DROP-ALWAYS hello', { maxTokens: 100 })).rejects.toThrow(/Could not reach the provider \((?!network error)[^)]+\)/);
+      calls.chat = before;
+    }, 20_000);
 
     it('compresses large pages with gzip when the browser accepts it', async () => {
       const dev = cookiesOf(await signIn('dev-code'));

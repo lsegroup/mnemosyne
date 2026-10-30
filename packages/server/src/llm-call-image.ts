@@ -8,6 +8,7 @@
  * Called only from the documentation generator, only after an administrator pressed
  *   "Create workflow diagram" and confirmed.
  */
+import { fetchWithRetry } from './llm-call-chat.js';
 import { ProviderValidationError, type Provider } from './provider-store.js';
 
 export interface ImageResult {
@@ -27,17 +28,12 @@ export function sniffImage(b: Buffer): ImageResult['mime'] | null {
 
 export async function generateImage(p: Provider, model: string, prompt: string, timeoutMs = 4 * 60_000): Promise<ImageResult> {
   const url = `${p.baseUrl.replace(/\/+$/, '')}/images/generations`;
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${p.apiKey}` },
-      body: JSON.stringify({ model, prompt, n: 1 }),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-  } catch {
-    throw new ProviderValidationError('Could not reach the provider for image generation (network error or timeout).');
-  }
+  const res = await fetchWithRetry(
+    url,
+    { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${p.apiKey}` }, body: JSON.stringify({ model, prompt, n: 1 }) },
+    timeoutMs,
+    'the provider for image generation',
+  );
   if (res.status === 401 || res.status === 403) throw new ProviderValidationError(`The provider rejected the API key (HTTP ${res.status}).`);
   if (res.status === 429) throw new ProviderValidationError('The provider is rate-limiting this key (HTTP 429). Try again in a minute.');
   if (!res.ok) throw new ProviderValidationError(`The provider answered HTTP ${res.status} for image generation.`);

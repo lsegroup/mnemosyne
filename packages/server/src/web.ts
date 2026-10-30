@@ -680,8 +680,16 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         const image = (await providers!.getAssigned('image'))!;
         const wikiText = (await docStore!.read(wiki)).toString('utf8');
         const brief = buildDiagramBriefPrompt(project, wikiText);
-        const prompt = await chat(text.provider, text.model, brief.system, brief.user, { maxTokens: DIAGRAM_BRIEF_TOKENS });
-        const img = await generateImage(image.provider, image.model, redact(prompt.text.trim()).slice(0, 3500));
+        const step = async <T,>(label: string, fn: () => Promise<T>): Promise<T> => {
+          try {
+            return await fn();
+          } catch (err) {
+            if (err instanceof ProviderValidationError) throw new ProviderValidationError(`${label}: ${err.message}`);
+            throw err;
+          }
+        };
+        const prompt = await step('Step 1 of 2 (drawing brief, text model)', () => chat(text.provider, text.model, brief.system, brief.user, { maxTokens: DIAGRAM_BRIEF_TOKENS }));
+        const img = await step('Step 2 of 2 (picture, image model)', () => generateImage(image.provider, image.model, redact(prompt.text.trim()).slice(0, 3500)));
         const ext = img.mime === 'image/png' ? 'png' : img.mime === 'image/jpeg' ? 'jpg' : 'webp';
         const meta = await docStore!.save(
           { kind: 'diagram', project, model: `${image.provider.label} / ${image.model}`, by: user, basedOn: wiki.id, inputTokens: prompt.inputTokens, outputTokens: prompt.outputTokens, ext },

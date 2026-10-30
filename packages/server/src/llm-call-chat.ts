@@ -19,6 +19,32 @@ export interface ChatResult {
 
 const DEFAULT_TIMEOUT_MS = 6 * 60_000;
 
+/** Technical reason of a failed fetch (undici hides it in `cause`), e.g. "ECONNRESET" or "other side closed". Never contains secrets. */
+export function networkDetail(err: unknown): string {
+  const e = err as { name?: string; message?: string; cause?: { code?: string; message?: string } };
+  if (e?.name === 'TimeoutError') return 'timed out';
+  return e?.cause?.code ?? e?.cause?.message ?? e?.message ?? 'unknown error';
+}
+
+/**
+ * POST with up to two retries when the connection itself fails (reset, closed, DNS), with a short pause.
+ * A timeout is not retried. The retried request is part of the job the administrator agreed to; at these
+ * sizes it costs a fraction of a cent.
+ */
+export async function fetchWithRetry(url: string, init: RequestInit, timeoutMs: number, what: string): Promise<Response> {
+  let detail = '';
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+    } catch (err) {
+      detail = networkDetail(err);
+      if (detail === 'timed out') break;
+      if (attempt < 2) await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+    }
+  }
+  throw new ProviderValidationError(`Could not reach ${what} (${detail}).`);
+}
+
 function endpoint(p: Pick<Provider, 'kind' | 'baseUrl'>): string {
   const base = p.baseUrl.replace(/\/+$/, '');
   if (p.kind === 'anthropic-messages') return /\/v\d+$/.test(base) ? `${base}/messages` : `${base}/v1/messages`;
@@ -44,11 +70,7 @@ export async function chat(
       p.kind === 'anthropic-messages'
         ? { model, system, max_tokens: maxTokens, messages: [{ role: 'user', content: user }] }
         : { model, [limitField]: maxTokens, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] };
-    try {
-      return await fetch(endpoint(p), { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS) });
-    } catch {
-      throw new ProviderValidationError('Could not reach the provider (network error or timeout).');
-    }
+    return fetchWithRetry(endpoint(p), { method: 'POST', headers, body: JSON.stringify(body) }, opts.timeoutMs ?? DEFAULT_TIMEOUT_MS, 'the provider');
   };
 
   let res = await send('max_tokens');
