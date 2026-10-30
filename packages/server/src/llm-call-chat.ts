@@ -63,7 +63,8 @@ export async function chat(
   if (!res.ok) throw new ProviderValidationError(`The provider answered HTTP ${res.status}.`);
 
   const json = (await res.json().catch(() => null)) as {
-    choices?: { message?: { content?: unknown } }[];
+    choices?: { message?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown }; finish_reason?: string }[];
+    stop_reason?: string;
     content?: { type?: string; text?: string }[];
     usage?: { prompt_tokens?: number; completion_tokens?: number; input_tokens?: number; output_tokens?: number };
   } | null;
@@ -71,7 +72,16 @@ export async function chat(
     typeof json?.choices?.[0]?.message?.content === 'string'
       ? (json.choices[0]!.message!.content as string)
       : (json?.content ?? []).map((c) => (c.type === 'text' || c.text ? (c.text ?? '') : '')).join('');
-  if (!content.trim()) throw new ProviderValidationError('The provider returned no text.');
+  if (!content.trim()) {
+    // Reasoning models spend part of the limit on thinking; with a small limit nothing is left for the answer.
+    const finish = json?.choices?.[0]?.finish_reason ?? json?.stop_reason ?? 'unknown';
+    const out = json?.usage?.completion_tokens ?? json?.usage?.output_tokens ?? 0;
+    const thought = Boolean(json?.choices?.[0]?.message?.reasoning_content ?? json?.choices?.[0]?.message?.reasoning);
+    throw new ProviderValidationError(
+      `The provider returned no text (finish reason: ${finish}, ${out} output tokens${thought ? ', the model only produced reasoning' : ''}). ` +
+        (finish === 'length' || finish === 'max_tokens' ? `The limit of ${maxTokens} tokens was used up before the answer - it needs a higher limit.` : 'Try again or choose another model in Admin → LLM.'),
+    );
+  }
   return {
     text: content,
     inputTokens: json?.usage?.prompt_tokens ?? json?.usage?.input_tokens ?? 0,

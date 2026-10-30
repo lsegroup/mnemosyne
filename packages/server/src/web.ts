@@ -26,6 +26,8 @@ const OAUTH_COOKIE = 'mnemosyne_oauth';
 const ADMIN_OAUTH_COOKIE = 'mnemosyne_admin_oauth';
 const SESSION_TTL_S = 8 * 3600;
 /** The documentation area stays signed in for a month; GitLab is re-checked silently every 12 h (refresh token). */
+/** Output limit of the drawing-brief call. Reasoning models (muse-spark) think first; 700 left nothing for the answer. */
+const DIAGRAM_BRIEF_TOKENS = 6000;
 const DOCS_SESSION_TTL_S = 30 * 24 * 3600;
 const MEMBER_FRESH_MS = 12 * 3600 * 1000;
 const OAUTH_TTL_S = 10 * 60;
@@ -627,7 +629,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     const image = await providers!.getAssigned('image');
     if (!image) return { error: 'Choose a model for Images in Admin → LLM first.' };
     const wikiChars = Math.min((await docStore!.read(wiki)).length, 60_000);
-    const est = estimateText(text.model, approxTokens(wikiChars) + 400, 600);
+    const est = estimateText(text.model, approxTokens(wikiChars) + 400, DIAGRAM_BRIEF_TOKENS);
     const usd = (est.usd ?? 0) + IMAGE_PRICE_USD;
     return {
       key: `${text.provider.id}:${text.model}|${image.provider.id}:${image.model}`,
@@ -678,7 +680,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         const image = (await providers!.getAssigned('image'))!;
         const wikiText = (await docStore!.read(wiki)).toString('utf8');
         const brief = buildDiagramBriefPrompt(project, wikiText);
-        const prompt = await chat(text.provider, text.model, brief.system, brief.user, { maxTokens: 700 });
+        const prompt = await chat(text.provider, text.model, brief.system, brief.user, { maxTokens: DIAGRAM_BRIEF_TOKENS });
         const img = await generateImage(image.provider, image.model, redact(prompt.text.trim()).slice(0, 3500));
         const ext = img.mime === 'image/png' ? 'png' : img.mime === 'image/jpeg' ? 'jpg' : 'webp';
         const meta = await docStore!.save(

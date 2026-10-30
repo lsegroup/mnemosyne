@@ -455,7 +455,7 @@ describe('web portal', () => {
   describe('AI documentation (agreement, spending guards, PDF)', () => {
     let llm: Server;
     let llmBase = '';
-    const calls = { chat: 0, image: 0 };
+    const calls = { chat: 0, image: 0, briefMax: 0 };
     let png: Buffer;
 
     beforeAll(async () => {
@@ -474,7 +474,15 @@ describe('web portal', () => {
             res.end('{}');
           } else if (req.url === '/v1/chat/completions') {
             calls.chat++;
-            const wantsBrief = raw.includes('IMAGE-GENERATION');
+            const wantsBrief = /image-generation/i.test(raw);
+            if (wantsBrief) {
+              const b = JSON.parse(raw) as { max_tokens?: number; max_completion_tokens?: number };
+              calls.briefMax = b.max_tokens ?? b.max_completion_tokens ?? 0;
+            }
+            if (raw.includes('EMPTY-REASONING')) {
+              reply({ choices: [{ message: { content: '', reasoning_content: 'thinking...' }, finish_reason: 'length' }], usage: { prompt_tokens: 10, completion_tokens: 700 } });
+              return;
+            }
             reply({
               choices: [{ message: { content: wantsBrief ? 'A clean flow chart: Notes -> Article -> PDF' : '# Alpha\n\nAlpha is a test project.\n\n## Overview\n\nIt does **things**.\n\n## History\n\n- first\n- second\n\n## Known issues\n\nNone documented.' } }],
               usage: { prompt_tokens: 1200, completion_tokens: 300 },
@@ -644,6 +652,15 @@ describe('web portal', () => {
       home = await (await fetch(`${inst.url}/`, { headers: { cookie } })).text();
       expect(home).toContain('Sign in with GitLab');
       inst.srv.close();
+    });
+
+    it('gives the drawing brief room to think and explains an empty answer', async () => {
+      expect(calls.briefMax).toBeGreaterThanOrEqual(4000); // 700 left a reasoning model with nothing to say
+      const { chat } = await import('../src/llm-call-chat.js');
+      const provider = { id: 'x', label: 'Fake', kind: 'openai-compatible', baseUrl: llmBase, apiKey: 'llm-key-1234567890' } as never;
+      const before = calls.chat;
+      await expect(chat(provider, 'm', 'sys', 'EMPTY-REASONING please', { maxTokens: 700 })).rejects.toThrow(/finish reason: length.*only produced reasoning.*700 tokens was used up/);
+      calls.chat = before; // this direct call must not count against the spending-guard assertions below
     });
 
     it('compresses large pages with gzip when the browser accepts it', async () => {
