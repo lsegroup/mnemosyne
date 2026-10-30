@@ -204,10 +204,22 @@ export function layout(plan: DiagramPlan): Scene {
   const n = plan.columns.length;
   const boxes = new Map<string, Box>();
   const order = new Map<string, number>(); // top-to-bottom position inside the column (path boxes, then control boxes)
+  // A box with an arrow into the other lane goes to the edge of its stack that faces that lane, so the arrow can leave straight
+  // without passing behind a neighbouring box (the order inside a column carries no meaning, the order of the columns does).
+  const laneById = new Map(plan.columns.flatMap((c) => c.nodes.map((nd) => [nd.id, nd.lane] as const)));
+  const colById = new Map(plan.columns.flatMap((c, i) => c.nodes.map((nd) => [nd.id, i] as const)));
+  const crossing = new Set<string>();
+  for (const l of plan.links) {
+    if (laneById.get(l.from) !== laneById.get(l.to) && colById.get(l.from) !== colById.get(l.to)) {
+      crossing.add(l.from);
+      crossing.add(l.to);
+    }
+  }
   const stacks = plan.columns.map((c, col) => {
     const mk = (lane: 'path' | 'control') =>
       c.nodes
         .filter((nd) => nd.lane === lane)
+        .sort((p, q) => (Number(crossing.has(p.id)) - Number(crossing.has(q.id))) * (lane === 'path' ? 1 : -1))
         .map((node) => {
           const label = wrapText(node.label, NODE_W - 2 * PAD - 4, 15, true, 3);
           const detail = node.detail ? wrapText(node.detail, NODE_W - 2 * PAD - 4, 12, false, 4) : [];
@@ -349,6 +361,9 @@ export function layout(plan: DiagramPlan): Scene {
       const off = (idx - (g.items.length - 1) / 2) * step;
       const pos: [number, number] =
         g.side === 'L' ? [b.x, b.y + b.h / 2 + off] : g.side === 'R' ? [b.x + b.w, b.y + b.h / 2 + off] : g.side === 'T' ? [b.x + b.w / 2 + off, b.y] : [b.x + b.w / 2 + off, b.y + b.h];
+      // arrows that go down into the control band and arrows that come up from it use different lanes, so they never look like one line
+      const ed = edges[it.e]!;
+      if (ed.kind === 'cross') pos[0] += ed.a.node.lane === 'path' ? 14 : -14;
       ports.set(`${it.e}:${it.end}`, pos);
     });
   }
@@ -398,7 +413,12 @@ export function layout(plan: DiagramPlan): Scene {
   let botSlot = 0;
   let leftSlot = 0;
 
-  /** A label sits on its arrow; if that spot is taken by another label it slides along the arrow, or, failing that, stays put. */
+  const obstacles: Rect[] = [...boxes.values()];
+
+  /**
+   * A label sits on its arrow. If that spot is taken (by another label or a box) it slides along the arrow, then moves just
+   * beside the arrow (above or below a horizontal run, left or right of a vertical one); only if nothing is free it stays put.
+   */
   const put = (center: [number, number], text: string[], along: 'x' | 'y', lo: number, hi: number) => {
     const w = lw(text);
     const h = lh(text);
@@ -408,15 +428,21 @@ export function layout(plan: DiagramPlan): Scene {
       halos.push({ t: 'rect', x: r.x, y: r.y, w: r.w, h: r.h, r: 3, fill: C.white });
       text.forEach((l, i) => halotexts.push({ t: 'text', x: cx, y: r.y + 3 + 11 + i * 14, text: l, size: 11.5, bold: false, anchor: 'middle', color: C.ink }));
     };
+    const free = (cx: number, cy: number) => {
+      const r = { x: cx - w / 2, y: cy - h / 2, w, h };
+      return !placed.some((p) => overlaps(p, r)) && !obstacles.some((o) => overlaps(o, r));
+    };
+    const tries: [number, number][] = [];
     for (const k of [0, 1, -1, 2, -2]) {
       const d = k * ((along === 'y' ? h : w) + 4);
       const cx = along === 'x' ? center[0] + d : center[0];
       const cy = along === 'y' ? center[1] + d : center[1];
       if (k !== 0 && (along === 'x' ? cx : cy) < lo) continue;
       if (k !== 0 && (along === 'x' ? cx : cy) > hi) continue;
-      if (placed.some((p) => overlaps(p, { x: cx - w / 2, y: cy - h / 2, w, h }))) continue;
-      return commit(cx, cy);
+      tries.push([cx, cy]);
     }
+    for (const k of [1, -1, 2, -2]) tries.push(along === 'x' ? [center[0], center[1] + k * (h / 2 + 6)] : [center[0] + k * (w / 2 + 8), center[1]]);
+    for (const [cx, cy] of tries) if (free(cx, cy)) return commit(cx, cy);
     commit(center[0], center[1]);
   };
 

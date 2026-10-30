@@ -59,11 +59,23 @@ describe('reading the plan the AI wrote', () => {
 });
 
 describe('drawing the plan', () => {
-  for (const name of ['mnemosyne', 'load-balancer']) {
-    it(`${name}: boxes never overlap, labels never cover a box, everything stays inside the picture`, () => {
+  // 'real-*' are plans the AI actually wrote on 2026-10-30 (addresses removed): the busiest diagrams we have
+  for (const name of ['mnemosyne', 'load-balancer', 'real-aequitas', 'real-mnemosyne']) {
+    it(`${name}: boxes never overlap, no label covers a box or another label, no arrow runs behind a box, everything stays inside the picture`, () => {
       const plan = parsePlan(fixture(name), name);
       const scene = layout(plan);
       const boxes = boxesOf(scene);
+      const halos = halosOf(scene);
+      for (const [i, a] of halos.entries()) for (const b of halos.slice(i + 1)) expect(overlap(a, b), 'two arrow labels overlap').toBe(false);
+      for (const o of scene.ops) {
+        if (o.t !== 'path') continue;
+        for (let k = 0; k + 1 < o.pts.length; k++) {
+          const [x1, y1] = o.pts[k]!;
+          const [x2, y2] = o.pts[k + 1]!;
+          const seg = { x: Math.min(x1, x2) - 0.5, y: Math.min(y1, y2) - 0.5, w: Math.abs(x2 - x1) + 1, h: Math.abs(y2 - y1) + 1 };
+          for (const b of boxes) expect(overlap(seg, { x: b.x + 3, y: b.y + 3, w: b.w - 6, h: b.h - 6 }), 'an arrow runs behind a box').toBe(false);
+        }
+      }
       expect(boxes.length).toBe(plan.columns.reduce((s, c) => s + c.nodes.length, 0));
       for (const [i, a] of boxes.entries()) {
         expect(a.x).toBeGreaterThanOrEqual(0);

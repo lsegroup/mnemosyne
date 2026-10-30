@@ -239,9 +239,11 @@ export function buildPdf(input: PdfInput): Promise<Buffer> {
     const space = bottom() - doc.y;
     const d = input.diagram;
     if (d.vector) {
-      const pw = doc.page.width - M.left - M.right;
+      // the drawing may use almost the whole page width (text margins are for text): a wide diagram stays as large as it can
+      const side = 22;
+      const pw = doc.page.width - 2 * side;
       const s = Math.min(pw / d.vector.width, Math.max(150, space - 10) / d.vector.height);
-      d.vector.draw(doc, M.left + (pw - d.vector.width * s) / 2, doc.y, s);
+      d.vector.draw(doc, side + (pw - d.vector.width * s) / 2, doc.y, s);
     } else if (d.png) {
       doc.image(d.png, M.left, doc.y, { fit: [W, Math.max(200, space - 10)], align: 'center' });
     }
