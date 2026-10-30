@@ -1155,7 +1155,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   // Audit trail, newest first (same columns as the CenTest / load-balancer audit view).
   api.get(
     '/audit',
-    handle((req) => audit!.list({ q: typeof req.query.q === 'string' ? req.query.q : '', offset: Number(req.query.offset) || 0 })),
+    handle((req) => audit!.list({ q: typeof req.query.q === 'string' ? req.query.q : '', offset: Number(req.query.offset) || 0, limit: Number(req.query.limit) || undefined })),
   );
 
   return { router, providers };

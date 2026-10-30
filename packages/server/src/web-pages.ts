@@ -244,6 +244,7 @@ input,select{padding:10px 12px;border-radius:8px;border:1px solid var(--line);ba
 input:focus,select:focus{outline:none;border-color:var(--accent)}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .msg{min-height:22px;font-size:14px}.ok{color:#4ade80}.err{color:#ff8b8b}
+.pager{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:16px}.pager .btn[disabled]{opacity:.4;cursor:default}
 .jobs{display:flex;flex-direction:column;gap:18px;margin-top:14px}
 .job{display:flex;flex-direction:column;gap:14px;padding:18px 20px;border:1px solid var(--line);border-radius:12px;background:var(--panel2)}
 .jobhead{display:flex;align-items:center;gap:12px}.jobhead h4{margin:0;font:600 20px/1.2 "Palatino Linotype","Book Antiqua",Palatino,Georgia,serif;color:var(--title)}
@@ -386,7 +387,8 @@ export function adminPage(v: AdminView): string {
           <table class="audit"><thead><tr><th>Date / Time</th><th>Event</th><th>Entity Type</th><th>Name / ID</th><th>User</th><th>IP Address</th><th>Changes</th><th>Description</th></tr></thead>
             <tbody id="auditRows"><tr><td colspan="8" class="muted">Loading…</td></tr></tbody></table>
         </div>
-        <div class="row" style="margin-top:14px"><button class="btn small" type="button" id="auditMore" hidden>Load more</button><span id="auditMsg" class="msg"></span></div>
+        <div class="pager" id="auditPager"></div>
+        <div class="row" style="margin-top:8px"><span id="auditMsg" class="msg"></span></div>
       </div>
     </section>
   </main>
@@ -425,7 +427,7 @@ function ADMIN_JS(basePath: string): string {
   function showTab(){
     var t=(location.hash||'#llm').slice(1);if(t!=='sso'&&t!=='audit')t='llm';
     ['llm','sso','audit'].forEach(function(n){$('tab-'+n).hidden=(n!==t)});
-    if(t==='audit')loadAudit(false);
+    if(t==='audit')loadAudit();
     Array.prototype.forEach.call(document.querySelectorAll('.side a'),function(a){a.className=a.getAttribute('data-tab')===t?'active':''});
   }
   window.addEventListener('hashchange',showTab);showTab();
@@ -539,7 +541,7 @@ function ADMIN_JS(basePath: string): string {
   });
 
   // --- Audit tab ---
-  var auditShown=0,auditTimer=null;
+  var auditPage=0,AUDIT_PER_PAGE=10;
   $('auditTz').textContent=Intl.DateTimeFormat().resolvedOptions().timeZone;
   function changeCell(td,text){
     if(!text)return;var pre=document.createElement('pre');pre.className='chg';
@@ -554,22 +556,40 @@ function ADMIN_JS(basePath: string): string {
     cell(tr,e.user);cell(tr,e.ip);changeCell(cell(tr,'','chg'),e.changes);cell(tr,e.description,'desc');
     return tr;
   }
-  function loadAudit(more){
+  function pageBtn(label,page,cur,off){
+    var b=document.createElement('button');b.type='button';b.className='btn small'+(cur?' primary':'');b.textContent=label;b.disabled=!!off;
+    b.addEventListener('click',function(){auditPage=page;loadAudit()});return b;
+  }
+  function renderPager(total){
+    var box=$('auditPager');box.textContent='';
+    var pages=Math.max(1,Math.ceil(total/AUDIT_PER_PAGE));
+    if(pages<2)return;
+    box.appendChild(pageBtn('‹ Previous',auditPage-1,false,auditPage===0));
+    var last=-1;
+    for(var p=0;p<pages;p++){
+      if(p===0||p===pages-1||Math.abs(p-auditPage)<=2){
+        if(last!==-1&&p-last>1){var gap=document.createElement('span');gap.className='muted';gap.textContent='…';box.appendChild(gap)}
+        box.appendChild(pageBtn(String(p+1),p,p===auditPage,false));last=p;
+      }
+    }
+    box.appendChild(pageBtn('Next ›',auditPage+1,false,auditPage>=pages-1));
+    var t=document.createElement('span');t.className='muted';t.style.marginLeft='10px';t.textContent='Page '+(auditPage+1)+' of '+pages;box.appendChild(t);
+  }
+  function loadAudit(){
     note('auditMsg','');var rows=$('auditRows');
-    if(!more){auditShown=0}
-    call('GET','/audit?q='+encodeURIComponent($('auditSearch').value.trim())+'&offset='+auditShown).then(function(d){
-      if(!more)rows.textContent='';
-      if(!d.events.length&&!more){var tr=document.createElement('tr');cell(tr,'No events yet.','muted').colSpan=8;rows.appendChild(tr)}
+    call('GET','/audit?q='+encodeURIComponent($('auditSearch').value.trim())+'&offset='+(auditPage*AUDIT_PER_PAGE)+'&limit='+AUDIT_PER_PAGE).then(function(d){
+      var pages=Math.max(1,Math.ceil(d.total/AUDIT_PER_PAGE));
+      if(auditPage>pages-1){auditPage=pages-1;return loadAudit()}
+      rows.textContent='';
+      if(!d.events.length){var tr=document.createElement('tr');cell(tr,$('auditSearch').value.trim()?'No matching events.':'No events yet.','muted').colSpan=8;rows.appendChild(tr)}
       d.events.forEach(function(e){rows.appendChild(auditRow(e))});
-      auditShown+=d.events.length;
-      $('auditCount').textContent=auditShown+' of '+d.total+' events';
-      $('auditMore').hidden=auditShown>=d.total;
+      $('auditCount').textContent=d.total?((auditPage*AUDIT_PER_PAGE+1)+'–'+(auditPage*AUDIT_PER_PAGE+d.events.length)+' of '+d.total+' events'):'0 events';
+      renderPager(d.total);
     }).catch(function(e){note('auditMsg',e.message)});
   }
-  var st;$('auditSearch').addEventListener('input',function(){clearTimeout(st);st=setTimeout(function(){loadAudit(false)},250)});
-  $('auditRefresh').addEventListener('click',function(){loadAudit(false)});
-  $('auditMore').addEventListener('click',function(){loadAudit(true)});
-  setInterval(function(){if(!$('tab-audit').hidden&&!$('auditSearch').value&&auditShown<=500)loadAudit(false)},15000);
+  var st;$('auditSearch').addEventListener('input',function(){clearTimeout(st);st=setTimeout(function(){auditPage=0;loadAudit()},250)});
+  $('auditRefresh').addEventListener('click',function(){loadAudit()});
+  setInterval(function(){if(!$('tab-audit').hidden&&auditPage===0&&!$('auditSearch').value)loadAudit()},15000);
 
   load();loadSso();
 })();`;

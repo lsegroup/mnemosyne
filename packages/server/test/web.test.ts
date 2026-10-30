@@ -704,6 +704,29 @@ describe('web portal', () => {
       expect(facts['Estimated cost']).toBeTruthy(); // the fake model has no list price, so it says so; priced models add 'at most $X'
     });
 
+    it('pages the audit trail: 10 events per page, newest first, pages do not overlap', async () => {
+      const admin = cookiesOf(await signIn('admin-code'));
+      for (let i = 0; i < 12; i++) await fetch(`${base}/p/alpha`, { headers: { cookie: admin } }); // each visit is an audit event
+      await new Promise((r) => setTimeout(r, 300));
+      const h = { cookie: cookiesOf(await signIn('admin-code', '/admin')) };
+      const page = async (n: number) => (await (await fetch(`${base}/admin/api/audit?limit=10&offset=${n * 10}`, { headers: h })).json()) as { events: { time: string; description: string; entityName: string }[]; total: number };
+      const p1 = await page(0);
+      const p2 = await page(1);
+      expect(p1.events).toHaveLength(10);
+      expect(p2.events.length).toBeGreaterThan(0);
+      expect(p1.total).toBe(p2.total);
+      expect(p1.total).toBeGreaterThanOrEqual(12);
+      expect(p1.events[0]!.time >= p1.events[9]!.time).toBe(true); // newest first
+      expect(p1.events[9]!.time >= p2.events[0]!.time).toBe(true); // page 2 continues where page 1 ends
+      const key = (e: { time: string; description: string; entityName: string }) => `${e.time}|${e.entityName}|${e.description}`;
+      const seen = new Set(p1.events.map(key));
+      expect(p2.events.some((e) => seen.has(key(e)) && p1.events.filter((x) => key(x) === key(e)).length === 1)).toBe(false);
+      // the last page is partial, an offset past the end is empty but still reports the total
+      const lastPage = Math.floor((p1.total - 1) / 10);
+      expect((await page(lastPage)).events.length).toBe(p1.total - lastPage * 10);
+      expect((await page(lastPage + 1)).events).toHaveLength(0);
+    });
+
     it('compresses large pages with gzip when the browser accepts it', async () => {
       const dev = cookiesOf(await signIn('dev-code'));
       const plain = await fetch(`${base}/`, { headers: { cookie: dev, 'accept-encoding': 'identity' } });
@@ -1208,7 +1231,9 @@ describe('admin page script', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(missing).toEqual([]);
     for (const form of ['form', 'job-text', 'job-image', 'job-pdf', 'ssoForm']) expect(typeof els.get(form)!.handlers.submit).toBe('function');
-    for (const btn of ['auditRefresh', 'auditMore', 'cancel']) expect(typeof els.get(btn)!.handlers.click).toBe('function');
+    for (const btn of ['auditRefresh', 'cancel']) expect(typeof els.get(btn)!.handlers.click).toBe('function');
+    expect(els.has('auditPager')).toBe(true); // numbered pages, 10 events each
+    expect(html).not.toContain('Load more');
     expect(els.get('tab-audit')!.hidden).toBe(false); // #audit opens the Audit tab
     expect(els.get('tab-llm')!.hidden).toBe(true);
   });
