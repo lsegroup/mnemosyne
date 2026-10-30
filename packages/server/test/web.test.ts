@@ -727,6 +727,24 @@ describe('web portal', () => {
       expect((await page(lastPage + 1)).events).toHaveLength(0);
     });
 
+    it('administrators get an Admin button in the user area, the admin area has a way back, members see no Admin button', async () => {
+      const admin = cookiesOf(await signIn('admin-code'));
+      const dev = cookiesOf(await signIn('dev-code'));
+      const adminPaths = ['/', '/p/alpha', '/p/alpha/notes'];
+      for (const path of adminPaths) {
+        const html = await (await fetch(`${base}${path}`, { headers: { cookie: admin } })).text();
+        expect(html, path).toMatch(/<a class="topbtn" href="[^"]*\/admin\/" title="Open the admin area"><svg[\s\S]*?<span>Admin<\/span><\/a>/);
+      }
+      for (const path of ['/', '/p/alpha']) {
+        const html = await (await fetch(`${base}${path}`, { headers: { cookie: dev } })).text();
+        expect(html, path).not.toContain('class="topbtn"');
+        expect(html).not.toContain('Open the admin area');
+      }
+      // the admin area links back to the projects (its own sign-in stays separate)
+      const adminHtml = await (await fetch(`${base}/admin/`, { headers: { cookie: cookiesOf(await signIn('admin-code', '/admin')) } })).text();
+      expect(adminHtml).toMatch(/<a class="topbtn" href="[^"]*\/" title="Back to the projects and their documentation"><svg[\s\S]*?<span>Projects<\/span><\/a>/);
+    });
+
     it('compresses large pages with gzip when the browser accepts it', async () => {
       const dev = cookiesOf(await signIn('dev-code'));
       const plain = await fetch(`${base}/`, { headers: { cookie: dev, 'accept-encoding': 'identity' } });

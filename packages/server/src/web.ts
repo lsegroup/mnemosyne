@@ -444,7 +444,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       res.send(
         homePage({
           basePath,
-          user: { name: ds.s.n, username: ds.s.u },
+          user: { name: ds.s.n, username: ds.s.u, admin: ds.m.admin },
           cards,
           isAdmin: ds.m.admin,
           notice:
@@ -468,7 +468,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
 
   const notFound = (res: Response, ds: NonNullable<ReturnType<typeof docsSession>>, msg: string) => {
     pageHeaders(res);
-    res.status(404).send(docsNotFound(basePath, { name: ds.s.n, username: ds.s.u }, msg));
+    res.status(404).send(docsNotFound(basePath, { name: ds.s.n, username: ds.s.u, admin: ds.m.admin }, msg));
   };
 
   // --------------------------------------------------------------------------
@@ -536,7 +536,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       projectHome({
         basePath,
         nonce,
-        user: { name: ds.s.n, username: ds.s.u },
+        user: { name: ds.s.n, username: ds.s.u, admin: ds.m.admin },
         project,
         subtitle: g.subtitle,
         isAdmin: ds.m.admin,
@@ -566,7 +566,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     res.send(
       notesPage({
         basePath,
-        user: { name: g.ds.s.n, username: g.ds.s.u },
+        user: { name: g.ds.s.n, username: g.ds.s.u, admin: g.ds.m.admin },
         project: g.project,
         subtitle: g.subtitle,
         q,
@@ -804,7 +804,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     res.send(
       nodePage({
         basePath,
-        user: { name: ds.s.n, username: ds.s.u },
+        user: { name: ds.s.n, username: ds.s.u, admin: ds.m.admin },
         project,
         title: note.title,
         type: note.type,

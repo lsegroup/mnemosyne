@@ -208,6 +208,12 @@ export interface AdminView {
 }
 
 // Same palette as the login screen: near-black base, violet main titles, turquoise second-level titles.
+const ICON_WRENCH = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>';
+const ICON_GRID = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>';
+/** Header buttons that flip between the user area and the admin area (each area keeps its own sign-in). */
+const topBtn = (href: string, label: string, icon: string, title: string) => `<a class="topbtn" href="${href}" title="${esc(title)}">${icon}<span>${esc(label)}</span></a>`;
+const TOPBTN_CSS = '.topbtn{display:inline-flex;align-items:center;gap:7px;padding:7px 13px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);color:var(--text);font-size:14px;text-decoration:none;white-space:nowrap}.topbtn:hover{border-color:var(--accent);color:#fff}.topbtn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}';
+
 const ADMIN_CSS = `
 :root{--bg:#0d0e13;--panel:#161922;--panel2:#12141b;--line:#262a36;--text:#e6e9ef;--muted:#8b90a0;--accent:#7a66e0;--accent-h:#9482ee;--title:#8473de;--teal:#3cc4cc}
 html,body{background:var(--bg)}
@@ -217,6 +223,7 @@ body{background:radial-gradient(ellipse 50% 40% at 12% 0%,rgba(120,58,182,.20),t
 .brand{font:600 24px/1 "Palatino Linotype","Book Antiqua",Palatino,Georgia,"Times New Roman",serif;letter-spacing:.4px;color:var(--title)}
 .brand .muted{font:500 14px/1 system-ui,sans-serif;letter-spacing:0;color:var(--teal)}
 .top .right{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:14px}.top form{margin:0}
+${TOPBTN_CSS}
 .layout{display:grid;grid-template-columns:210px minmax(0,1fr);gap:28px;max-width:1640px;margin:0 auto;padding:28px 24px 60px}
 .side{display:flex;flex-direction:column;gap:6px;position:sticky;top:20px;align-self:start}
 .side a{display:block;padding:10px 14px;border-radius:9px;border:1px solid transparent;color:var(--muted);text-decoration:none;font-weight:600}
@@ -308,7 +315,7 @@ export function adminPage(v: AdminView): string {
     'Mnemosyne admin',
     `<header class="top">
   <span class="brand">Mnemosyne <span class="muted">admin</span></span>
-  <div class="right"><span>${esc(v.user.name)} <span>@${esc(v.user.username)}</span></span>
+  <div class="right">${topBtn(`${base}/`, 'Projects', ICON_GRID, 'Back to the projects and their documentation')}<span>${esc(v.user.name)} <span>@${esc(v.user.username)}</span></span>
   <form method="post" action="${base}/admin/auth/logout"><button class="btn small" type="submit">Sign out</button></form></div>
 </header>
 <div class="layout">
@@ -603,7 +610,10 @@ function ADMIN_JS(basePath: string): string {
 export interface DocsUser {
   name: string;
   username: string;
+  /** A GitLab instance administrator: the header offers a button to the admin area. */
+  admin?: boolean;
 }
+
 
 export interface ProjectCard {
   title: string;
@@ -626,6 +636,7 @@ a{color:var(--teal)}
 .top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 24px;border-bottom:1px solid var(--line);background:rgba(22,25,34,.85)}
 .brand{font:600 24px/1 "Palatino Linotype","Book Antiqua",Palatino,Georgia,"Times New Roman",serif;letter-spacing:.4px;color:var(--title);text-decoration:none}
 .top .right{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:14px}.top form{margin:0}
+${TOPBTN_CSS}
 main.docs{max-width:1180px;margin:0 auto;padding:30px 24px 70px;display:flex;flex-direction:column;gap:18px}
 h1{margin:0;font:600 34px/1.15 "Palatino Linotype","Book Antiqua",Palatino,Georgia,"Times New Roman",serif;letter-spacing:.3px;color:var(--title)}
 h2{margin:6px 0 0;font-size:19px;font-weight:600;color:var(--teal)}
@@ -677,7 +688,7 @@ function docsShell(title: string, basePath: string, user: DocsUser, body: string
   return shell(
     title,
     `<header class="top"><a class="brand" href="${base}/">Mnemosyne</a>
-  <div class="right"><span>${esc(user.name)} <span>@${esc(user.username)}</span></span>
+  <div class="right">${user.admin ? topBtn(`${base}/admin/`, 'Admin', ICON_WRENCH, 'Open the admin area') : ''}<span>${esc(user.name)} <span>@${esc(user.username)}</span></span>
   <form method="post" action="${base}/auth/logout"><button class="btn small" type="submit">Sign out</button></form></div></header>
 <main class="docs">${body}</main>`,
     DOCS_CSS,
@@ -929,7 +940,7 @@ ${article}
 function docsShellBody(basePath: string, user: DocsUser, body: string): string {
   const base = esc(basePath);
   return `<header class="top"><a class="brand" href="${base}/">Mnemosyne</a>
-  <div class="right"><span>${esc(user.name)} <span>@${esc(user.username)}</span></span>
+  <div class="right">${user.admin ? topBtn(`${base}/admin/`, 'Admin', ICON_WRENCH, 'Open the admin area') : ''}<span>${esc(user.name)} <span>@${esc(user.username)}</span></span>
   <form method="post" action="${base}/auth/logout"><button class="btn small" type="submit">Sign out</button></form></div></header>
 <main class="docs">${body}</main>`;
 }
