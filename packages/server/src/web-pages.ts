@@ -562,6 +562,7 @@ a.card:hover{border-color:var(--accent)}
 .card .t{font-size:17px;font-weight:600;color:var(--teal)}
 .card .s{font-size:13px;color:var(--muted)}
 .card{position:relative}.card .t{padding-right:46px}
+.card .gid{align-self:flex-start;margin-top:2px;padding:2px 10px;border-radius:8px;border:1px solid var(--teal);color:var(--teal);font-size:14px}.card .gid b{font-size:17px;color:#fff}
 .card .n{margin-top:4px;font-size:13px;color:var(--muted)}
 
 .card .c{position:absolute;top:12px;right:12px;min-width:30px;height:30px;padding:0 6px;box-sizing:border-box;border-radius:99px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--teal);background:transparent;border:2px solid var(--teal)}
@@ -611,7 +612,7 @@ export function homePage(v: { basePath: string; user: DocsUser; cards: ProjectCa
   // the ring in the corner is the running project number (1..N), so the list can be counted at a glance
   const card = (c: ProjectCard, i: number) => `<a class="card" href="${esc(c.href)}" title="${c.count === 0 ? 'No notes yet' : `${c.count} ${c.count === 1 ? 'note' : 'notes'}`}">
     <span class="c" aria-label="project ${i + 1}">${i + 1}</span>
-    <span class="t">${esc(c.title)}</span><span class="s">${esc(c.sub)}${c.glId !== undefined ? ` · GitLab ID ${c.glId}` : ''}</span>
+    <span class="t">${esc(c.title)}</span><span class="s">${esc(c.sub)}</span>${c.glId !== undefined ? `<span class="gid">GitLab ID <b>${c.glId}</b></span>` : ''}
     <span class="n">${c.count === 0 ? 'no notes yet' : `${c.count} ${c.count === 1 ? 'note' : 'notes'}`}${c.updated ? ` · updated ${esc(c.updated)}` : ''}</span>
     ${c.adminOnly ? '<span class="badge admin">administrators only</span>' : ''}</a>`;
   // five cards per row (easier to count); fewer on narrower windows

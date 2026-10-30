@@ -599,7 +599,7 @@ describe('web portal', () => {
       expect(rings).toEqual(rings.map((_, i) => i + 1));
       expect(home).toMatch(/<b>\d+ projects\.<\/b>/);
       expect(home).toContain('repeat(5,minmax(0,1fr))'); // five cards per row
-      expect(home).toContain('grp/zeta · GitLab ID 2'); // the real GitLab project id is printed on the card, separate from the ring
+      expect(home).toContain('<span class="gid">GitLab ID <b>2</b></span>'); // the real GitLab project id is printed on the card, separate from the ring
       expect(home).toContain(`href="${base.replace(new URL(base).origin, '')}/p/zeta"`);
       const page = await fetch(`${base}/p/zeta`, { headers: { cookie: dev } });
       expect(page.status).toBe(200);
