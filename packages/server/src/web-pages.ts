@@ -288,22 +288,20 @@ function jobBlocks(): string {
       const ph = d.placeholders.length
         ? `<span class="hint">Placeholders the server fills in: ${d.placeholders.map((p) => `<code>{{${esc(p.name)}}}</code> = ${esc(p.meaning)}${p.required ? ' <b>(required)</b>' : ''}`).join(' · ')}</span>`
         : '';
-      const ai = d.usesAi
-        ? `<div class="nums">
+      const ai = `<div class="nums">
       <label>Max output tokens<input id="maxTokens-${role}" inputmode="numeric" placeholder="${fmt(d.defaults.maxTokens)}" autocomplete="off"><span class="hint">The most the AI may write in one call. You pay per token written, so this is the cost ceiling of a call; the agreement popup shows the worst case. Big projects and reasoning models need a high limit. Default ${fmt(d.defaults.maxTokens)}, allowed 256 to ${fmt(MAX_OUTPUT_TOKENS)}.</span></label>
       <label>Temperature<input id="temperature-${role}" inputmode="decimal" placeholder="provider default" autocomplete="off"><span class="hint">0 to 2. Lower = more factual and repeatable, higher = more varied. Empty = the provider's own default (the value is not sent).</span></label>
       <label>Top-p<input id="topP-${role}" inputmode="decimal" placeholder="provider default" autocomplete="off"><span class="hint">0.01 to 1. The share of most-likely words the AI may choose from; lower = safer wording. Empty = the provider's own default (not sent).</span></label>
       <label>Time limit per call (minutes)<input id="timeoutMinutes-${role}" inputmode="numeric" placeholder="${d.defaults.timeoutMinutes}" autocomplete="off"><span class="hint">A call that takes longer is stopped. Default ${d.defaults.timeoutMinutes}, allowed 1 to 60.</span></label>
     </div>
     <label class="wide">${esc(d.systemLabel)}<textarea id="sys-${role}" rows="6" spellcheck="false"></textarea></label>
-    <label class="wide">${esc(d.userLabel)}<textarea id="usr-${role}" rows="14" spellcheck="false"></textarea>${ph}</label>`
-        : '';
+    <label class="wide">${esc(d.userLabel)}<textarea id="usr-${role}" rows="14" spellcheck="false"></textarea>${ph}</label>`;
       return `<form class="job" data-role="${role}" id="job-${role}">
     <div class="jobhead"><h4>${esc(d.title)}</h4><span class="tag${d.usesAi ? ' ai' : ''}">${d.usesAi ? 'AI call · costs money' : 'no AI call yet'}</span></div>
     <p class="sub">${esc(d.summary)}</p>
     <label class="wide">Model<select id="m-${role}"></select><span class="hint">Picked from the models your keys can use (step 2).</span></label>
     ${ai}
-    <div class="row"><button class="btn primary" type="submit">Save ${esc(d.title)} settings</button>${d.usesAi ? `<button class="btn" type="button" data-reset="${role}">Reset to defaults</button>` : ''}<span id="msg-${role}" class="msg"></span></div>
+    <div class="row"><button class="btn primary" type="submit">Save ${esc(d.title)} settings</button><button class="btn" type="button" data-reset="${role}">Reset to defaults</button><span id="msg-${role}" class="msg"></span></div>
   </form>`;
     })
     .join('\n  ');
@@ -483,7 +481,6 @@ function ADMIN_JS(basePath: string): string {
   function fillJob(role){
     var j=JOBS[role];if(!j)return;
     var a=j.assignment;if(a)$('m-'+role).value=a.providerId+'::'+a.model;
-    if(!j.def.usesAi)return;
     var st=j.settings||{},e=j.effective;
     ['maxTokens','temperature','topP','timeoutMinutes'].forEach(function(k){$(k+'-'+role).value=st[k]===undefined?'':st[k]});
     $('sys-'+role).value=e.systemPrompt;$('usr-'+role).value=e.userPrompt;
@@ -499,10 +496,8 @@ function ADMIN_JS(basePath: string): string {
       ev.preventDefault();note('msg-'+role,'');
       var body={},v=$('m-'+role).value;
       if(v){var i=v.indexOf('::');body.model={providerId:v.slice(0,i),model:v.slice(i+2)}}
-      if(JOBS[role]&&JOBS[role].def.usesAi){
-        ['maxTokens','temperature','topP','timeoutMinutes'].forEach(function(k){body[k]=$(k+'-'+role).value.trim()});
-        body.systemPrompt=$('sys-'+role).value;body.userPrompt=$('usr-'+role).value;
-      }
+      ['maxTokens','temperature','topP','timeoutMinutes'].forEach(function(k){body[k]=$(k+'-'+role).value.trim()});
+      body.systemPrompt=$('sys-'+role).value;body.userPrompt=$('usr-'+role).value;
       call('PUT','/llm/jobs/'+role,body).then(function(r){JOBS=r.jobs;data.assignments={};ROLES.forEach(function(x){if(JOBS[x].assignment)data.assignments[x]=JOBS[x].assignment});fillJob(role);note('msg-'+role,'Saved. It applies to the next run.',true)}).catch(function(e){note('msg-'+role,e.message)});
     });
     var rb=document.querySelector('[data-reset="'+role+'"]');

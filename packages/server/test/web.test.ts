@@ -817,6 +817,17 @@ describe('web portal', () => {
       expect(jobs.text.def.placeholders.map((p: { name: string }) => p.name)).toEqual(['project', 'notes_count', 'notes']);
       expect(jobs.image.def.placeholders.map((p: { name: string }) => p.name)).toEqual(['project', 'article']);
       expect(jobs.pdf.def.usesAi).toBe(false);
+      // the PDF block has the very same fields as the other two, empty because nothing uses them yet
+      const pageHtml = await (await fetch(`${base}/admin/`, { headers: h })).text();
+      for (const role of ['text', 'image', 'pdf']) for (const f of ['maxTokens', 'temperature', 'topP', 'timeoutMinutes']) expect(pageHtml, `${f}-${role}`).toContain(`id="${f}-${role}"`);
+      for (const id of ['sys-pdf', 'usr-pdf']) expect(pageHtml).toContain(`id="${id}"`);
+      expect(jobs.pdf.effective.systemPrompt).toBe('');
+      expect(jobs.pdf.effective.userPrompt).toBe('');
+      const pdfSaved = await put('pdf', { model: jobs.pdf.assignment, maxTokens: '8000', temperature: '0.3', systemPrompt: 'PDF-SYSTEM', userPrompt: 'Handbook for {{project}}: {{article}}' });
+      expect(pdfSaved.status).toBe(200);
+      expect((await get()).pdf.settings).toMatchObject({ maxTokens: 8000, temperature: 0.3, systemPrompt: 'PDF-SYSTEM' });
+      expect((await put('pdf', { model: jobs.pdf.assignment, userPrompt: 'bad {{bogus}}' })).status).toBe(400);
+      await put('pdf', { model: jobs.pdf.assignment }); // back to empty
       expect((await put('image', { model: jobs.image.assignment, maxTokens: 1_000_000 })).status).toBe(200); // Meta allows up to 1 million output tokens per call
       expect((await get()).image.settings.maxTokens).toBe(1_000_000);
       await put('image', { model: jobs.image.assignment }); // back to the defaults

@@ -80,11 +80,14 @@ export const JOB_DEFS: Record<Role, JobDef> = {
     role: 'pdf',
     title: 'PDF',
     summary:
-      'Today the PDF handbook is built from the article and the diagram without any AI call (it costs nothing), so the settings below are not used yet. The model choice is kept so an AI-written PDF handbook can use it later.',
+      'Today the PDF handbook is built from the article and the diagram without any AI call (it costs nothing), so the values below are not used yet and are left empty. They are here, like for the other jobs, so an AI-written PDF handbook can be controlled the same way as soon as it exists: whatever you save now will be used then.',
     usesAi: false,
-    systemLabel: 'System prompt (not used yet)',
-    userLabel: 'Instruction (not used yet)',
-    placeholders: [],
+    systemLabel: 'System prompt - who the AI is and the rules (not used yet)',
+    userLabel: 'Instruction - what the AI is asked to write (not used yet)',
+    placeholders: [
+      { name: 'project', meaning: 'the project name', required: false },
+      { name: 'article', meaning: 'the generated documentation article', required: false },
+    ],
     defaults: { maxTokens: 50_000, timeoutMinutes: 20, systemPrompt: '', userPrompt: '' },
   },
 };
