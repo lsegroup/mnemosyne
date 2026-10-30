@@ -457,6 +457,15 @@ describe('web portal', () => {
     let llmBase = '';
     const calls = { chat: 0, image: 0, briefMax: 0, limits: [] as number[], lastChat: null as null | { max_tokens?: number; max_completion_tokens?: number; temperature?: number; top_p?: number; messages: { role: string; content: string }[] } };
     const dropped = { once: false };
+    // what the fake text model answers when asked for a diagram plan (the label holds characters that must be escaped in the SVG)
+    const DIAGRAM_PLAN = {
+      title: 'Alpha',
+      columns: [
+        { title: 'Clients', nodes: [{ id: 'u', label: 'Browser', detail: 'people', lane: 'path' }] },
+        { title: 'Service', nodes: [{ id: 's', label: 'Notes <service> & "index"', detail: 'HTTP :40000', lane: 'path' }, { id: 'g', label: 'GitLab SSO', detail: 'OAuth 2 + PKCE', lane: 'control' }] },
+      ],
+      links: [{ from: 'u', to: 's', label: 'HTTPS' }, { from: 's', to: 'g', label: 'sign in' }],
+    };
     let png: Buffer;
 
     beforeAll(async () => {
@@ -489,7 +498,7 @@ describe('web portal', () => {
           } else if (req.url === '/v1/chat/completions') {
             calls.chat++;
             calls.lastChat = JSON.parse(raw);
-            const wantsBrief = /image-generation/i.test(raw);
+            const wantsBrief = /solutions architect/i.test(raw); // the diagram plan request
             if (wantsBrief) {
               const b = JSON.parse(raw) as { max_tokens?: number; max_completion_tokens?: number };
               calls.briefMax = b.max_tokens ?? b.max_completion_tokens ?? 0;
@@ -499,7 +508,7 @@ describe('web portal', () => {
               return;
             }
             reply({
-              choices: [{ message: { content: wantsBrief ? 'A clean flow chart: Notes -> Article -> PDF' : '# Alpha\n\nAlpha is a test project.\n\n## Overview\n\nIt does **things**.\n\n## History\n\n- first\n- second\n\n## Known issues\n\nNone documented.' } }],
+              choices: [{ message: { content: wantsBrief ? JSON.stringify(DIAGRAM_PLAN) : '# Alpha\n\nAlpha is a test project.\n\n## Overview\n\nIt does **things**.\n\n## History\n\n- first\n- second\n\n## Known issues\n\nNone documented.' } }],
               usage: { prompt_tokens: 1200, completion_tokens: 300 },
             });
           } else if (req.url === '/v1/images/generations') {
@@ -588,18 +597,26 @@ describe('web portal', () => {
       expect(page).not.toContain('id="pdfBtn" disabled'); // active now
       expect(page).toContain('Regenerate documentation');
 
-      // workflow diagram: two calls (brief + image), only after agreement
+      // workflow diagram: ONE text call writes the plan, Mnemosyne draws it itself (no image model), only after agreement
       const est = await (await api(admin, '/estimate?kind=diagram')).json();
-      expect(est.facts.map((f: string[]) => f[0])).toEqual(expect.arrayContaining(['Text model', 'Image model', 'Estimated cost']));
+      expect(est.facts.map((f: string[]) => f[0])).toEqual(expect.arrayContaining(['Text model', 'Estimated cost']));
+      expect(est.facts.map((f: string[]) => f[0])).not.toContain('Image model');
+      expect(est.what).toContain('No image model is used');
       expect((await api(admin, '/generate', 'POST', { kind: 'diagram', token: est.token })).status).toBe(202);
       expect((await waitIdle(admin)).state).toBe('done');
-      expect(calls.image).toBe(1);
+      expect(calls.image).toBe(0);
       const after = await (await fetch(`${base}/p/alpha`, { headers: { cookie: admin } })).text();
       const src = /<img src="([^"]+)" alt="Workflow diagram/.exec(after)?.[1];
       expect(src).toContain('/p/alpha/diagram/');
+      expect(after).toContain('by Mnemosyne, planned by Fake AI / text-model');
       const img = await fetch(`${new URL(base).origin}${src}`, { headers: { cookie: admin } });
-      expect(img.headers.get('content-type')).toBe('image/png');
-      expect(Buffer.from(await img.arrayBuffer()).subarray(1, 4).toString()).toBe('PNG');
+      expect(img.headers.get('content-type')).toBe('image/svg+xml');
+      expect(img.headers.get('content-security-policy')).toContain('sandbox');
+      const svg = await img.text();
+      expect(svg.startsWith('<svg')).toBe(true);
+      expect(svg).toContain('>GitLab SSO<'); // spelled exactly as in the plan
+      expect(svg).toContain('Notes &lt;service&gt; &amp; &quot;index&quot;'); // escaped, never markup
+      expect(svg).not.toContain('<script');
       expect((await fetch(`${new URL(base).origin}${src}`, { redirect: 'manual' })).status).toBe(302); // not signed in
 
       // layout: article left, infobox card right with the small clickable diagram, rule, then the change history
@@ -797,6 +814,7 @@ describe('web portal', () => {
       const bytes = Buffer.from(await pdf.arrayBuffer());
       expect(bytes.subarray(0, 5).toString()).toBe('%PDF-');
       expect((bytes.toString('latin1').match(/\/Type \/Page\b/g) ?? []).length).toBeGreaterThanOrEqual(4); // cover, index, diagram, content
+      expect(bytes.toString('latin1')).toContain('/MediaBox [0 0 841.89 595.28]'); // the wide diagram has a landscape page of its own
       const page = await (await fetch(`${base}/p/alpha`, { headers: { cookie: dev } })).text();
       expect(page).toContain('Download PDF');
       expect(page).toContain('Workflow diagram');

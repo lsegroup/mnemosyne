@@ -1,0 +1,28 @@
+{"title":"Load balancer and WAF","columns":[
+ {"title":"Client","nodes":[{"id":"cl","label":"Client","detail":"browser or application","lane":"path"}]},
+ {"title":"High availability","nodes":[
+  {"id":"vip","label":"VRRP virtual IP","detail":"keepalived holds the public IPv4 and IPv6 VIPs","lane":"path"},
+  {"id":"ka","label":"keepalived","detail":"VRRP groups, also the internal gateway VIP","lane":"control"}]},
+ {"title":"Frontend","nodes":[
+  {"id":"fe","label":"FE frontend / VIP service","detail":"listens on the VIP, ports 80 and 443","lane":"path"},
+  {"id":"dash","label":"Dashboard","detail":"VIPs, products, policies","lane":"control"}]},
+ {"title":"TLS","nodes":[
+  {"id":"acc","label":"ACC TLS accelerator","detail":"one port per product, terminates TLS, keeps source IP and Host","lane":"path"},
+  {"id":"redis","label":"Redis","detail":"shared config, ban table, stats","lane":"control"}]},
+ {"title":"Inspection","nodes":[
+  {"id":"waf","label":"WAF rule engine","detail":"local ports, scores requests","lane":"path"},
+  {"id":"f2b","label":"fail2ban on web hosts","detail":"forwards bans","lane":"control"}]},
+ {"title":"Routing","nodes":[
+  {"id":"be","label":"BE backend / load balancer","detail":"local port, L7 path routing, DirectBackend","lane":"path"}]},
+ {"title":"Backends","nodes":[{"id":"pool","label":"Aggregator backend pools","detail":"web hosts behind the internal gateway VIP","lane":"path"}]}],
+ "links":[
+ {"from":"cl","to":"vip","label":"HTTPS to VIP","dashed":false},
+ {"from":"vip","to":"fe","label":"80 / 443","dashed":false},
+ {"from":"fe","to":"acc","label":"to ACC port","dashed":false},
+ {"from":"acc","to":"waf","label":"decrypted request","dashed":false},
+ {"from":"waf","to":"be","label":"allow forward","dashed":false},
+ {"from":"be","to":"pool","label":"L7 route","dashed":false},
+ {"from":"ka","to":"vip","label":"holds the VIP","dashed":true},
+ {"from":"dash","to":"redis","label":"publishes config","dashed":true},
+ {"from":"redis","to":"waf","label":"rules, bans","dashed":true},
+ {"from":"f2b","to":"redis","label":"bans","dashed":true}]}

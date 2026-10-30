@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { MemoryNode } from '@mnemosyne/core';
+import type { DiagramPlan } from './diagram.js';
 import { redact } from './docs.js';
 import type { ImageResult } from './llm-call-image.js';
 
@@ -32,6 +33,8 @@ export interface DocMeta {
   basedOn?: string;
   /** The diagram a PDF embeds, if there was one. */
   diagram?: string;
+  /** For a diagram drawn by Mnemosyne itself: the plan it was drawn from (the PDF draws the same plan as vectors). */
+  plan?: DiagramPlan;
   ext: string;
 }
 
@@ -189,25 +192,37 @@ export function buildWikiPrompt(project: string, gitlabName: string | null, note
   return { system, user, noteCount: parts.length, inputTokens: approxTokens(system.length + user.length) };
 }
 
-/** What the text model is told when it writes the drawing brief for the image model. Editable in Admin -> LLM (job Images). */
-export const DEFAULT_BRIEF_SYSTEM = 'You write prompts for an image-generation model. Output only the prompt text, in English, no quotes, no markdown, no explanations.';
-export const DEFAULT_BRIEF_USER = [
+/**
+ * What the text model is told when it writes the PLAN of the architecture diagram (Admin -> LLM, job Images). The AI only
+ * writes data (boxes and arrows as JSON); Mnemosyne draws the picture itself (diagram.ts), so the spelling is exact.
+ */
+export const DEFAULT_PLAN_SYSTEM = [
+  'You are a solutions architect. You turn the documentation of one software project into the plan of an architecture diagram.',
+  'Output ONLY one JSON object: no markdown fences, no commentary before or after it.',
+  'Use only facts that are in the article; never invent components, ports, protocols or authentication.',
+  'Never write passwords, tokens or keys.',
+].join(' ');
+
+export const DEFAULT_PLAN_USER = [
   'Below is an article about the software project "{{project}}".',
-  'Write ONE prompt that makes an image model draw a clear WORKFLOW / ARCHITECTURE DIAGRAM of it:',
-  '- a clean flow chart on a plain white background, dark navy lines and boxes with violet and teal accent colours, flat vector style, landscape orientation',
-  '- boxes for the main components or steps (at most 12), connected by labelled arrows that show the real flow of work or data from start to finish',
-  '- short, legible English labels taken from the article; no paragraphs of text, no logos, no people, no photographs',
-  '- a title at the top with the project name',
-  'Name each box and each arrow label explicitly in the prompt so the model does not invent its own.',
+  'Write the plan of ONE architecture diagram that shows how the system is reached, how a request (or a person\'s work) travels through it and where its data lives. Answer with exactly this JSON shape:',
+  '{"title":"project name","columns":[{"title":"CLIENTS","nodes":[{"id":"n1","label":"VS Code","detail":"MCP client","lane":"path"}]}],"links":[{"from":"n1","to":"n2","label":"MCP over HTTPS :40000","dashed":false}]}',
+  '',
+  'Rules:',
+  '1. Columns run from LEFT to RIGHT in the order a request (or a person\'s work) travels, CLOSEST TO THE USER FIRST. Column 1 = who or what uses the system (people, browsers, editors, applications, other systems). Then the entry layer exactly as a client meets it: virtual IPs and failover (for example VRRP / keepalived), load balancers, gateways, firewalls, public ports. Then the services in the order they process a request, and last the storage and the external systems. Never place a component behind something that sits in front of it in reality.',
+  '2. "lane":"path" = the request passes through this component. "lane":"control" = it configures, monitors, signs people in or is managed from elsewhere but is NOT in the request path (dashboards, configuration stores, identity providers / single sign-on, agents, banning and monitoring). Control boxes are drawn in a band below, under the column they belong to, and their arrows are dashed.',
+  '3. Show EVERY interface the article names: each way in (protocol, port, URL path), each sign-in or authentication mechanism and where it happens, each data store and what it holds, each external system. Describe authentication exactly as the article does, including when it is optional or not switched on.',
+  '4. 3 to 7 columns, at most 8 "path" and 6 "control" boxes per column, at most 30 boxes in total. "label" at most 40 characters (a name), "detail" at most 90 characters (port, protocol, technology or role), arrow "label" at most 45 characters (protocol, port or action). Connect boxes of the same or of neighbouring columns where you can. Every box needs at least one arrow.',
+  '5. Use the exact names, ports and numbers from the article. If the article does not say it, do not draw it. Output the JSON only.',
   '',
   '--- ARTICLE ---',
   '{{article}}',
 ].join('\n');
 
-export function buildDiagramBriefPrompt(project: string, wiki: string, tpl: PromptTemplates = {}): { system: string; user: string } {
+export function buildDiagramPlanPrompt(project: string, wiki: string, tpl: PromptTemplates = {}): { system: string; user: string } {
   return {
-    system: tpl.system?.trim() ? tpl.system : DEFAULT_BRIEF_SYSTEM,
-    user: fillTemplate(tpl.user?.trim() ? tpl.user : DEFAULT_BRIEF_USER, { project, article: wiki.slice(0, 60_000) }),
+    system: tpl.system?.trim() ? tpl.system : DEFAULT_PLAN_SYSTEM,
+    user: fillTemplate(tpl.user?.trim() ? tpl.user : DEFAULT_PLAN_USER, { project, article: wiki.slice(0, 60_000) }),
   };
 }
 

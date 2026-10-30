@@ -84,3 +84,13 @@ The reference deployment co-locates with GitLab on a host with ~125 MB free RAM,
 into swap. A JVM (OpenSearch) or in-RAM index (Typesense) does not fit; Meilisearch would
 push GitLab further into swap. Embedded SQLite rides inside the server process at ~tens of
 MB. A `MeilisearchBackend` remains possible behind `SearchBackend` for RAM-rich hosts.
+
+## Generated documentation and the architecture diagram
+
+The portal (`packages/server/src/web.ts`) turns a project's notes into a documentation page, a diagram and a PDF. Nothing calls a model unless an administrator presses a button and agrees to the cost (`ai-jobs.ts` holds every editable value: limits, sampling, prompts).
+
+- **Article** - the *Text* job: one chat call writes the page from all notes of the project (`docgen.ts`).
+- **Diagram** - the *Images* job, but no image model is involved. One text call reads the article and answers with a **plan** (JSON: columns of boxes in the order a request travels, closest to the user first; a `control` lane for things that are managed from elsewhere; arrows with protocol / port labels). `diagram.ts` validates the plan (limits, unknown arrows dropped, credentials masked), lays it out deterministically and draws it as SVG. Every word is spelled as the plan says and the picture is the same every time. The plan is stored in the diagram's metadata, so a PDF can paint the same drawing as vectors (landscape page when wide) and the picture can be redrawn without another AI call.
+- **PDF** - built from the article and the diagram without any AI call.
+
+Diagrams made earlier by an image model (png/jpg/webp) are still shown and embedded; new ones are svg.

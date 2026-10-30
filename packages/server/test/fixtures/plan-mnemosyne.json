@@ -1,0 +1,33 @@
+{"title":"Mnemosyne","columns":[
+ {"title":"Clients","nodes":[
+  {"id":"vsc","label":"VS Code","detail":"MCP client","lane":"path"},
+  {"id":"jb","label":"JetBrains","detail":"MCP client","lane":"path"},
+  {"id":"app","label":"Claude Code / any application","detail":"MCP or REST client","lane":"path"},
+  {"id":"br","label":"Browser","detail":"people reading the documentation","lane":"path"}]},
+ {"title":"Endpoint :40000/tcp","nodes":[
+  {"id":"gw","label":"Go gateway mcp-server","detail":"HTTPS, one endpoint, path-routed /mnemosyne/","lane":"path"}]},
+ {"title":"Service","nodes":[
+  {"id":"mcp","label":"MCP over Streamable HTTP","detail":"/mnemosyne/mcp, 9 tools, shared bearer token (optional, not set)","lane":"path"},
+  {"id":"rest","label":"REST API","detail":"/mnemosyne/search, /mnemosyne/nodes","lane":"path"},
+  {"id":"web","label":"Web portal","detail":"documentation pages, user area and admin area","lane":"path"},
+  {"id":"sso","label":"GitLab SSO bridge","detail":"OAuth 2 authorization code + PKCE","lane":"control"},
+  {"id":"ai","label":"AI provider","detail":"Meta Muse, only on an admin click after cost agreement","lane":"control"}]},
+ {"title":"Storage","nodes":[
+  {"id":"git","label":"Git repository","detail":"nodes/<project>/*.md, source of truth, every commit is audit","lane":"path"},
+  {"id":"sql","label":"SQLite search index","detail":"full-text + vectors, rebuildable cache","lane":"path"},
+  {"id":"gl","label":"GitLab","detail":"sign-in, users and project membership","lane":"control"}]}],
+ "links":[
+ {"from":"vsc","to":"gw","label":"MCP over Streamable HTTPS","dashed":false},
+ {"from":"jb","to":"gw","label":"MCP over Streamable HTTPS","dashed":false},
+ {"from":"app","to":"gw","label":"MCP or REST over HTTPS","dashed":false},
+ {"from":"br","to":"gw","label":"HTTPS :40000","dashed":false},
+ {"from":"gw","to":"mcp","label":"proxy to :40001","dashed":false},
+ {"from":"gw","to":"rest","label":"proxy to :40001","dashed":false},
+ {"from":"gw","to":"web","label":"proxy to :40001","dashed":false},
+ {"from":"mcp","to":"git","label":"read and write notes","dashed":false},
+ {"from":"rest","to":"git","label":"read and write notes","dashed":false},
+ {"from":"mcp","to":"sql","label":"search","dashed":false},
+ {"from":"web","to":"git","label":"reads notes","dashed":false},
+ {"from":"web","to":"sso","label":"sign in","dashed":true},
+ {"from":"sso","to":"gl","label":"OAuth 2 + PKCE","dashed":true},
+ {"from":"web","to":"ai","label":"on click","dashed":true}]}

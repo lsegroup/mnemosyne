@@ -12,10 +12,10 @@ import { JOB_DEFS, effectiveJob, validateJobSettings, type JobSettings } from '.
 import { MemberStore, type MemberEntry } from './member-store.js';
 import { NodeIndex, fetchMemberships, matchProject, redact, slug, type GitLabProject } from './docs.js';
 import { outline, renderMarkdown } from './markdown.js';
-import { DocStore, IMAGE_PRICE_USD, approxTokens, buildDiagramBriefPrompt, buildWikiPrompt, changeHistory, estimateText, historyMarkdown, missingSections, toPdfImage, type DocMeta } from './docgen.js';
+import { DocStore, approxTokens, buildDiagramPlanPrompt, buildWikiPrompt, changeHistory, estimateText, historyMarkdown, missingSections, toPdfImage, type DocMeta } from './docgen.js';
 import { chat } from './llm-call-chat.js';
-import { generateImage } from './llm-call-image.js';
-import { buildPdf } from './pdf.js';
+import { PlanError, drawScene, layout, parsePlan, renderSvg, type DiagramPlan } from './diagram.js';
+import { buildPdf, type PdfInput } from './pdf.js';
 import { LOGO_WEBP_BASE64 } from './web-assets.js';
 
 // Two independent sign-in systems: the public page (cookie below) and the admin area
@@ -28,6 +28,8 @@ const ADMIN_OAUTH_COOKIE = 'mnemosyne_admin_oauth';
 const SESSION_TTL_S = 8 * 3600;
 /** The documentation area stays signed in for a month; GitLab is re-checked silently every 12 h (refresh token). */
 const money = (usd: number) => (usd < 0.01 ? '<0.01' : usd.toFixed(2));
+/** Pictures made by an image model are png/jpg/webp; diagrams drawn by Mnemosyne itself are svg. */
+const DIAGRAM_MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp', svg: 'image/svg+xml' };
 const DOCS_SESSION_TTL_S = 30 * 24 * 3600;
 const MEMBER_FRESH_MS = 12 * 3600 * 1000;
 const OAUTH_TTL_S = 10 * 60;
@@ -583,7 +585,9 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     if (!g) return;
     const meta = await docStore!.get(g.project, 'diagram', String(req.params.id));
     if (!meta) return notFound(res, g.ds, 'This diagram does not exist.');
-    res.setHeader('Content-Type', meta.ext === 'png' ? 'image/png' : meta.ext === 'jpg' ? 'image/jpeg' : 'image/webp');
+    res.setHeader('Content-Type', DIAGRAM_MIME[meta.ext] ?? 'application/octet-stream');
+    // the SVG is made by this server from checked data and holds no script; the policy makes sure of it if the link is opened on its own
+    if (meta.ext === 'svg') res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox");
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.send(await docStore!.read(meta));
@@ -630,23 +634,18 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     }
     const wiki = await docStore!.latest(project, 'wiki');
     if (!wiki) return { error: 'Generate the documentation first.' };
-    const image = await providers!.getAssigned('image');
-    if (!image) return { error: 'Choose a model for Images in Admin → LLM first.' };
     const wikiChars = Math.min((await docStore!.read(wiki)).length, 60_000);
-    const typical = estimateText(text.model, approxTokens(wikiChars) + 400, Math.min(4000, ij.maxTokens)); // the first real brief used 2,692 tokens
-    const worst = estimateText(text.model, approxTokens(wikiChars) + 400, ij.maxTokens);
-    const usd = (typical.usd ?? 0) + IMAGE_PRICE_USD;
-    const usdMax = (worst.usd ?? 0) + IMAGE_PRICE_USD;
+    const typical = estimateText(text.model, approxTokens(wikiChars) + 1200, Math.min(4000, ij.maxTokens)); // the article plus the rules; a plan is a few thousand tokens
+    const worst = estimateText(text.model, approxTokens(wikiChars) + 1200, ij.maxTokens);
     return {
-      key: `${text.provider.id}:${text.model}|${image.provider.id}:${image.model}:${ij.maxTokens}:${ij.userPrompt.length}:${ij.systemPrompt.length}`,
-      what: `Two AI calls: ${text.provider.label} first turns the article into a drawing brief, then ${image.provider.label} draws the workflow diagram from it.`,
+      key: `${text.provider.id}:${text.model}|plan:${ij.maxTokens}:${ij.userPrompt.length}:${ij.systemPrompt.length}`,
+      what: `One AI call: ${text.provider.label} reads the article and writes a plan of the diagram (boxes, arrows, ports) as data. Mnemosyne then draws the picture itself, so every word is spelled exactly. No image model is used.`,
       facts: [
         ['Text model', `${text.provider.label} / ${text.model}`],
-        ['Image model', `${image.provider.label} / ${image.model}`],
         ['Based on', `the article from ${wiki.generatedAt.slice(0, 16).replace('T', ' ')} UTC`],
-        ['Estimated cost', `about $${money(usd)} (one image at about $${money(IMAGE_PRICE_USD)}; at most $${money(usdMax)} if the whole ${ij.maxTokens.toLocaleString('en-US')}-token limit of the drawing brief is used)`],
+        ['Estimated cost', typical.usd === null || worst.usd === null ? 'unknown (no list price for this model)' : `about $${money(typical.usd)} (at most $${money(worst.usd)} if the whole ${ij.maxTokens.toLocaleString('en-US')}-token limit of the answer is used)`],
       ],
-      usd: usdMax,
+      usd: worst.usd,
     };
   };
 
@@ -683,31 +682,38 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         if (missing.length) warning = `The article was saved, but the AI left out: ${missing.join(', ')}. Click “Regenerate documentation” to try again.`;
         void log({ event: 'ai_done', entityId: meta.id, description: `Article written by ${meta.model} from ${prompt.noteCount} notes (${out.inputTokens} tokens in, ${out.outputTokens} out)${missing.length ? `; MISSING SECTIONS: ${missing.join(', ')}` : ''}` });
       } else {
+        // one AI call writes the PLAN (data); Mnemosyne draws the picture itself, so no word in it is misspelled by a model
         const wiki = (await docStore!.latest(project, 'wiki'))!;
-        const image = (await providers!.getAssigned('image'))!;
         const wikiText = (await docStore!.read(wiki)).toString('utf8');
         const ij = effectiveJob('image', (await providers!.getJobs()).image);
-        const brief = buildDiagramBriefPrompt(project, wikiText, { system: ij.systemPrompt, user: ij.userPrompt });
-        const step = async <T,>(label: string, fn: () => Promise<T>): Promise<T> => {
-          try {
-            return await fn();
-          } catch (err) {
-            if (err instanceof ProviderValidationError) throw new ProviderValidationError(`${label}: ${err.message}`);
-            throw err;
-          }
-        };
-        const prompt = await step('Step 1 of 2 (drawing brief, text model)', () => chat(text.provider, text.model, brief.system, brief.user, { maxTokens: ij.maxTokens, temperature: ij.temperature, topP: ij.topP, timeoutMs: ij.timeoutMinutes * 60_000 }));
-        const img = await step('Step 2 of 2 (picture, image model)', () => generateImage(image.provider, image.model, redact(prompt.text.trim()).slice(0, 3500), Math.max(4, Math.min(ij.timeoutMinutes, 15)) * 60_000));
-        const ext = img.mime === 'image/png' ? 'png' : img.mime === 'image/jpeg' ? 'jpg' : 'webp';
+        const ask = buildDiagramPlanPrompt(project, wikiText, { system: ij.systemPrompt, user: ij.userPrompt });
+        const out = await chat(text.provider, text.model, ask.system, ask.user, { maxTokens: ij.maxTokens, temperature: ij.temperature, topP: ij.topP, timeoutMs: ij.timeoutMinutes * 60_000 });
+        let plan: DiagramPlan;
+        try {
+          plan = parsePlan(out.text, glName ?? project);
+        } catch (err) {
+          if (!(err instanceof PlanError)) throw err;
+          throw new ProviderValidationError(
+            `The AI answered, but not with a usable diagram plan: ${err.message}. Nothing was drawn (${out.inputTokens.toLocaleString('en-US')} tokens in, ${out.outputTokens.toLocaleString('en-US')} out were used). If you changed the instruction in Admin → LLM → Images, press “Reset to defaults” there: it must ask for the JSON plan.`,
+          );
+        }
+        const scene = layout(plan);
+        const boxes = plan.columns.reduce((s, c) => s + c.nodes.length, 0);
         const meta = await docStore!.save(
-          { kind: 'diagram', project, model: `${image.provider.label} / ${image.model}`, by: user, basedOn: wiki.id, inputTokens: prompt.inputTokens, outputTokens: prompt.outputTokens, ext },
-          img.bytes,
+          { kind: 'diagram', project, model: `Mnemosyne, planned by ${text.provider.label} / ${text.model}`, by: user, basedOn: wiki.id, inputTokens: out.inputTokens, outputTokens: out.outputTokens, ext: 'svg', plan },
+          renderSvg(scene, plan),
         );
-        void log({ event: 'ai_done', entityId: meta.id, description: `Workflow diagram drawn by ${meta.model} (brief by ${text.model}: ${prompt.inputTokens} in, ${prompt.outputTokens} out)` });
+        if (plan.dropped.length) warning = `The diagram was drawn, but ${plan.dropped.length} item(s) of the AI's plan could not be used and were left out: ${plan.dropped.slice(0, 3).join('; ')}${plan.dropped.length > 3 ? '; ...' : ''}.`;
+        void log({
+          event: 'ai_done',
+          entityId: meta.id,
+          description: `Architecture diagram drawn by Mnemosyne from a plan written by ${text.model} (${plan.columns.length} columns, ${boxes} boxes, ${plan.links.length} arrows; ${out.inputTokens} tokens in, ${out.outputTokens} out)${plan.dropped.length ? `; left out of the plan: ${plan.dropped.length}` : ''}`,
+        });
       }
       jobs.set(project, { kind, state: 'done', startedAt: started, warning });
     } catch (err) {
       const msg = err instanceof ProviderValidationError ? err.message : 'The generation failed unexpectedly.';
+      if (!(err instanceof ProviderValidationError)) console.error(`docs ${kind} job for ${project} failed:`, err);
       jobs.set(project, { kind, state: 'error', startedAt: started, error: msg });
       void log({ event: 'ai_failed', description: msg });
     }
@@ -763,10 +769,14 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     jobs.set(g.project + ':pdf', { kind: 'pdf', state: 'running', startedAt: Date.now() });
     try {
       const diagram = await docStore!.latest(g.project, 'diagram');
-      let png: Buffer | null = null;
-      if (diagram) {
-        const bytes = await docStore!.read(diagram);
-        png = await toPdfImage({ bytes, mime: diagram.ext === 'png' ? 'image/png' : diagram.ext === 'jpg' ? 'image/jpeg' : 'image/webp' });
+      let picture: Omit<NonNullable<PdfInput['diagram']>, 'caption'> | null = null;
+      if (diagram?.ext === 'svg' && diagram.plan) {
+        // drawn by Mnemosyne: the PDF paints the same plan as vectors (sharp at any zoom, selectable text)
+        const scene = layout(diagram.plan);
+        picture = { vector: { width: scene.width, height: scene.height, draw: (d, x, y, s) => drawScene(d, scene, x, y, s) } };
+      } else if (diagram && diagram.ext !== 'svg') {
+        const png = await toPdfImage({ bytes: await docStore!.read(diagram), mime: diagram.ext === 'png' ? 'image/png' : diagram.ext === 'jpg' ? 'image/jpeg' : 'image/webp' });
+        if (png) picture = { png };
       }
       const markdown = redact((await docStore!.read(wiki)).toString('utf8')) + historyMarkdown(changeHistory(await nodeIndex!.inProject(g.project)));
       const pdf = await buildPdf({
@@ -776,10 +786,10 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         model: wiki.model,
         noteCount: wiki.noteCount ?? 0,
         markdown,
-        diagram: diagram && png ? { png, caption: `Created ${diagram.generatedAt.slice(0, 16).replace('T', ' ')} UTC by ${diagram.model}` } : undefined,
+        diagram: diagram && picture ? { ...picture, caption: `Created ${diagram.generatedAt.slice(0, 16).replace('T', ' ')} UTC by ${diagram.model}` } : undefined,
       });
-      const meta: DocMeta = await docStore!.save({ kind: 'pdf', project: g.project, model: wiki.model, by: g.ds.s.u, basedOn: wiki.id, diagram: png ? diagram?.id : undefined, noteCount: wiki.noteCount, ext: 'pdf' }, pdf);
-      void rec(req, { event: 'create', entityType: 'docs_pdf', entityId: meta.id, entityName: g.project, user: g.ds.s.u, description: `Project PDF built from the article of ${wiki.generatedAt.slice(0, 16).replace('T', ' ')} UTC${png ? ' with the workflow diagram' : ''}` });
+      const meta: DocMeta = await docStore!.save({ kind: 'pdf', project: g.project, model: wiki.model, by: g.ds.s.u, basedOn: wiki.id, diagram: picture ? diagram?.id : undefined, noteCount: wiki.noteCount, ext: 'pdf' }, pdf);
+      void rec(req, { event: 'create', entityType: 'docs_pdf', entityId: meta.id, entityName: g.project, user: g.ds.s.u, description: `Project PDF built from the article of ${wiki.generatedAt.slice(0, 16).replace('T', ' ')} UTC${picture ? ' with the workflow diagram' : ''}` });
       res.json({ id: meta.id });
     } catch (err) {
       console.error('pdf:', (err as Error).message);

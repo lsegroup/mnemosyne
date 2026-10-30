@@ -15,7 +15,12 @@ export interface PdfInput {
   model: string;
   noteCount: number;
   markdown: string;
-  diagram?: { png: Buffer; caption: string };
+  /** Either a raster picture, or a drawing that is painted as vectors (sharp at any zoom, real text). */
+  diagram?: {
+    png?: Buffer;
+    vector?: { width: number; height: number; draw: (doc: InstanceType<typeof PDFDocument>, x: number, y: number, scale: number) => void };
+    caption: string;
+  };
   /** Tests turn compression off to read the text streams. */
   compress?: boolean;
 }
@@ -169,8 +174,9 @@ export function buildPdf(input: PdfInput): Promise<Buffer> {
   // ---- reserved index pages (filled once the page numbers are known) ----
   for (let i = 0; i < tocPages; i++) doc.addPage();
 
-  // ---- content ----
-  doc.addPage();
+  // ---- content ---- (a wide drawing gets a landscape page of its own, so its text stays readable)
+  const wide = !!input.diagram?.vector && input.diagram.vector.width / input.diagram.vector.height >= 1.25;
+  doc.addPage(wide ? { size: 'A4', layout: 'landscape', margins: M } : undefined);
   let outlineH2: ReturnType<typeof doc.outline.addItem> | null = null;
   const heading = (level: number, text: string) => {
     const size = level <= 2 ? 19 : level === 3 ? 14 : 12;
@@ -231,7 +237,14 @@ export function buildPdf(input: PdfInput): Promise<Buffer> {
     doc.font('Helvetica').fontSize(9).fillColor(COLOURS.muted).text(pdfText(input.diagram.caption), M.left, doc.y, { width: W });
     doc.moveDown(0.6);
     const space = bottom() - doc.y;
-    doc.image(input.diagram.png, M.left, doc.y, { fit: [W, Math.max(200, space - 10)], align: 'center' });
+    const d = input.diagram;
+    if (d.vector) {
+      const pw = doc.page.width - M.left - M.right;
+      const s = Math.min(pw / d.vector.width, Math.max(150, space - 10) / d.vector.height);
+      d.vector.draw(doc, M.left + (pw - d.vector.width * s) / 2, doc.y, s);
+    } else if (d.png) {
+      doc.image(d.png, M.left, doc.y, { fit: [W, Math.max(200, space - 10)], align: 'center' });
+    }
     doc.addPage();
   }
 
@@ -333,8 +346,9 @@ export function buildPdf(input: PdfInput): Promise<Buffer> {
     const keep = doc.page.margins.bottom;
     doc.page.margins.bottom = 0; // allow writing below the normal text area without a page break
     doc.font('Helvetica').fontSize(8).fillColor(COLOURS.muted);
-    doc.text(pdfText(`${input.title} - Project documentation - ${dateText}`), M.left, doc.page.height - 40, { width: W - 60, lineBreak: false });
-    doc.text(`Page ${i + 1} of ${total}`, M.left, doc.page.height - 40, { width: W, align: 'right', lineBreak: false });
+    const pw = doc.page.width - M.left - M.right; // a landscape page is wider than the others
+    doc.text(pdfText(`${input.title} - Project documentation - ${dateText}`), M.left, doc.page.height - 40, { width: pw - 60, lineBreak: false });
+    doc.text(`Page ${i + 1} of ${total}`, M.left, doc.page.height - 40, { width: pw, align: 'right', lineBreak: false });
     doc.page.margins.bottom = keep;
   }
 
