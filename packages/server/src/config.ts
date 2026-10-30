@@ -65,6 +65,8 @@ export interface MnemosyneConfig {
     providersFile: string;
     /** Sealed file holding portal settings edited in the admin UI (override the env values). */
     settingsFile: string;
+    /** Sealed file remembering signed-in users' GitLab memberships and refresh tokens across restarts. */
+    membersFile: string;
     /** Append-only audit trail (JSON lines) of sign-ins and admin changes. */
     auditFile: string;
     /** Generated project documentation (articles, diagrams, PDFs), kept with their date stamps. */
@@ -142,6 +144,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, repoOverride?: 
       },
       providersFile: resolve(env.MNEMOSYNE_PROVIDERS_FILE ?? `${dirname(dbPath)}/providers.enc`),
       settingsFile: resolve(env.MNEMOSYNE_SETTINGS_FILE ?? `${dirname(dbPath)}/settings.enc`),
+      membersFile: resolve(env.MNEMOSYNE_MEMBERS_FILE ?? `${dirname(dbPath)}/members.enc`),
       auditFile: resolve(env.MNEMOSYNE_AUDIT_FILE ?? `${dirname(dbPath)}/audit.jsonl`),
       docsDir: resolve(env.MNEMOSYNE_DOCS_DIR ?? `${dirname(dbPath)}/docs`),
       aiDailyLimit: int(env.MNEMOSYNE_AI_DAILY_LIMIT, 20),

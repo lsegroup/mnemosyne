@@ -536,6 +536,8 @@ export interface ProjectCard {
   count: number;
   updated: string | null;
   href: string;
+  /** The project's ID in GitLab (shown on the card), when a GitLab project matches. */
+  glId?: number;
   /** Only visible because the viewer is a GitLab administrator. */
   adminOnly: boolean;
 }
@@ -561,7 +563,8 @@ a.card:hover{border-color:var(--accent)}
 .card .s{font-size:13px;color:var(--muted)}
 .card{position:relative}.card .t{padding-right:46px}
 .card .n{margin-top:4px;font-size:13px;color:var(--muted)}
-.card .c{position:absolute;top:12px;right:12px;min-width:30px;height:30px;padding:0 6px;box-sizing:border-box;border-radius:99px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#0b0d14;background:var(--teal)}
+
+.card .c{position:absolute;top:12px;right:12px;min-width:30px;height:30px;padding:0 6px;box-sizing:border-box;border-radius:99px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--teal);background:transparent;border:2px solid var(--teal)}
 
 .badge{display:inline-block;padding:1px 9px;border-radius:99px;font-size:12px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
 .badge.working,.badge.resolved{color:#4ade80;border-color:#1f5a38}
@@ -608,10 +611,11 @@ export function homePage(v: { basePath: string; user: DocsUser; cards: ProjectCa
   // the ring in the corner is the running project number (1..N), so the list can be counted at a glance
   const card = (c: ProjectCard, i: number) => `<a class="card" href="${esc(c.href)}" title="${c.count === 0 ? 'No notes yet' : `${c.count} ${c.count === 1 ? 'note' : 'notes'}`}">
     <span class="c" aria-label="project ${i + 1}">${i + 1}</span>
-    <span class="t">${esc(c.title)}</span><span class="s">${esc(c.sub)}</span>
+    <span class="t">${esc(c.title)}</span><span class="s">${esc(c.sub)}${c.glId !== undefined ? ` · GitLab ID ${c.glId}` : ''}</span>
     <span class="n">${c.count === 0 ? 'no notes yet' : `${c.count} ${c.count === 1 ? 'note' : 'notes'}`}${c.updated ? ` · updated ${esc(c.updated)}` : ''}</span>
     ${c.adminOnly ? '<span class="badge admin">administrators only</span>' : ''}</a>`;
-  const body = `<h1>Your projects</h1>
+  // five cards per row (easier to count); fewer on narrower windows
+  const body = `<style>main.docs{max-width:1760px}.grid{grid-template-columns:repeat(5,minmax(0,1fr))}@media(max-width:1500px){.grid{grid-template-columns:repeat(4,minmax(0,1fr))}}@media(max-width:1150px){.grid{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:800px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:520px){.grid{grid-template-columns:1fr}}</style><h1>Your projects</h1>
 <p class="lead">Documentation for the projects you belong to in GitLab${v.isAdmin ? ' — as a GitLab administrator you see every project' : ''}.${v.cards.length ? ` <b>${v.cards.length} projects.</b>` : ''}</p>
 ${v.notice ? `<div class="notice">${esc(v.notice)}</div>` : ''}
 ${v.cards.length ? `<div class="grid">${v.cards.map((c, i) => card(c, i)).join('')}</div>` : v.notice ? '' : '<div class="notice">No documentation exists yet for the projects you belong to.</div>'}`;

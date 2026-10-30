@@ -181,8 +181,12 @@ describe('web portal', () => {
           const p = new URLSearchParams(raw);
           const code = p.get('code') ?? '';
           const verifierOk = createHash('sha256').update(p.get('code_verifier') ?? '').digest('base64url') === challenge;
-          if (p.get('client_secret') !== 'csecret' || !verifierOk || !gitlabUsers[code]) json(400, { error: 'invalid_grant' });
-          else json(200, { access_token: code });
+          if (p.get('grant_type') === 'refresh_token') {
+            const rt = p.get('refresh_token') ?? '';
+            if (p.get('client_secret') !== 'csecret' || !gitlabUsers[rt]) json(400, { error: 'invalid_grant' });
+            else json(200, { access_token: rt, refresh_token: rt });
+          } else if (p.get('client_secret') !== 'csecret' || !verifierOk || !gitlabUsers[code]) json(400, { error: 'invalid_grant' });
+          else json(200, { access_token: code, refresh_token: code });
         });
       } else if (req.url?.startsWith('/api/v4/projects')) {
         const t = (req.headers.authorization ?? '').replace('Bearer ', '');
@@ -218,6 +222,7 @@ describe('web portal', () => {
       MNEMOSYNE_GITLAB_CLIENT_SECRET: 'csecret',
       MNEMOSYNE_AI_DAILY_LIMIT: '3',
     });
+    webCfg = cfg;
     portalApp = express();
     portalApp.use(express.json());
     portalApp.use(cfg.http.basePath, createWebPortal(cfg).router);
@@ -229,6 +234,8 @@ describe('web portal', () => {
     portal?.close();
     await rm(tmp, { recursive: true, force: true });
   });
+
+  let webCfg: ReturnType<typeof loadConfig>;
 
   const cookiesOf = (res: Response) =>
     res.headers.getSetCookie().map((c) => c.split(';')[0]!).filter((c) => !c.endsWith('=')).join('; ');
@@ -591,11 +598,55 @@ describe('web portal', () => {
       expect(rings.length).toBeGreaterThan(1);
       expect(rings).toEqual(rings.map((_, i) => i + 1));
       expect(home).toMatch(/<b>\d+ projects\.<\/b>/);
+      expect(home).toContain('repeat(5,minmax(0,1fr))'); // five cards per row
+      expect(home).toContain('grp/zeta · GitLab ID 2'); // the real GitLab project id is printed on the card, separate from the ring
       expect(home).toContain(`href="${base.replace(new URL(base).origin, '')}/p/zeta"`);
       const page = await fetch(`${base}/p/zeta`, { headers: { cookie: dev } });
       expect(page.status).toBe(200);
       expect(await page.text()).toContain('No documentation has been generated yet');
       expect((await fetch(`${base}/p/not-a-project`, { headers: { cookie: dev } })).status).toBe(404);
+    });
+
+    it('stays signed in across a restart and re-checks GitLab silently with the refresh token', async () => {
+      const { MemberStore } = await import('../src/member-store.js');
+      const store = new MemberStore(webCfg.web.membersFile, deriveKeys(SECRET).enc);
+      const wait = () => new Promise((r) => setTimeout(r, 200));
+      const boot = async () => {
+        const app = express();
+        app.use(express.json());
+        app.use(webCfg.http.basePath, createWebPortal(webCfg).router);
+        const srv = createServer(app);
+        await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+        return { srv, url: `http://127.0.0.1:${(srv.address() as AddressInfo).port}${webCfg.http.basePath}` };
+      };
+      const cookie = cookiesOf(await signIn('dev-code'));
+      await wait();
+      // 1) a new process (empty memory) still knows the person: no second trip through GitLab
+      let inst = await boot();
+      let home = await (await fetch(`${inst.url}/`, { headers: { cookie } })).text();
+      expect(home).toContain('Your projects');
+      expect(await readFile(webCfg.web.membersFile, 'utf8')).not.toContain('dev-code'); // sealed, refresh token not readable
+      inst.srv.close();
+      // 2) last GitLab check older than 12 h: re-validated on the server, still signed in
+      const map = store.load();
+      const [name, entry] = [...map.entries()][0]!;
+      expect(entry.refresh).toBe('dev-code');
+      map.set(name, { ...entry, at: Date.now() - 13 * 3600 * 1000 });
+      await store.save(map);
+      inst = await boot();
+      home = await (await fetch(`${inst.url}/`, { headers: { cookie } })).text();
+      expect(home).toContain('Your projects');
+      await wait();
+      expect(Date.now() - store.load().get(name)!.at).toBeLessThan(60_000);
+      inst.srv.close();
+      // 3) GitLab no longer accepts the refresh token (revoked / blocked): signed out
+      const map2 = store.load();
+      map2.set(name, { ...map2.get(name)!, at: Date.now() - 30 * 3600 * 1000, refresh: 'revoked-token' });
+      await store.save(map2);
+      inst = await boot();
+      home = await (await fetch(`${inst.url}/`, { headers: { cookie } })).text();
+      expect(home).toContain('Sign in with GitLab');
+      inst.srv.close();
     });
 
     it('compresses large pages with gzip when the browser accepts it', async () => {

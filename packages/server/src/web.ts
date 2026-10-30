@@ -8,6 +8,7 @@ import { fetchModels } from './llm-models.js';
 import { AuditLog, clientIp, diffLines, type AuditInput } from './audit.js';
 import { SettingsStore, SettingsValidationError, applyPortalInput, type GitLabSettings, type PortalSettings } from './settings-store.js';
 import { adminPage, docsNotFound, homePage, loginPage, nodePage, notesPage, projectHome, type ProjectCard } from './web-pages.js';
+import { MemberStore, type MemberEntry } from './member-store.js';
 import { NodeIndex, fetchMemberships, matchProject, redact, slug, type GitLabProject } from './docs.js';
 import { outline, renderMarkdown } from './markdown.js';
 import { DocStore, IMAGE_PRICE_USD, approxTokens, buildDiagramBriefPrompt, buildWikiPrompt, changeHistory, estimateText, historyMarkdown, missingSections, toPdfImage, type DocMeta } from './docgen.js';
@@ -24,6 +25,9 @@ const ADMIN_COOKIE = 'mnemosyne_admin';
 const OAUTH_COOKIE = 'mnemosyne_oauth';
 const ADMIN_OAUTH_COOKIE = 'mnemosyne_admin_oauth';
 const SESSION_TTL_S = 8 * 3600;
+/** The documentation area stays signed in for a month; GitLab is re-checked silently every 12 h (refresh token). */
+const DOCS_SESSION_TTL_S = 30 * 24 * 3600;
+const MEMBER_FRESH_MS = 12 * 3600 * 1000;
 const OAUTH_TTL_S = 10 * 60;
 const GITLAB_TIMEOUT_MS = 10_000;
 const LOCAL_ADMIN_GRACE_S = 24 * 3600;
@@ -174,7 +178,9 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     /** OAuth scopes requested from GitLab. */
     scope: string;
     /** Runs after GitLab accepted the user, with their access token (e.g. to read their project memberships). */
-    after?: (user: SsoUser, accessToken: string, warmed: Promise<unknown> | undefined) => Promise<void>;
+    after?: (user: SsoUser, accessToken: string, warmed: Promise<unknown> | undefined, refreshToken?: string) => Promise<void>;
+    /** How long the browser session lasts (default 8 h). */
+    sessionTtlS?: number;
     /** Started the moment GitLab hands over the token, in parallel with the user lookup (the browser is waiting on GitLab's redirect page). */
     warm?: (accessToken: string) => Promise<unknown>;
     oauthCookie: string;
@@ -259,7 +265,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
           }),
           signal: AbortSignal.timeout(GITLAB_TIMEOUT_MS),
         });
-        const token = (await tokenRes.json()) as { access_token?: string };
+        const token = (await tokenRes.json()) as { access_token?: string; refresh_token?: string };
         if (!tokenRes.ok || !token.access_token) throw new Error(`token exchange failed (${tokenRes.status})`);
 
         const warmed = area.warm?.(token.access_token);
@@ -287,6 +293,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
           { username: user.username, name: user.name ?? user.username, email: user.email ?? '', admin: user.is_admin === true },
           token.access_token,
           warmed,
+          token.refresh_token,
         );
         void rec(req, {
           event: 'login',
@@ -302,9 +309,9 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
             u: user.username,
             n: user.name ?? user.username,
             e: user.email ?? '',
-            exp: Math.floor(Date.now() / 1000) + SESSION_TTL_S,
+            exp: Math.floor(Date.now() / 1000) + (area.sessionTtlS ?? SESSION_TTL_S),
           } satisfies Session),
-          SESSION_TTL_S,
+          area.sessionTtlS ?? SESSION_TTL_S,
           area.sessionPath,
         );
         clearCookie(res, area.oauthCookie, oauthPath);
@@ -322,13 +329,66 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   // Who may read which project's documentation: GitLab's own membership list, read with the user's
   // token at sign-in and kept in memory for the session (never in a cookie: it can be long).
   const nodeIndex = keys ? new NodeIndex(cfg.nodesDir) : null;
-  const members = new Map<string, { at: number; admin: boolean; projects: GitLabProject[] | null }>();
-
+  const memberStore = keys ? new MemberStore(cfg.web.membersFile, keys.enc) : null;
+  const members: Map<string, MemberEntry> = memberStore ? memberStore.load() : new Map();
+  const persistMembers = () => void memberStore?.save(members);
   const docsSession = (req: Request) => {
     const s = sessionFrom(req, SESSION_COOKIE);
     const m = s ? members.get(s.u) : undefined;
-    return s && m && Date.now() - m.at < SESSION_TTL_S * 1000 ? { s, m } : null;
+    return s && m && Date.now() - m.at < DOCS_SESSION_TTL_S * 1000 ? { s, m } : null;
   };
+
+  // Re-check GitLab (still active? still administrator? which projects?) with the stored refresh token, on the
+  // server, with no browser round trip. Only when this fails does the person have to sign in again.
+  const refreshing = new Map<string, Promise<boolean>>();
+  const refreshMember = (username: string): Promise<boolean> => {
+    const running = refreshing.get(username);
+    if (running) return running;
+    const job = (async () => {
+      const m = members.get(username);
+      if (!m?.refresh) return false;
+      try {
+        const eff = await effective();
+        if (!eff.sso) return false;
+        const res = await fetch(`${eff.gitlab.url}/oauth/token`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+          body: new URLSearchParams({ client_id: eff.gitlab.clientId!, client_secret: eff.gitlab.clientSecret!, grant_type: 'refresh_token', refresh_token: m.refresh }),
+          signal: AbortSignal.timeout(GITLAB_TIMEOUT_MS),
+        });
+        const t = (await res.json().catch(() => ({}))) as { access_token?: string; refresh_token?: string };
+        if (!res.ok || !t.access_token) return false;
+        const [userRes, projects] = await Promise.all([
+          fetch(`${eff.gitlab.url}/api/v4/user`, { headers: { Authorization: `Bearer ${t.access_token}`, Accept: 'application/json' }, signal: AbortSignal.timeout(GITLAB_TIMEOUT_MS) }),
+          fetchMemberships(eff.gitlab.url!, t.access_token),
+        ]);
+        const u = (await userRes.json().catch(() => ({}))) as GitLabUser;
+        if (!userRes.ok || u.username !== username || (u.state && u.state !== 'active')) return false;
+        members.set(username, { at: Date.now(), admin: u.is_admin === true, projects, refresh: t.refresh_token ?? m.refresh });
+        persistMembers();
+        return true;
+      } catch {
+        return false; // GitLab unreachable: keep the old entry, retry on the next request
+      }
+    })();
+    refreshing.set(username, job);
+    void job.finally(() => refreshing.delete(username));
+    return job;
+  };
+  /** The signed-in documentation user; silently re-validated against GitLab when the last check is older than 12 h. */
+  const freshSession = async (req: Request) => {
+    const ds = docsSession(req);
+    if (!ds) return null;
+    if (Date.now() - ds.m.at < MEMBER_FRESH_MS) return ds;
+    if (await refreshMember(ds.s.u)) return docsSession(req);
+    // refresh failed: keep working on the old answer only if GitLab could not be reached, else sign out
+    const m = members.get(ds.s.u);
+    if (m?.refresh && Date.now() - m.at < MEMBER_FRESH_MS * 2) return ds;
+    members.delete(ds.s.u);
+    persistMembers();
+    return null;
+  };
+
   /** Administrators see every project; others only those that match a GitLab project they belong to. */
   const canRead = (m: { admin: boolean; projects: GitLabProject[] | null }, project: string) =>
     m.admin || (m.projects !== null && matchProject(project, m.projects) !== null);
@@ -353,7 +413,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   });
 
   router.get('/', async (req, res) => {
-    const ds = docsSession(req);
+    const ds = await freshSession(req);
     pageHeaders(res);
     if (ds && nodeIndex) {
       const fromNotes = (await nodeIndex.projects())
@@ -368,6 +428,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
               count: p.count,
               updated: p.updated,
               href: `${basePath}/p/${encodeURIComponent(p.project)}`,
+              glId: gl?.id,
               adminOnly: ds.m.admin && !gl,
             } as ProjectCard,
           };
@@ -376,7 +437,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       const withNotes = new Set(fromNotes.map((x) => x.gl?.id).filter((id) => id !== undefined));
       const empty: ProjectCard[] = (ds.m.projects ?? [])
         .filter((g) => !withNotes.has(g.id))
-        .map((g) => ({ title: g.name, sub: g.fullPath, count: 0, updated: null, href: `${basePath}/p/${encodeURIComponent(slug(g.path))}`, adminOnly: false }));
+        .map((g) => ({ title: g.name, sub: g.fullPath, count: 0, updated: null, href: `${basePath}/p/${encodeURIComponent(slug(g.path))}`, glId: g.id, adminOnly: false }));
       const cards: ProjectCard[] = [...fromNotes.map((x) => x.card), ...empty].sort((x, y) => x.title.localeCompare(y.title));
       res.send(
         homePage({
@@ -421,7 +482,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
 
   /** Signed-in reader of an existing project they may see; otherwise answers and returns null. */
   const gate = async (req: Request, res: Response, adminOnly = false) => {
-    const ds = docsSession(req);
+    const ds = await freshSession(req);
     if (!ds || !nodeIndex || !docStore) {
       res.redirect(`${basePath}/`);
       return null;
@@ -750,9 +811,11 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     failTo: `${basePath}/`,
     admit: async () => ({ to: `${basePath}/` }),
     warm: async (accessToken) => fetchMemberships((await effective()).gitlab.url!, accessToken),
-    after: async (user, _accessToken, warmed) => {
+    sessionTtlS: DOCS_SESSION_TTL_S,
+    after: async (user, _accessToken, warmed, refreshToken) => {
       const projects = ((await warmed?.catch(() => null)) ?? null) as GitLabProject[] | null;
-      members.set(user.username, { at: Date.now(), admin: user.admin, projects });
+      members.set(user.username, { at: Date.now(), admin: user.admin, projects, refresh: refreshToken });
+      persistMembers();
     },
   });
 
@@ -760,6 +823,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     const who = sessionFrom(req, SESSION_COOKIE);
     if (who) {
       members.delete(who.u);
+      persistMembers();
       void rec(req, { event: 'logout', entityType: 'public_session', user: who.u, description: 'Signed out' });
     }
     clearCookie(res, SESSION_COOKIE);
