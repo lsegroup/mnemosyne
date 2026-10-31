@@ -15,12 +15,16 @@ export interface PdfInput {
   model: string;
   noteCount: number;
   markdown: string;
-  /** Either a raster picture, or a drawing that is painted as vectors (sharp at any zoom, real text). */
-  diagram?: {
+  /**
+   * The pictures, in page order (the overview first, then the detail pictures): each either a raster picture or a drawing painted as
+   * vectors (sharp at any zoom, real text). Each gets a page of its own after the index.
+   */
+  diagrams?: {
+    name: string;
     png?: Buffer;
     vector?: { width: number; height: number; draw: (doc: InstanceType<typeof PDFDocument>, x: number, y: number, scale: number) => void };
     caption: string;
-  };
+  }[];
   /** Tests turn compression off to read the text streams. */
   compress?: boolean;
 }
@@ -154,7 +158,7 @@ export function buildPdf(input: PdfInput): Promise<Buffer> {
   if (blocks[0]?.t === 'h' && blocks[0].level === 1) blocks = blocks.slice(1);
 
   const entries: { level: number; text: string; page: number }[] = [];
-  const tocCount = blocks.filter((b) => b.t === 'h' && b.level <= 3 && b.level >= 2).length + (input.diagram ? 1 : 0);
+  const tocCount = blocks.filter((b) => b.t === 'h' && b.level <= 3 && b.level >= 2).length + (input.diagrams?.length ?? 0);
   const tocPages = Math.max(1, Math.ceil(tocCount / 36));
 
   // ---- cover ----
@@ -175,7 +179,6 @@ export function buildPdf(input: PdfInput): Promise<Buffer> {
   for (let i = 0; i < tocPages; i++) doc.addPage();
 
   // ---- content ---- (every page stays portrait A4; a wide drawing is turned a quarter turn so it runs up the whole page)
-  const wide = !!input.diagram?.vector && input.diagram.vector.width / input.diagram.vector.height >= 1.25;
   doc.addPage();
   let outlineH2: ReturnType<typeof doc.outline.addItem> | null = null;
   const heading = (level: number, text: string) => {
@@ -232,41 +235,41 @@ export function buildPdf(input: PdfInput): Promise<Buffer> {
     doc.y = y + lh;
   };
 
-  if (input.diagram && input.diagram.vector && wide) {
-    // The page is turned a quarter turn counter-clockwise (text reads bottom to top, the top of the picture is at the left edge):
-    // inside the turned frame the heading, the caption and the drawing are laid out like on a landscape page, but the frame is
-    // as long as the whole page, so the picture is as large as it can be.
-    const d = input.diagram;
-    const v = d.vector!;
-    const side = 24;
-    const footer = 56;
-    const frameW = doc.page.height - side - footer; // along the page height
-    const frameH = doc.page.width - 2 * side; // across the page
-    doc.outline.addItem('Workflow diagram');
-    doc.save();
-    doc.translate(side, doc.page.height - footer).rotate(-90);
-    doc.font('Helvetica-Bold').fontSize(19).fillColor(COLOURS.violet).text('Workflow diagram', 0, 0, { lineBreak: false });
-    doc.moveTo(0, 27).lineTo(frameW, 27).lineWidth(0.6).strokeColor(COLOURS.line).stroke();
-    doc.font('Helvetica').fontSize(9).fillColor(COLOURS.muted).text(pdfText(d.caption), 0, 33, { lineBreak: false });
-    const top = 54;
-    const s = Math.min(frameW / v.width, (frameH - top) / v.height);
-    v.draw(doc, (frameW - v.width * s) / 2, top, s);
-    doc.restore();
-    doc.addPage();
-  } else if (input.diagram) {
-    heading(2, 'Workflow diagram');
-    doc.font('Helvetica').fontSize(9).fillColor(COLOURS.muted).text(pdfText(input.diagram.caption), M.left, doc.y, { width: W });
-    doc.moveDown(0.6);
-    const space = bottom() - doc.y;
-    const d = input.diagram;
-    if (d.vector) {
-      // the drawing may use almost the whole page width (text margins are for text): a wide diagram stays as large as it can
-      const side = 22;
-      const pw = doc.page.width - 2 * side;
-      const s = Math.min(pw / d.vector.width, Math.max(150, space - 10) / d.vector.height);
-      d.vector.draw(doc, side + (pw - d.vector.width * s) / 2, doc.y, s);
-    } else if (d.png) {
-      doc.image(d.png, M.left, doc.y, { fit: [W, Math.max(200, space - 10)], align: 'center' });
+  for (const d of input.diagrams ?? []) {
+    const v = d.vector;
+    if (v && v.width / v.height >= 1.25) {
+      // A wide drawing: the page is turned a quarter turn counter-clockwise (text reads bottom to top, the top of the picture is at
+      // the left edge). Inside the turned frame the heading, the caption and the drawing are laid out like on a landscape page, but
+      // the frame is as long as the whole page, so the picture is as large as it can be.
+      const side = 24;
+      const footer = 56;
+      const frameW = doc.page.height - side - footer; // along the page height
+      const frameH = doc.page.width - 2 * side; // across the page
+      entries.push({ level: 2, text: d.name, page: currentPage() });
+      doc.outline.addItem(pdfText(d.name));
+      doc.save();
+      doc.translate(side, doc.page.height - footer).rotate(-90);
+      doc.font('Helvetica-Bold').fontSize(19).fillColor(COLOURS.violet).text(pdfText(d.name), 0, 0, { lineBreak: false });
+      doc.moveTo(0, 27).lineTo(frameW, 27).lineWidth(0.6).strokeColor(COLOURS.line).stroke();
+      doc.font('Helvetica').fontSize(9).fillColor(COLOURS.muted).text(pdfText(d.caption), 0, 33, { lineBreak: false });
+      const top = 54;
+      const s = Math.min(frameW / v.width, (frameH - top) / v.height);
+      v.draw(doc, (frameW - v.width * s) / 2, top, s);
+      doc.restore();
+    } else {
+      heading(2, d.name);
+      doc.font('Helvetica').fontSize(9).fillColor(COLOURS.muted).text(pdfText(d.caption), M.left, doc.y, { width: W });
+      doc.moveDown(0.6);
+      const space = bottom() - doc.y;
+      if (v) {
+        // the drawing may use almost the whole page width (text margins are for text)
+        const side = 22;
+        const pw = doc.page.width - 2 * side;
+        const s = Math.min(pw / v.width, Math.max(150, space - 10) / v.height);
+        v.draw(doc, side + (pw - v.width * s) / 2, doc.y, s);
+      } else if (d.png) {
+        doc.image(d.png, M.left, doc.y, { fit: [W, Math.max(200, space - 10)], align: 'center' });
+      }
     }
     doc.addPage();
   }
@@ -345,7 +348,7 @@ export function buildPdf(input: PdfInput): Promise<Buffer> {
   }
 
   // ---- index (contents) on the reserved pages ----
-  const all = input.diagram ? [{ level: 2, text: 'Workflow diagram', page: tocPages + 1 }, ...entries.filter((e) => e.text !== 'Workflow diagram')] : entries;
+  const all = entries; // the pictures were drawn before the article, so they come first in the order of the pages
   let entryIdx = 0;
   for (let p = 0; p < tocPages; p++) {
     doc.switchToPage(1 + p);

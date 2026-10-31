@@ -1,0 +1,531 @@
+{
+ "title": "centest",
+ "diagrams": [
+  {
+   "name": "Overview",
+   "columns": [
+    {
+     "title": "Users",
+     "nodes": [
+      {
+       "id": "adm",
+       "label": "Admins, operators, viewers",
+       "detail": "browsers, LDAP logins",
+       "lane": "path"
+      }
+     ]
+    },
+    {
+     "title": "Entry",
+     "nodes": [
+      {
+       "id": "ngx",
+       "label": "nginx :443",
+       "detail": "TLS, /centest/ to :3000",
+       "lane": "path"
+      }
+     ]
+    },
+    {
+     "title": "Services",
+     "nodes": [
+      {
+       "id": "web",
+       "label": "CenTest web :3000",
+       "detail": "Express Node, /login /dashboard /api/monitoring",
+       "lane": "path"
+      },
+      {
+       "id": "eng",
+       "label": "centest-engine",
+       "detail": "tick 60s, 30s timeout, plugins",
+       "lane": "path"
+      },
+      {
+       "id": "col",
+       "label": "centest-collector",
+       "detail": ":8080 REST bearer, :50443 gRPC TLS",
+       "lane": "path"
+      }
+     ]
+    },
+    {
+     "title": "Data",
+     "nodes": [
+      {
+       "id": "red",
+       "label": "Redis :6379",
+       "detail": "live state, result queue, sessions 8h",
+       "lane": "path"
+      },
+      {
+       "id": "db",
+       "label": "MariaDB :3306 centest",
+       "detail": "hosts, services, commands, satellites",
+       "lane": "path"
+      }
+     ]
+    },
+    {
+     "title": "Monitored",
+     "nodes": [
+      {
+       "id": "sat",
+       "label": "Satellites ATL SIN",
+       "detail": "poll local nets, gRPC to :50443",
+       "lane": "path"
+      },
+      {
+       "id": "fleet",
+       "label": "Monitored fleet",
+       "detail": "23 hosts, 124 checks, SNMPv3 and ICMP",
+       "lane": "path"
+      }
+     ]
+    }
+   ],
+   "links": [
+    {
+     "from": "adm",
+     "to": "ngx",
+     "label": "HTTPS :443",
+     "dashed": false
+    },
+    {
+     "from": "ngx",
+     "to": "web",
+     "label": "proxy /centest/",
+     "dashed": false
+    },
+    {
+     "from": "web",
+     "to": "red",
+     "label": "live data",
+     "dashed": false
+    },
+    {
+     "from": "web",
+     "to": "db",
+     "label": "scoped SELECT",
+     "dashed": false
+    },
+    {
+     "from": "eng",
+     "to": "db",
+     "label": "reads checks",
+     "dashed": false
+    },
+    {
+     "from": "eng",
+     "to": "fleet",
+     "label": "ICMP SNMPv3 HTTP",
+     "dashed": false
+    },
+    {
+     "from": "col",
+     "to": "sat",
+     "label": "ConfigPush gRPC",
+     "dashed": false
+    },
+    {
+     "from": "sat",
+     "to": "col",
+     "label": "ResultReport gRPC",
+     "dashed": false
+    },
+    {
+     "from": "sat",
+     "to": "fleet",
+     "label": "polls local nets",
+     "dashed": false
+    }
+   ]
+  },
+  {
+   "name": "Request path",
+   "columns": [
+    {
+     "title": "Users",
+     "nodes": [
+      {
+       "id": "adm",
+       "label": "Admins, operators, viewers",
+       "detail": "browsers, LDAP logins",
+       "lane": "path"
+      }
+     ]
+    },
+    {
+     "title": "Firewall",
+     "nodes": [
+      {
+       "id": "ufw",
+       "label": "UFW firewall",
+       "detail": "default deny, 443 open, admin ports ATL SIN only",
+       "lane": "path"
+      }
+     ]
+    },
+    {
+     "title": "Proxy",
+     "nodes": [
+      {
+       "id": "ngx",
+       "label": "nginx :443",
+       "detail": "TLS wildcard, HSTS",
+       "lane": "path"
+      }
+     ]
+    },
+    {
+     "title": "Applications",
+     "nodes": [
+      {
+       "id": "web",
+       "label": "CenTest web :3000",
+       "detail": "Express Node, /login /dashboard /api/monitoring",
+       "lane": "path"
+      },
+      {
+       "id": "scan",
+       "label": "Scanner gvmd gsad",
+       "detail": "gvmd :9390 GMP TLS, gsad :9392",
+       "lane": "path"
+      }
+     ]
+    }
+   ],
+   "links": [
+    {
+     "from": "adm",
+     "to": "ufw",
+     "label": "HTTPS :443",
+     "dashed": false
+    },
+    {
+     "from": "ufw",
+     "to": "ngx",
+     "label": "allow 443",
+     "dashed": false
+    },
+    {
+     "from": "ngx",
+     "to": "web",
+     "label": "proxy /centest/ to :3000",
+     "dashed": false
+    },
+    {
+     "from": "ngx",
+     "to": "scan",
+     "label": "proxy /openvas/ to :9392",
+     "dashed": false
+    },
+    {
+     "from": "web",
+     "to": "scan",
+     "label": "GMP TLS :9390, 20 s",
+     "dashed": false
+    }
+   ]
+  },
+  {
+   "name": "Data and storage",
+   "columns": [
+    {
+     "title": "Producers",
+     "nodes": [
+      {
+       "id": "eng",
+       "label": "centest-engine",
+       "detail": "tick 60s, 30s timeout, plugins",
+       "lane": "path"
+      },
+      {
+       "id": "msg",
+       "label": "centest-messenger :9200",
+       "detail": "/results /batch, bearer tokens",
+       "lane": "path"
+      }
+     ]
+    },
+    {
+     "title": "Web and queue",
+     "nodes": [
+      {
+       "id": "web",
+       "label": "CenTest web :3000",
+       "detail": "Express Node, /login /dashboard /api/monitoring",
+       "lane": "path"
+      },
+      {
+       "id": "red",
+       "label": "Redis :6379",
+       "detail": "live state, result queue, sessions 8h",
+       "lane": "path"
+      }
+     ]
+    },
+    {
+     "title": "Writer",
+     "nodes": [
+      {
+       "id": "sync",
+       "label": "centest-redis-sync",
+       "detail": "4 workers, batch 100, live + history",
+       "lane": "path"
+      }
+     ]
+    },
+    {
+     "title": "Databases",
+     "nodes": [
+      {
+       "id": "db",
+       "label": "MariaDB :3306 centest",
+       "detail": "hosts, services, commands, satellites",
+       "lane": "path"
+      },
+      {
+       "id": "hist",
+       "label": "MariaDB centest_storage",
+       "detail": "monthly tables, 1631 MB, 6.63M rows",
+       "lane": "path"
+      }
+     ]
+    }
+   ],
+   "links": [
+    {
+     "from": "eng",
+     "to": "msg",
+     "label": "POST /results, bearer",
+     "dashed": false
+    },
+    {
+     "from": "msg",
+     "to": "web",
+     "label": "POST /api/results, 202",
+     "dashed": false
+    },
+    {
+     "from": "web",
+     "to": "red",
+     "label": "LPUSH, HGETALL live",
+     "dashed": false
+    },
+    {
+     "from": "red",
+     "to": "sync",
+     "label": "BRPOP batch 100",
+     "dashed": false
+    },
+    {
+     "from": "sync",
+     "to": "red",
+     "label": "HSET state_since",
+     "dashed": false
+    },
+    {
+     "from": "sync",
+     "to": "hist",
+     "label": "INSERT monthly table",
+     "dashed": false
+    },
+    {
+     "from": "sync",
+     "to": "db",
+     "label": "UPDATE service_state",
+     "dashed": false
+    },
+    {
+     "from": "web",
+     "to": "db",
+     "label": "scoped SELECT",
+     "dashed": false
+    },
+    {
+     "from": "db",
+     "to": "eng",
+     "label": "reads hosts, services",
+     "dashed": false
+    }
+   ]
+  },
+  {
+   "name": "Monitoring and satellites",
+   "columns": [
+    {
+     "title": "Engine",
+     "nodes": [
+      {
+       "id": "eng",
+       "label": "centest-engine",
+       "detail": "tick 60s, 30s timeout, plugins",
+       "lane": "path"
+      },
+      {
+       "id": "col",
+       "label": "centest-collector",
+       "detail": ":8080 REST bearer, :50443 gRPC TLS",
+       "lane": "path"
+      }
+     ]
+    },
+    {
+     "title": "Remote",
+     "nodes": [
+      {
+       "id": "sat",
+       "label": "Satellites ATL SIN",
+       "detail": "poll local nets, gRPC to :50443",
+       "lane": "path"
+      }
+     ]
+    },
+    {
+     "title": "Targets",
+     "nodes": [
+      {
+       "id": "fleet",
+       "label": "Monitored fleet",
+       "detail": "23 hosts, 124 checks, SNMPv3 and ICMP",
+       "lane": "path"
+      }
+     ]
+    },
+    {
+     "title": "Config",
+     "nodes": [
+      {
+       "id": "db",
+       "label": "MariaDB :3306 centest",
+       "detail": "hosts, services, commands, satellites",
+       "lane": "path"
+      },
+      {
+       "id": "red",
+       "label": "Redis :6379",
+       "detail": "live state, result queue, sessions 8h",
+       "lane": "path"
+      }
+     ]
+    }
+   ],
+   "links": [
+    {
+     "from": "eng",
+     "to": "fleet",
+     "label": "ICMP SNMPv3 HTTP TLS DNS",
+     "dashed": false
+    },
+    {
+     "from": "col",
+     "to": "sat",
+     "label": "ConfigPush gRPC TLS :50443",
+     "dashed": false
+    },
+    {
+     "from": "sat",
+     "to": "col",
+     "label": "ResultReport gRPC TLS :50443",
+     "dashed": false
+    },
+    {
+     "from": "sat",
+     "to": "fleet",
+     "label": "poll local nets",
+     "dashed": false
+    },
+    {
+     "from": "col",
+     "to": "db",
+     "label": "reads orgs, satellites",
+     "dashed": false
+    },
+    {
+     "from": "col",
+     "to": "red",
+     "label": "publish config reload",
+     "dashed": false
+    }
+   ]
+  },
+  {
+   "name": "Sign-in and security",
+   "columns": [
+    {
+     "title": "Services",
+     "nodes": [
+      {
+       "id": "web",
+       "label": "CenTest web :3000",
+       "detail": "Express Node, /login /dashboard /api/monitoring",
+       "lane": "path"
+      },
+      {
+       "id": "col",
+       "label": "centest-collector",
+       "detail": ":8080 REST bearer, :50443 gRPC TLS",
+       "lane": "path"
+      },
+      {
+       "id": "sat",
+       "label": "Satellites ATL SIN",
+       "detail": "poll local nets, gRPC to :50443",
+       "lane": "path"
+      }
+     ]
+    },
+    {
+     "title": "Identity and audit",
+     "nodes": [
+      {
+       "id": "ldap",
+       "label": "OpenLDAP LDAPS :636",
+       "detail": "local directory, optional ldap-servers.json",
+       "lane": "control"
+      },
+      {
+       "id": "lic",
+       "label": "License Server :3200",
+       "detail": "validates satellites",
+       "lane": "control"
+      },
+      {
+       "id": "aud",
+       "label": "MariaDB centest_audit",
+       "detail": "LOGIN, CREATE, UPDATE, DELETE events",
+       "lane": "control"
+      }
+     ]
+    }
+   ],
+   "links": [
+    {
+     "from": "web",
+     "to": "ldap",
+     "label": "LDAPS :636 login",
+     "dashed": true
+    },
+    {
+     "from": "sat",
+     "to": "ldap",
+     "label": "LDAPS :636 satellite login",
+     "dashed": true
+    },
+    {
+     "from": "col",
+     "to": "lic",
+     "label": "POST validate satellite",
+     "dashed": true
+    },
+    {
+     "from": "web",
+     "to": "aud",
+     "label": "audit events",
+     "dashed": true
+    }
+   ]
+  }
+ ]
+}

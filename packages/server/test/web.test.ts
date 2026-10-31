@@ -460,11 +460,24 @@ describe('web portal', () => {
     // what the fake text model answers when asked for a diagram plan (the label holds characters that must be escaped in the SVG)
     const DIAGRAM_PLAN = {
       title: 'Alpha',
-      columns: [
-        { title: 'Clients', nodes: [{ id: 'u', label: 'Browser', detail: 'people', lane: 'path' }] },
-        { title: 'Service', nodes: [{ id: 's', label: 'Notes <service> & "index"', detail: 'HTTP :40000', lane: 'path' }, { id: 'g', label: 'GitLab SSO', detail: 'OAuth 2 + PKCE', lane: 'control' }] },
+      diagrams: [
+        {
+          name: 'Overview',
+          columns: [
+            { title: 'Clients', nodes: [{ id: 'u', label: 'Browser', detail: 'people', lane: 'path' }] },
+            { title: 'Service', nodes: [{ id: 's', label: 'Notes <service> & "index"', detail: 'HTTP :40000', lane: 'path' }, { id: 'g', label: 'GitLab SSO', detail: 'OAuth 2 + PKCE', lane: 'control' }] },
+          ],
+          links: [{ from: 'u', to: 's', label: 'HTTPS' }, { from: 's', to: 'g', label: 'sign in' }],
+        },
+        {
+          name: 'Sign-in and security',
+          columns: [
+            { title: 'Service', nodes: [{ id: 'w', label: 'Web portal', detail: 'cookies', lane: 'path' }] },
+            { title: 'Identity', nodes: [{ id: 'i', label: 'GitLab OAuth', detail: 'code + PKCE', lane: 'path' }] },
+          ],
+          links: [{ from: 'w', to: 'i', label: 'authorize' }],
+        },
       ],
-      links: [{ from: 'u', to: 's', label: 'HTTPS' }, { from: 's', to: 'g', label: 'sign in' }],
     };
     let png: Buffer;
 
@@ -617,6 +630,20 @@ describe('web portal', () => {
       expect(svg).toContain('>GitLab SSO<'); // spelled exactly as in the plan
       expect(svg).toContain('Notes &lt;service&gt; &amp; &quot;index&quot;'); // escaped, never markup
       expect(svg).not.toContain('<script');
+
+      // a second, detail picture: thumbnail under the overview in the card, drawn on request, its own page in the PDF
+      const detail = /<a class="pic sub" href="([^"]+\/diagram\/\d{8}T\d{6}Z\/1)"/.exec(after)?.[1];
+      expect(detail).toBeTruthy();
+      expect(after).toContain('Detail pictures · click to enlarge');
+      expect(after).toContain('<span>Sign-in and security</span>');
+      const dres = await fetch(`${new URL(base).origin}${detail}`, { headers: { cookie: admin } });
+      expect(dres.status).toBe(200);
+      expect(dres.headers.get('content-type')).toBe('image/svg+xml');
+      const dsvg = await dres.text();
+      expect(dsvg).toContain('>GitLab OAuth<');
+      expect(dsvg).toContain('Alpha - Sign-in and security'); // the title names the topic
+      expect((await fetch(`${new URL(base).origin}${detail!.replace(/\/1$/, '/2')}`, { headers: { cookie: admin } })).status).toBe(404); // there is no third picture
+      expect((await fetch(`${new URL(base).origin}${detail}`, { redirect: 'manual' })).status).toBe(302); // not signed in
       expect((await fetch(`${new URL(base).origin}${src}`, { redirect: 'manual' })).status).toBe(302); // not signed in
 
       // layout: article left, infobox card right with the small clickable diagram, rule, then the change history
@@ -813,7 +840,7 @@ describe('web portal', () => {
       expect(pdf.headers.get('content-disposition')).toContain('alpha-documentation-');
       const bytes = Buffer.from(await pdf.arrayBuffer());
       expect(bytes.subarray(0, 5).toString()).toBe('%PDF-');
-      expect((bytes.toString('latin1').match(/\/Type \/Page\b/g) ?? []).length).toBeGreaterThanOrEqual(4); // cover, index, diagram, content
+      expect((bytes.toString('latin1').match(/\/Type \/Page\b/g) ?? []).length).toBeGreaterThanOrEqual(5); // cover, index, overview, detail picture, content
       expect(bytes.toString('latin1')).not.toContain('/MediaBox [0 0 841.89 595.28]'); // every page stays portrait; a wide diagram is turned on its page
       const page = await (await fetch(`${base}/p/alpha`, { headers: { cookie: dev } })).text();
       expect(page).toContain('Download PDF');

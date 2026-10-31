@@ -35,6 +35,8 @@ export interface DocMeta {
   diagram?: string;
   /** For a diagram drawn by Mnemosyne itself: the plan it was drawn from (the PDF draws the same plan as vectors). */
   plan?: DiagramPlan;
+  /** The DETAIL pictures of the same diagram set (the overview is `plan` and the stored SVG); drawn on request and in the PDF. */
+  pictures?: { name: string; plan: DiagramPlan }[];
   ext: string;
 }
 
@@ -205,15 +207,16 @@ export const DEFAULT_PLAN_SYSTEM = [
 
 export const DEFAULT_PLAN_USER = [
   'Below is an article about the software project "{{project}}".',
-  'Write the plan of ONE architecture diagram that shows how the system is reached, how a request (or a person\'s work) travels through it and where its data lives. Answer with exactly this JSON shape:',
-  '{"title":"project name","columns":[{"title":"CLIENTS","nodes":[{"id":"n1","label":"VS Code","detail":"MCP client","lane":"path"}]}],"links":[{"from":"n1","to":"n2","label":"MCP over HTTPS :40000","dashed":false}]}',
+  'Write the plan of the architecture diagrams that show how the system is reached, how a request (or a person\'s work) travels through it and where its data lives. Answer with exactly this JSON shape:',
+  '{"title":"project name","diagrams":[{"name":"Overview","columns":[{"title":"CLIENTS","nodes":[{"id":"n1","label":"VS Code","detail":"MCP client","lane":"path"}]}],"links":[{"from":"n1","to":"n2","label":"MCP over HTTPS :40000","dashed":false}]}]}',
   '',
   'Rules:',
-  '1. Columns run from LEFT to RIGHT in the order a request (or a person\'s work) travels, CLOSEST TO THE USER FIRST. Column 1 = who or what uses the system (people, browsers, editors, applications, other systems). Then the entry layer exactly as a client meets it: virtual IPs and failover (for example VRRP / keepalived), load balancers, gateways, firewalls, public ports. Then the services in the order they process a request, and last the storage and the external systems. Never place a component behind something that sits in front of it in reality.',
-  '2. "lane":"path" = the request passes through this component. "lane":"control" = it configures, monitors, signs people in or is managed from elsewhere but is NOT in the request path (dashboards, configuration stores, identity providers / single sign-on, agents, banning and monitoring). Control boxes are drawn in a band below, under the column they belong to, and their arrows are dashed.',
-  '3. Show EVERY interface the article names: each way in (protocol, port, URL path), each sign-in or authentication mechanism and where it happens, each data store and what it holds, each external system. Describe authentication exactly as the article does, including when it is optional or not switched on.',
-  '4. 3 to 7 columns, at most 8 "path" and 6 "control" boxes per column, at most 30 boxes in total. "label" at most 40 characters (a name), "detail" at most 90 characters (port, protocol, technology or role), arrow "label" at most 45 characters (protocol, port or action). Connect boxes of the same or of neighbouring columns where you can. Every box needs at least one arrow.',
-  '5. Use the exact names, ports and numbers from the article. If the article does not say it, do not draw it. Output the JSON only.',
+  '1. SPLIT, DO NOT CROWD. One picture holds at most 10 boxes, at most 14 arrows and at most 5 arrows on any one box - more cannot be read. The FIRST entry of "diagrams" is the OVERVIEW: the main parts of the whole system only (at most 10 boxes), one arrow between two boxes, arrow labels of one to three words. If the system has more than that, add DETAIL pictures, one per topic (for example request path, data and storage, sign-in and security, monitoring and management, build and deployment), each within the same limits and named by its topic in "name"; a detail picture shows the boxes of its topic plus the one neighbouring box it connects to, and repeats a box that other pictures also use. At most 5 pictures in total. A small system needs only the overview.',
+  '2. In every picture the columns run from LEFT to RIGHT in the order a request (or a person\'s work) travels, CLOSEST TO THE USER FIRST. Column 1 = who or what uses the system (people, browsers, editors, applications, other systems). Then the entry layer exactly as a client meets it: virtual IPs and failover (for example VRRP / keepalived), load balancers, gateways, firewalls, public ports. Then the services in the order they process a request, and last the storage and the external systems. Never place a component behind something that sits in front of it in reality.',
+  '3. "lane":"path" = the request passes through this component. "lane":"control" = it configures, monitors, signs people in or is managed from elsewhere but is NOT in the request path (dashboards, configuration stores, identity providers / single sign-on, agents, banning and monitoring). Control boxes are drawn in a band below, under the column they belong to, and their arrows are dashed.',
+  '4. Across all pictures show EVERY interface the article names: each way in (protocol, port, URL path), each sign-in or authentication mechanism and where it happens, each data store and what it holds, each external system - each one in the picture of its topic. Describe authentication exactly as the article does, including when it is optional or not switched on.',
+  '5. 2 to 6 columns per picture, at most 8 "path" and 6 "control" boxes per column. "label" at most 40 characters (a name), "detail" at most 90 characters (port, protocol, technology or role), arrow "label" at most 45 characters (protocol, port or action). Connect boxes of the same or of neighbouring columns where you can. Every box needs at least one arrow.',
+  '6. Use the exact names, ports and numbers from the article. If the article does not say it, do not draw it. Output the JSON only.',
   '',
   '--- ARTICLE ---',
   '{{article}}',

@@ -37,7 +37,19 @@ export interface DiagramPlan {
   dropped: string[];
 }
 
-const LIMITS = { columns: 8, pathPerColumn: 8, controlPerColumn: 6, nodes: 30, links: 45, title: 60, colTitle: 32, label: 44, detail: 96, linkLabel: 48 };
+const LIMITS = { columns: 8, pathPerColumn: 8, controlPerColumn: 6, title: 60, colTitle: 32, label: 44, detail: 96, linkLabel: 48 };
+
+interface PlanLimits {
+  nodes: number;
+  links: number;
+}
+/** Plans stored before the pictures were split, and the single-picture fixtures: generous. */
+const LEGACY_LIMITS: PlanLimits = { nodes: 30, links: 45 };
+/**
+ * One picture of a set (owner decision 2026-10-30): the prompt asks for at most 10 boxes and 14 arrows and at most 5 pictures;
+ * a little more is tolerated before anything is cut. More than this cannot be drawn legibly - the labels have no room left.
+ */
+export const PICTURE_LIMITS = { nodes: 12, links: 16, pictures: 5 };
 
 // ----------------------------------------------------------------------------
 // Reading the AI's answer
@@ -64,10 +76,16 @@ function extractJson(raw: string): unknown {
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
-/** Validates and tidies the AI's plan. Anything unusable is dropped and listed in `dropped`; a plan with nothing left to draw is an error. */
+/** One picture from the single-picture answer format ({title, columns, links}). */
 export function parsePlan(raw: string, fallbackTitle: string): DiagramPlan {
   const root = extractJson(raw);
-  if (!isObj(root) || !Array.isArray(root.columns)) throw new PlanError('the JSON has no "columns" list');
+  if (!isObj(root)) throw new PlanError('the answer is not a JSON object');
+  return buildPlan(root, fallbackTitle, LEGACY_LIMITS);
+}
+
+/** Validates and tidies one picture. Anything unusable is dropped and listed in `dropped`; a picture with nothing left to draw is an error. */
+function buildPlan(root: Record<string, unknown>, fallbackTitle: string, limits: PlanLimits): DiagramPlan {
+  if (!Array.isArray(root.columns)) throw new PlanError('the JSON has no "columns" list');
   const dropped: string[] = [];
   const ids = new Map<string, string>(); // lower-case id -> id
   const columns: PlanColumn[] = [];
@@ -88,7 +106,7 @@ export function parsePlan(raw: string, fallbackTitle: string): DiagramPlan {
       const label = clean(rawNode.label ?? rawNode.name ?? rawNode.title, LIMITS.label);
       if (!label) continue;
       const lane = String(rawNode.lane ?? '').toLowerCase() === 'control' ? 'control' : 'path';
-      if (total >= LIMITS.nodes || (lane === 'path' ? path : control) >= (lane === 'path' ? LIMITS.pathPerColumn : LIMITS.controlPerColumn)) {
+      if (total >= limits.nodes || (lane === 'path' ? path : control) >= (lane === 'path' ? LIMITS.pathPerColumn : LIMITS.controlPerColumn)) {
         dropped.push(`box “${label}” (too many boxes)`);
         continue;
       }
@@ -117,12 +135,60 @@ export function parsePlan(raw: string, fallbackTitle: string): DiagramPlan {
     }
     const label = clean(rawLink.label, LIMITS.linkLabel);
     const key = `${from}>${to}>${label}`;
-    if (seen.has(key) || links.length >= LIMITS.links) continue;
+    if (seen.has(key) || links.length >= limits.links) continue;
     seen.add(key);
     links.push({ from, to, label, dashed: rawLink.dashed === true || laneOf.get(from) === 'control' || laneOf.get(to) === 'control' });
   }
   if (!links.length) throw new PlanError('the plan has no arrows between its boxes');
   return { title: clean(root.title, LIMITS.title) || clean(fallbackTitle, LIMITS.title) || 'Architecture', columns, links, dropped };
+}
+
+export interface DiagramPicture {
+  /** "Overview" for the first picture, then the topic of each detail picture ("Request path", "Data and storage", ...). */
+  name: string;
+  plan: DiagramPlan;
+}
+export interface DiagramSet {
+  title: string;
+  /** The overview first, then the detail pictures. */
+  pictures: DiagramPicture[];
+  dropped: string[];
+}
+
+/**
+ * Reads the AI's answer: {title, diagrams:[{name, columns, links}, ...]} - an overview and detail pictures by topic, each within the
+ * strict limits. The older single-picture answer ({columns, links}) is read as one picture. A picture that cannot be used is left
+ * out and reported; if none can be used the answer is refused.
+ */
+export function parsePlanSet(raw: string, fallbackTitle: string): DiagramSet {
+  const root = extractJson(raw);
+  if (!isObj(root)) throw new PlanError('the answer is not a JSON object');
+  const title = clean(root.title, LIMITS.title) || clean(fallbackTitle, LIMITS.title) || 'Architecture';
+  const dropped: string[] = [];
+  const pictures: DiagramPicture[] = [];
+
+  const add = (src: Record<string, unknown>, index: number) => {
+    const name = clean(src.name ?? src.title, 40) || (index === 0 ? 'Overview' : `Detail ${index}`);
+    if (pictures.length >= PICTURE_LIMITS.pictures) {
+      dropped.push(`picture “${name}” (more than ${PICTURE_LIMITS.pictures} pictures)`);
+      return;
+    }
+    try {
+      const plan = buildPlan(src, title, PICTURE_LIMITS);
+      plan.title = pictures.length === 0 ? title : clean(`${title} - ${name}`, LIMITS.title);
+      pictures.push({ name: pictures.length === 0 ? 'Overview' : name, plan });
+      dropped.push(...plan.dropped.map((d) => `${name}: ${d}`));
+    } catch (err) {
+      if (!(err instanceof PlanError)) throw err;
+      dropped.push(`picture “${name}” (${err.message})`);
+    }
+  };
+
+  if (Array.isArray(root.diagrams)) root.diagrams.forEach((d, i) => isObj(d) && add(d, i));
+  else if (Array.isArray(root.columns)) add(root, 0);
+  else throw new PlanError('the JSON has no "diagrams" list');
+  if (!pictures.length) throw new PlanError(`none of the pictures in the plan could be used${dropped.length ? ` (${dropped.slice(0, 2).join('; ')})` : ''}`);
+  return { title, pictures, dropped };
 }
 
 // ----------------------------------------------------------------------------
@@ -251,6 +317,9 @@ export function layout(plan: DiagramPlan): Scene {
     lines: string[];
     sa: Side;
     sb: Side;
+    /** A box that is not at the edge of its stack facing the other lane cannot send its arrow straight up or down (it would run behind its neighbours): it leaves sideways. */
+    blockA: boolean;
+    blockB: boolean;
     /** The label sits on the stretch next to the end that has fewer arrows, so labels of arrows that fan in or out do not pile up. */
     atSource: boolean;
   }
@@ -282,7 +351,16 @@ export function layout(plan: DiagramPlan): Scene {
       sa = b.col > a.col ? 'R' : 'L';
       sb = sa === 'R' ? 'L' : 'R';
     }
-    return { link, a, b, kind, lines: link.label ? wrapText(link.label, 150, 11.5, false, 3) : [], sa, sb, atSource: true };
+    const blocked = (bx: Box) => {
+      const list = bx.node.lane === 'path' ? stacks[bx.col]!.path : stacks[bx.col]!.control;
+      const idx = list.indexOf(bx);
+      return bx.node.lane === 'path' ? idx < list.length - 1 : idx > 0;
+    };
+    const blockA = kind === 'cross' && blocked(a);
+    const blockB = kind === 'cross' && blocked(b);
+    if (blockA) sa = a.col < n - 1 ? 'R' : 'L';
+    if (blockB) sb = b.col < n - 1 ? 'R' : 'L';
+    return { link, a, b, kind, lines: link.label ? wrapText(link.label, 150, 11.5, false, 3) : [], sa, sb, blockA, blockB, atSource: true };
   });
   const skipGaps = (e: Edge): [number, number] => (e.b.col > e.a.col ? [e.a.col, e.b.col - 1] : [e.a.col - 1, e.b.col]);
 
@@ -299,6 +377,9 @@ export function layout(plan: DiagramPlan): Scene {
     } else if (e.kind === 'gutter' && e.a.col > 0) {
       gapCount[e.a.col - 1]!++;
       gapLabel[e.a.col - 1] = Math.max(gapLabel[e.a.col - 1]!, lw(e.lines));
+    } else if (e.kind === 'cross') {
+      if (e.blockA) gapCount[e.sa === 'R' ? e.a.col : e.a.col - 1]!++;
+      if (e.blockB) gapCount[e.sb === 'R' ? e.b.col : e.b.col - 1]!++;
     }
   }
   const gaps = gapCount.map((cnt, g) => Math.min(260, Math.max(64, (gapLabel[g]! ? gapLabel[g]! + 34 : 30) + 9 * cnt)));
@@ -308,13 +389,14 @@ export function layout(plan: DiagramPlan): Scene {
 
   const skipPath = edges.filter((e) => e.kind === 'skip' && e.a.node.lane === 'path').length;
   const skipCtrl = edges.filter((e) => e.kind === 'skip' && e.a.node.lane === 'control').length;
-  const crossN = edges.filter((e) => e.kind === 'cross').length;
 
   const titleY = MARGIN + 24;
   const headY = titleY + 34;
   const pathTop = headY + 18 + (skipPath ? 16 + 26 * skipPath : 8);
   const pathBottom = pathTop + pathH;
-  const bandGap = hasControl ? 74 + 12 * Math.min(crossN, 8) : 0;
+  // every arrow that crosses between the bands gets its own horizontal lane; a lane with a label is as high as the label
+  const crossSteps = edges.filter((e) => e.kind === 'cross').map((e) => (e.lines.length ? lh(e.lines) + 8 : 12));
+  const bandGap = hasControl ? 74 + crossSteps.reduce((a, b) => a + b, 0) : 0;
   const ctrlTop = pathBottom + bandGap;
   const ctrlBottom = ctrlTop + ctrlH;
   const height = (hasControl ? ctrlBottom + 16 + (skipCtrl ? 16 + 26 * skipCtrl : 0) : pathBottom) + MARGIN;
@@ -363,7 +445,7 @@ export function layout(plan: DiagramPlan): Scene {
         g.side === 'L' ? [b.x, b.y + b.h / 2 + off] : g.side === 'R' ? [b.x + b.w, b.y + b.h / 2 + off] : g.side === 'T' ? [b.x + b.w / 2 + off, b.y] : [b.x + b.w / 2 + off, b.y + b.h];
       // arrows that go down into the control band and arrows that come up from it use different lanes, so they never look like one line
       const ed = edges[it.e]!;
-      if (ed.kind === 'cross') pos[0] += ed.a.node.lane === 'path' ? 14 : -14;
+      if (ed.kind === 'cross' && (g.side === 'T' || g.side === 'B')) pos[0] += ed.a.node.lane === 'path' ? 14 : -14;
       ports.set(`${it.e}:${it.end}`, pos);
     });
   }
@@ -389,6 +471,10 @@ export function layout(plan: DiagramPlan): Scene {
       reqs.push({ e: i, tag: 'v1', g: g1, home: fwd ? 'L' : 'R', dy: 1e6 }, { e: i, tag: 'v2', g: g2, home: fwd ? 'R' : 'L', dy: 1e6 });
     } else if (e.kind === 'gutter' && e.a.col > 0) {
       reqs.push({ e: i, tag: 'v', g: e.a.col - 1, home: 'R', dy: 2e6 });
+    } else if (e.kind === 'cross') {
+      // leaving sideways: the lane hugs the box (right side: left end of the gap; left side: right end of the gap)
+      if (e.blockA) reqs.push({ e: i, tag: 'va', g: e.sa === 'R' ? e.a.col : e.a.col - 1, home: e.sa === 'R' ? 'L' : 'R', dy: 1e6 });
+      if (e.blockB) reqs.push({ e: i, tag: 'vb', g: e.sb === 'R' ? e.b.col : e.b.col - 1, home: e.sb === 'R' ? 'L' : 'R', dy: 1e6 });
     }
   });
   const vx = new Map<string, number>();
@@ -464,9 +550,12 @@ export function layout(plan: DiagramPlan): Scene {
       }
     } else if (e.kind === 'cross') {
       const pb = P(i, 'b');
-      const yc = pathBottom + 20 + 12 * crossSlot++;
-      pts = [pa, [pa[0], yc], [pb[0], yc], pb];
-      if (e.lines.length) put([(pa[0] + pb[0]) / 2, yc], e.lines, 'x', Math.min(pa[0], pb[0]), Math.max(pa[0], pb[0]));
+      const yc = pathBottom + 14 + crossSteps.slice(0, crossSlot).reduce((a, b) => a + b, 0) + crossSteps[crossSlot]! / 2;
+      crossSlot++;
+      const xa = e.blockA ? vx.get(`${i}:va`)! : pa[0];
+      const xb = e.blockB ? vx.get(`${i}:vb`)! : pb[0];
+      pts = [pa, ...(e.blockA ? ([[xa, pa[1]]] as [number, number][]) : []), [xa, yc], [xb, yc], ...(e.blockB ? ([[xb, pb[1]]] as [number, number][]) : []), pb];
+      if (e.lines.length) put([(xa + xb) / 2, yc], e.lines, 'x', Math.min(xa, xb), Math.max(xa, xb));
     } else if (e.kind === 'near') {
       const pb = P(i, 'b');
       if (Math.abs(pa[1] - pb[1]) < 0.5) {

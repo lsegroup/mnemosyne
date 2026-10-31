@@ -66,7 +66,7 @@ export const JOB_DEFS: Record<Role, JobDef> = {
     role: 'image',
     title: 'Images',
     summary:
-      'Creates the architecture diagram. The text model (the one chosen for Text) reads the article and writes a PLAN of the picture as data (columns of boxes and the arrows between them) using the prompts below; Mnemosyne itself then draws the picture from that plan, so every word is spelled exactly and the layout is always the same. No image model is called for diagrams, so the model chosen here is not used by them. Runs when an administrator presses “Create workflow diagram” and agrees to the cost. The limit, sampling values and prompts below belong to the text call that writes the plan.',
+      'Creates the architecture diagrams. The text model (the one chosen for Text) reads the article and writes a PLAN as data using the prompts below: an overview picture and, for a bigger system, detail pictures by topic (at most 5 pictures, each with at most 10 boxes and 14 arrows, columns of boxes and the arrows between them); Mnemosyne itself then draws every picture from that plan, so every word is spelled exactly and the layout is always the same. No image model is called for diagrams, so the model chosen here is not used by them. Runs when an administrator presses “Create workflow diagram” and agrees to the cost. The limit, sampling values and prompts below belong to the text call that writes the plan.',
     usesAi: true,
     systemLabel: 'System prompt for the diagram plan - who the AI is and the rules',
     userLabel: 'Instruction for the diagram plan - what the picture must show (the AI must answer with the JSON plan)',

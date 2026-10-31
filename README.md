@@ -37,7 +37,7 @@ The home page after sign-in: one card for every GitLab project the person belong
 
 ![Mnemosyne admin, LLM tab](docs/images/screenshot-3-admin-llm.png)
 
-GitLab instance administrators connect an AI provider: (1) enter the provider and its API key (stored encrypted, never shown again), (2) fetch the models that key can really use (this only reads the model list and costs nothing), (3) choose one model each for text, images and PDF handbooks. The architecture diagram is not drawn by an image model: the text model writes a plan of it (boxes, arrows, ports) and Mnemosyne draws it itself as SVG, so every word is spelled exactly; the PDF paints the same plan as vectors. Nothing in Mnemosyne calls a model unless an administrator presses a button and agrees to the estimated cost in a popup.
+GitLab instance administrators connect an AI provider: (1) enter the provider and its API key (stored encrypted, never shown again), (2) fetch the models that key can really use (this only reads the model list and costs nothing), (3) choose one model each for text, images and PDF handbooks. The architecture diagram is not drawn by an image model: the text model writes a plan of it (an overview and, for a bigger system, detail pictures: boxes, arrows, ports) and Mnemosyne draws it itself as SVG, so every word is spelled exactly; the PDF paints the same plan as vectors. Nothing in Mnemosyne calls a model unless an administrator presses a button and agrees to the estimated cost in a popup.
 
 ### 4. Admin: audit trail
 

@@ -834,6 +834,7 @@ const HOME_CSS = `
 .card .pic img{display:block;width:100%;height:auto}
 .card .cap{margin:0 12px 12px;font-size:12px;color:var(--muted);text-align:center}
 .card .noimg{margin:12px;padding:30px 12px;border:1px dashed var(--line);border-radius:8px;text-align:center;color:var(--muted);font-size:13px}
+.card .subs{margin:0 12px 12px;display:flex;flex-direction:column;gap:8px}.card .subs .cap{margin:2px 0 0}.card .pic.sub{margin:0;padding:4px}.card .pic.sub span{display:block;margin-top:4px;font-size:12px;color:#33384a;text-align:center}
 .card dl{margin:0;padding:4px 14px 12px;font-size:13px}.card dt{margin-top:9px;color:var(--teal);font-weight:600}.card dd{margin:2px 0 0;color:var(--text);overflow-wrap:anywhere}
 .card a{color:var(--teal)}
 .wp article h2{margin-top:26px}
@@ -892,7 +893,7 @@ export function projectHome(v: ProjectHomeView): string {
   const card = v.wiki
     ? `<aside class="side"><div class="card"><h3>${esc(v.project)}</h3>${
         v.diagram
-          ? `<a class="pic" id="pic" href="${base}/p/${enc}/diagram/${esc(v.diagram.id)}" target="_blank" rel="noopener"><img src="${base}/p/${enc}/diagram/${esc(v.diagram.id)}" alt="Workflow diagram of ${esc(v.project)}"></a><p class="cap">Workflow diagram · click to enlarge<br>created ${esc(when(v.diagram.generatedAt))} by ${esc(v.diagram.model)}</p>${vers(v.diagramVersions, `${base}/p/${enc}/diagram/`, 'diagrams')}`
+          ? `<a class="pic" id="pic" href="${base}/p/${enc}/diagram/${esc(v.diagram.id)}" target="_blank" rel="noopener"><img src="${base}/p/${enc}/diagram/${esc(v.diagram.id)}" alt="Workflow diagram of ${esc(v.project)}"></a><p class="cap">Workflow diagram · click to enlarge<br>created ${esc(when(v.diagram.generatedAt))} by ${esc(v.diagram.model)}</p>${(v.diagram.pictures ?? []).length ? `<div class="subs"><p class="cap">Detail pictures · click to enlarge</p>${(v.diagram.pictures ?? []).map((p, i) => `<a class="pic sub" href="${base}/p/${enc}/diagram/${esc(v.diagram!.id)}/${i + 1}" target="_blank" rel="noopener"><img src="${base}/p/${enc}/diagram/${esc(v.diagram!.id)}/${i + 1}" alt="${esc(p.name)} diagram of ${esc(v.project)}"><span>${esc(p.name)}</span></a>`).join('')}</div>` : ''}${vers(v.diagramVersions, `${base}/p/${enc}/diagram/`, 'diagrams')}`
           : `<div class="noimg">Workflow diagram<br>not created yet${v.isAdmin ? '<br>Use “Create workflow diagram” above.' : ''}</div>`
       }<dl><dt>Documentation</dt><dd>${esc(when(v.wiki.meta.generatedAt))}</dd><dt>Written by</dt><dd>${esc(v.wiki.meta.model)}</dd><dt>Source notes</dt><dd>${v.wiki.meta.noteCount ?? '?'} notes</dd><dt>Latest note</dt><dd>${esc(v.history[0]?.date ?? 'unknown')} UTC</dd>${v.glUrl ? `<dt>GitLab project</dt><dd><a href="${esc(v.glUrl)}" rel="noopener noreferrer">${esc(v.glUrl.replace(/^https?:\/\//, ''))}</a></dd>` : ''}</dl></div>${contents}</aside>`
     : '';
@@ -992,9 +993,9 @@ function HOME_JS(api: string, busy: string | null): string {
   ${busy ? 'watch();' : ''}
 
   // click the small diagram to see it large
-  var pic=$('pic'),lb=$('lightbox');
-  if(pic&&lb){
-    pic.addEventListener('click',function(ev){ev.preventDefault();lb.querySelector('img').src=pic.getAttribute('href');lb.hidden=false});
+  var pics=document.querySelectorAll('a.pic'),lb=$('lightbox');
+  if(pics.length&&lb){
+    pics.forEach(function(pic){pic.addEventListener('click',function(ev){ev.preventDefault();lb.querySelector('img').src=pic.getAttribute('href');lb.hidden=false})});
     lb.addEventListener('click',function(){lb.hidden=true});
     document.addEventListener('keydown',function(ev){if(ev.key==='Escape')lb.hidden=true});
   }
