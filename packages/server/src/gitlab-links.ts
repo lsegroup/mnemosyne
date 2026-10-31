@@ -1,4 +1,3 @@
-import { readdir } from 'node:fs/promises';
 import { slug } from './slug.js';
 
 /**
@@ -18,24 +17,18 @@ export interface GlProject {
 
 export const BADGE_NAME = 'Mnemosyne Wiki';
 
-/** Where a project's page lives in the portal: the notes project that matches the GitLab project, else the slug of its path (as the home page does). */
-export function linkKey(gl: Pick<GlProject, 'name' | 'path'>, notesProjects: string[]): string {
-  const hit = [...notesProjects].sort().find((p) => slug(p) === slug(gl.path) || slug(p) === slug(gl.name));
-  return hit ?? slug(gl.path);
+/**
+ * Where a project's page lives in the portal: the slug of its GitLab path. That is also the key the home page uses for a project nobody has written
+ * notes for, and the portal resolves it to the real notes project by slug, so the link needs no knowledge of the notes (which live on the server,
+ * not in any checkout) and stays valid when a notes project is spelled differently.
+ */
+export function linkKey(gl: Pick<GlProject, 'path'>): string {
+  return slug(gl.path);
 }
 
 const trimSlash = (u: string) => u.replace(/\/+$/, '');
 export const wikiUrl = (portalUrl: string, key: string) => `${trimSlash(portalUrl)}/p/${encodeURIComponent(key)}`;
 export const badgeImageUrl = (portalUrl: string) => `${trimSlash(portalUrl)}/assets/wiki-badge.svg`;
-
-/** The notes projects are the directories of the notes folder. */
-export async function notesProjectNames(nodesDir: string): Promise<string[]> {
-  try {
-    return (await readdir(nodesDir, { withFileTypes: true })).filter((d) => d.isDirectory() && !/^[._]/.test(d.name)).map((d) => d.name);
-  } catch {
-    return [];
-  }
-}
 
 export interface Counts {
   create: number;
@@ -54,7 +47,6 @@ export interface SyncOptions {
   token: string;
   /** The portal address including the base path, e.g. https://host:40000/mnemosyne */
   portalUrl: string;
-  notesProjects: string[];
   /** False = only report what would change. */
   apply: boolean;
   wikiLink?: boolean;
@@ -127,7 +119,7 @@ export async function syncGitLabLinks(opt: SyncOptions): Promise<SyncResult> {
   const verb = (v: 'create' | 'update' | 'ok') => (opt.apply ? { create: 'created', update: 'updated', ok: 'ok     ' }[v] : { create: 'would create', update: 'would update', ok: 'ok' }[v]);
 
   const one = async (p: GlProject) => {
-    const url = wikiUrl(opt.portalUrl, linkKey(p, opt.notesProjects));
+    const url = wikiUrl(opt.portalUrl, linkKey(p));
     if (wantWiki) {
       try {
         const cur = await call('GET', `/projects/${p.id}/integrations/external-wiki`);

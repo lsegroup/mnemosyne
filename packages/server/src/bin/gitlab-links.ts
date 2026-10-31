@@ -1,17 +1,16 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
-import { notesProjectNames, syncGitLabLinks } from '../gitlab-links.js';
+import { syncGitLabLinks } from '../gitlab-links.js';
 
 /**
  * Puts the "Mnemosyne Wiki" link (External wiki + badge) into every GitLab project. Dry run unless --apply.
- *   GITLAB_TOKEN=... node dist/bin/gitlab-links.js --gitlab-url https://gitlab.example.com --portal-url https://host:40000/mnemosyne --nodes ./nodes --apply
+ *   GITLAB_TOKEN=... node dist/bin/gitlab-links.js --gitlab-url https://gitlab.example.com --portal-url https://host:40000/mnemosyne --apply
  * The token (api scope, Maintainer on the projects) is read from the environment only, never from the command line.
  */
 const { values } = parseArgs({
   options: {
     'gitlab-url': { type: 'string' },
     'portal-url': { type: 'string' },
-    nodes: { type: 'string', default: './nodes' },
     apply: { type: 'boolean', default: false },
     only: { type: 'string', multiple: true },
     'no-badge': { type: 'boolean', default: false },
@@ -27,7 +26,7 @@ const token = env.GITLAB_TOKEN ?? env.GITLAB_PAT;
 
 if (values.help || !gitlabUrl || !portalUrl || !token) {
   console.error(
-    'usage: GITLAB_TOKEN=<api token> gitlab-links --gitlab-url <url> --portal-url <https://host:40000/mnemosyne> [--nodes ./nodes] [--only group/project]... [--no-badge] [--no-wiki] [--apply]\n' +
+    'usage: GITLAB_TOKEN=<api token> gitlab-links --gitlab-url <url> --portal-url <https://host:40000/mnemosyne> [--only group/project]... [--no-badge] [--no-wiki] [--apply]\n' +
       'Without --apply nothing is changed: it only prints what would be done. Defaults: MNEMOSYNE_GITLAB_URL / CI_SERVER_URL, MNEMOSYNE_PUBLIC_URL + MNEMOSYNE_BASE_PATH.',
   );
   process.exit(values.help ? 0 : 2);
@@ -37,7 +36,6 @@ const result = await syncGitLabLinks({
   gitlabUrl,
   token,
   portalUrl,
-  notesProjects: await notesProjectNames(values.nodes!),
   apply: values.apply!,
   only: values.only,
   badge: !values['no-badge'],

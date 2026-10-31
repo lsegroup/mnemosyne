@@ -99,12 +99,12 @@ Diagrams made earlier by an image model (png/jpg/webp) are still shown and embed
 
 ## A Mnemosyne Wiki link in every GitLab project
 
-`packages/server/src/gitlab-links.ts` (command `packages/server/src/bin/gitlab-links.ts`, plain Node, no dependencies) puts two links into every GitLab project so people reach the project's Mnemosyne page from GitLab: the project's **External wiki** integration (GitLab shows it in the project menu in place of its own wiki; the label "External wiki" is GitLab's) and a **badge named "Mnemosyne Wiki"** on the project page (the badge image is served publicly by the portal at `/assets/wiki-badge.svg`). The target is the project's page key as the portal's home page builds it: the matching notes project, otherwise the slug of the GitLab path. Both links are idempotent (a second run changes nothing, a wrong address is corrected).
+`packages/server/src/gitlab-links.ts` (command `packages/server/src/bin/gitlab-links.ts`, plain Node, no dependencies) puts two links into every GitLab project so people reach the project's Mnemosyne page from GitLab: the project's **External wiki** integration (GitLab shows it in the project menu in place of its own wiki; the label "External wiki" is GitLab's) and a **badge named "Mnemosyne Wiki"** on the project page (the badge image is served publicly by the portal at `/assets/wiki-badge.svg`). The target is `/p/<slug of the GitLab path>`; the portal resolves that key to the project's real notes project by slug (case, dash and underscore do not matter) and redirects there. Both links are idempotent (a second run changes nothing, a wrong address is corrected).
 
 ```bash
 # dry run (default): prints what would be done, changes nothing
 GITLAB_TOKEN=<token with the api scope, Maintainer on the projects> node packages/server/dist/bin/gitlab-links.js \
-  --gitlab-url https://gitlab.example.com --portal-url https://host:40000/mnemosyne --nodes ./nodes
+  --gitlab-url https://gitlab.example.com --portal-url https://host:40000/mnemosyne
 # ... --apply   to do it;   --only group/project   to limit it;   --no-badge / --no-wiki   for one of the two links
 ```
 

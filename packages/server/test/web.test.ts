@@ -497,6 +497,20 @@ describe('web portal', () => {
     });
   });
 
+  it('resolves a project key spelled differently (case, dash, underscore) to the real notes project - the GitLab links use the slug of the GitLab path - but never for a person who may not read it', async () => {
+    const dev = cookiesOf(await signIn('dev-code')); // member of alpha
+    const to = (r: Response) => new URL(r.headers.get('location') ?? 'http://none', base).pathname + new URL(r.headers.get('location') ?? 'http://none', base).search;
+    const r1 = await fetch(`${base}/p/ALPHA`, { headers: { cookie: dev }, redirect: 'manual' });
+    expect(r1.status).toBe(302);
+    expect(to(r1)).toBe(`${new URL(base).pathname}/p/alpha`);
+    const r2 = await fetch(`${base}/p/Alpha?v=20261030T120000Z`, { headers: { cookie: dev }, redirect: 'manual' });
+    expect(to(r2)).toBe(`${new URL(base).pathname}/p/alpha?v=20261030T120000Z`); // the rest of the address is kept
+    expect((await fetch(`${base}/p/alpha`, { headers: { cookie: dev }, redirect: 'manual' })).status).toBe(200); // the real name: no redirect
+    const none = cookiesOf(await signIn('scope-code')); // no project at all
+    const r3 = await fetch(`${base}/p/ALPHA`, { headers: { cookie: none }, redirect: 'manual' });
+    expect(r3.status).toBe(404); // nothing is revealed: not redirected to a page that exists
+  });
+
   it('fails closed when GitLab does not share the project list (missing read_api scope)', async () => {
     const cookie = cookiesOf(await signIn('scope-code'));
     const home = await (await fetch(`${base}/`, { headers: { cookie } })).text();

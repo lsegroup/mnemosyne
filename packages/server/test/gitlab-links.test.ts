@@ -1,10 +1,7 @@
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { BADGE_NAME, badgeImageUrl, linkKey, notesProjectNames, syncGitLabLinks, wikiUrl } from '../src/gitlab-links.js';
+import { BADGE_NAME, badgeImageUrl, linkKey, syncGitLabLinks, wikiUrl } from '../src/gitlab-links.js';
 
 const PORTAL = 'https://host.example:40000/mnemosyne';
 const projects = [
@@ -17,7 +14,6 @@ const projects = [
 describe('the Mnemosyne Wiki link in every GitLab project', () => {
   let gl: Server;
   let url = '';
-  let tmp = '';
   const wikis = new Map<number, string>();
   const badges = new Map<number, { id: number; name: string; kind: string; link_url: string; image_url: string }[]>();
   const writes: string[] = [];
@@ -27,8 +23,6 @@ describe('the Mnemosyne Wiki link in every GitLab project', () => {
   const read = (req: IncomingMessage) => new Promise<Record<string, string>>((r) => { let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => r(b ? JSON.parse(b) : {})); });
 
   beforeAll(async () => {
-    tmp = await mkdtemp(join(tmpdir(), 'mnem-links-'));
-    for (const d of ['centest', 'bootstrap_access', 'lse', '_candidates']) await mkdir(join(tmp, d), { recursive: true });
     gl = createServer(async (req, res) => {
       tokens.add(String(req.headers['private-token']));
       const send = (code: number, body: unknown, headers: Record<string, string> = {}) => { res.writeHead(code, { 'Content-Type': 'application/json', ...headers }); res.end(JSON.stringify(body)); };
@@ -65,22 +59,20 @@ describe('the Mnemosyne Wiki link in every GitLab project', () => {
     await new Promise<void>((r) => gl.listen(0, '127.0.0.1', r));
     url = `http://127.0.0.1:${(gl.address() as AddressInfo).port}`;
   });
-  afterAll(async () => {
+  afterAll(() => {
     gl?.close();
-    await rm(tmp, { recursive: true, force: true });
   });
 
   const run = (extra: Partial<Parameters<typeof syncGitLabLinks>[0]> = {}) =>
-    syncGitLabLinks({ gitlabUrl: url, token: 'secret-token-123', portalUrl: PORTAL, notesProjects: ['centest', 'bootstrap_access', 'lse'], apply: true, concurrency: 2, ...extra });
+    syncGitLabLinks({ gitlabUrl: url, token: 'secret-token-123', portalUrl: PORTAL, apply: true, concurrency: 2, ...extra });
 
-  it('keys a project like the portal does: the matching notes project, else the slug of the GitLab path; notes folders are the notes projects', async () => {
-    expect(linkKey({ name: 'CenTest', path: 'CenTest' }, ['centest', 'lse'])).toBe('centest');
-    expect(linkKey({ name: 'bootstrap_access', path: 'bootstrap_access' }, ['bootstrap_access'])).toBe('bootstrap_access'); // underscore kept: it is the notes name
-    expect(linkKey({ name: 'Brand New', path: 'brand-new' }, ['centest'])).toBe('brand-new'); // no notes yet: the page is still blank-but-there
-    expect(linkKey({ name: 'Odd Name', path: 'Odd_Path.git' }, [])).toBe('odd-path-git');
+  it('keys a project by the slug of its GitLab path (the portal resolves that to the real notes project); builds the addresses', () => {
+    expect(linkKey({ path: 'CenTest' })).toBe('centest');
+    expect(linkKey({ path: 'bootstrap_access' })).toBe('bootstrap-access'); // the portal maps it to the notes project 'bootstrap_access'
+    expect(linkKey({ path: 'brand-new' })).toBe('brand-new');
+    expect(linkKey({ path: 'Odd_Path.git' })).toBe('odd-path-git');
     expect(wikiUrl(`${PORTAL}/`, 'a b')).toBe(`${PORTAL}/p/a%20b`);
     expect(badgeImageUrl(PORTAL)).toBe(`${PORTAL}/assets/wiki-badge.svg`);
-    expect((await notesProjectNames(tmp)).sort()).toEqual(['bootstrap_access', 'centest', 'lse']); // _candidates is not a project
   });
 
   it('a dry run changes nothing and says what it would do', async () => {
@@ -96,9 +88,9 @@ describe('the Mnemosyne Wiki link in every GitLab project', () => {
   it('applies to every project, reports the one it may not change, and carries on with the rest', async () => {
     const r = await run();
     expect(wikis.get(1)).toBe(`${PORTAL}/p/centest`);
-    expect(wikis.get(12)).toBe(`${PORTAL}/p/bootstrap_access`);
+    expect(wikis.get(12)).toBe(`${PORTAL}/p/bootstrap-access`);
     expect(wikis.get(20)).toBe(`${PORTAL}/p/brand-new`);
-    expect(badges.get(12)![0]).toMatchObject({ name: BADGE_NAME, link_url: `${PORTAL}/p/bootstrap_access`, image_url: `${PORTAL}/assets/wiki-badge.svg` });
+    expect(badges.get(12)![0]).toMatchObject({ name: BADGE_NAME, link_url: `${PORTAL}/p/bootstrap-access`, image_url: `${PORTAL}/assets/wiki-badge.svg` });
     expect(wikis.has(30)).toBe(false);
     expect(r.failed.map((f) => `${f.project}:${f.step}`).sort()).toEqual(['GCD-Group/locked:badge', 'GCD-Group/locked:wiki link']);
     expect(r.failed[0]!.error).toContain('403');
@@ -113,13 +105,13 @@ describe('the Mnemosyne Wiki link in every GitLab project', () => {
     expect(again.wiki).toMatchObject({ create: 0, update: 0, ok: 3 });
     expect(again.badge).toMatchObject({ create: 0, update: 0, ok: 3 });
 
-    wikis.set(12, 'https://old.example/p/bootstrap_access');
+    wikis.set(12, 'https://old.example/p/bootstrap-access');
     badges.get(20)![0]!.link_url = 'https://old.example/x';
     const fixed = await run({ only: ['infrastructure/bootstrap_access', 'GCD-Group/brand-new'] });
     expect(fixed.projects).toBe(2);
     expect(fixed.wiki.update).toBe(1);
     expect(fixed.badge.update).toBe(1);
-    expect(wikis.get(12)).toBe(`${PORTAL}/p/bootstrap_access`);
+    expect(wikis.get(12)).toBe(`${PORTAL}/p/bootstrap-access`);
     expect(badges.get(20)![0]!.link_url).toBe(`${PORTAL}/p/brand-new`);
     expect(badges.get(20)!.length).toBe(1); // updated, not added a second time
   });

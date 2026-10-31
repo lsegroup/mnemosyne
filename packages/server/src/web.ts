@@ -526,6 +526,16 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       return null;
     }
     const project = String(req.params.project);
+    // A link may spell the project differently from its notes (GitLab path 'bootstrap_access' as 'bootstrap-access', other case): resolve it to
+    // the real notes project by slug and redirect there - but only if this person may read that project (nothing is revealed otherwise).
+    if (req.method === 'GET' && !(await nodeIndex.inProject(project)).length) {
+      const names = (await nodeIndex.projects()).map((p) => p.project);
+      const real = names.find((n) => slug(n) === slug(project));
+      if (real && real !== project && canRead(ds.m, real)) {
+        res.redirect(302, req.originalUrl.replace(`/p/${encodeURIComponent(project)}`, `/p/${encodeURIComponent(real)}`));
+        return null;
+      }
+    }
     const refuse = (why: string) => {
       void rec(req, { event: 'denied', entityType: 'docs_project', entityName: project, user: ds.s.u, description: why });
       notFound(res, ds, 'This page does not exist, or you do not have access to it.');
