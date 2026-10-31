@@ -29,6 +29,9 @@ const SESSION_TTL_S = 8 * 3600;
 /** The documentation area stays signed in for a month; GitLab is re-checked silently every 12 h (refresh token). */
 const money = (usd: number) => (usd < 0.01 ? '<0.01' : usd.toFixed(2));
 /** Pictures made by an image model are png/jpg/webp; diagrams drawn by Mnemosyne itself are svg. */
+/** The portal's logo as a PNG for the PDF cover (the asset is a WebP; converted once). null = no logo, the PDF is still built. */
+let pdfLogoCache: Promise<Buffer | null> | null = null;
+const pdfLogo = () => (pdfLogoCache ??= toPdfImage({ bytes: Buffer.from(LOGO_WEBP_BASE64, 'base64'), mime: 'image/webp' }));
 const DIAGRAM_MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp', svg: 'image/svg+xml' };
 const DOCS_SESSION_TTL_S = 30 * 24 * 3600;
 const MEMBER_FRESH_MS = 12 * 3600 * 1000;
@@ -856,6 +859,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         noteCount: wiki.noteCount ?? 0,
         markdown,
         diagrams: pics,
+        logo: (await pdfLogo()) ?? undefined,
       });
       const meta: DocMeta = await docStore!.save({ kind: 'pdf', project: g.project, model: wiki.model, by: g.ds.s.u, basedOn: wiki.id, diagram: pics.length ? diagram?.id : undefined, noteCount: wiki.noteCount, ext: 'pdf' }, pdf);
       void rec(req, { event: 'create', entityType: 'docs_pdf', entityId: meta.id, entityName: g.project, user: g.ds.s.u, description: `Project PDF built from the article of ${wiki.generatedAt.slice(0, 16).replace('T', ' ')} UTC${pics.length ? ` with ${pics.length === 1 ? 'the workflow diagram' : `${pics.length} diagram pages`}` : ''}` });

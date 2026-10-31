@@ -25,6 +25,8 @@ export interface PdfInput {
     vector?: { width: number; height: number; draw: (doc: InstanceType<typeof PDFDocument>, x: number, y: number, scale: number) => void };
     caption: string;
   }[];
+  /** The logo (PNG) for the right side of the cover's purple band; none = no logo. */
+  logo?: Buffer;
   /** Tests turn compression off to read the text streams. */
   compress?: boolean;
 }
@@ -164,8 +166,17 @@ export function buildPdf(input: PdfInput): Promise<Buffer> {
   // ---- cover ----
   doc.rect(0, 0, doc.page.width, 190).fill(COLOURS.violet);
   doc.rect(0, 190, doc.page.width, 6).fill(COLOURS.teal);
-  doc.fillColor('#ffffff').font('Helvetica').fontSize(13).text('MNEMOSYNE', M.left, 70, { characterSpacing: 4 });
-  doc.fontSize(11).text('Self-hosted AI team memory', M.left, 92);
+  // the name is spelled Mnemosyne (not spaced capitals); the logo sits in the right side of the purple band
+  doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(34).text('Mnemosyne', M.left, 66, { lineBreak: false });
+  doc.font('Helvetica').fontSize(13).text('Self-hosted AI team memory', M.left, 112, { lineBreak: false });
+  if (input.logo) {
+    const logoW = 124;
+    try {
+      doc.image(input.logo, doc.page.width - M.right - logoW, 33, { width: logoW });
+    } catch (err) {
+      console.error('pdf: the cover logo could not be drawn:', (err as Error).message); // never stops the PDF
+    }
+  }
   doc.fillColor(COLOURS.ink).font('Helvetica-Bold').fontSize(34).text(pdfText(input.title), M.left, 250, { width: W });
   doc.moveDown(0.4).font('Helvetica').fontSize(17).fillColor(COLOURS.teal).text('Project documentation', { width: W });
   doc.moveDown(2).fontSize(11).fillColor(COLOURS.muted);
