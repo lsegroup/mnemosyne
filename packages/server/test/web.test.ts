@@ -635,7 +635,11 @@ describe('web portal', () => {
       const detail = /<a class="pic sub" href="([^"]+\/diagram\/\d{8}T\d{6}Z\/1)"/.exec(after)?.[1];
       expect(detail).toBeTruthy();
       expect(after).toContain('Detail pictures · click to enlarge');
-      expect(after).toContain('.side>*{flex-shrink:0}'); // a tall right column scrolls; its cards are never squashed and clipped (owner report 2026-10-31)
+      // Wikipedia layout (owner demand 2026-10-31): ONE scrollbar - the info box floats at the top right and the text flows around it;
+      // no sticky column, no height cap, no inner scrolling
+      expect(after).toContain('.side{float:right;width:310px;');
+      expect(after).not.toMatch(/\.side\{[^}]*(position:sticky|max-height|overflow)/);
+      expect(after).toContain('.wp article{display:flow-root}'); // the article card contains the float
       expect(after).toContain('<span>Sign-in and security</span>');
       const dres = await fetch(`${new URL(base).origin}${detail}`, { headers: { cookie: admin } });
       expect(dres.status).toBe(200);
@@ -648,7 +652,8 @@ describe('web portal', () => {
       expect((await fetch(`${new URL(base).origin}${src}`, { redirect: 'manual' })).status).toBe(302); // not signed in
 
       // layout: article left, infobox card right with the small clickable diagram, rule, then the change history
-      expect(after).toMatch(/<div class="wp"><div class="main"><article>[\s\S]*<\/article><hr class="rule"><section class="hist"><h2 id="h-change-history">Change history<\/h2>[\s\S]*<\/section><\/div><aside class="side">/);
+      // the box comes FIRST inside the article card (a float sits at the top only if it comes first), then the text; the change history follows the card
+      expect(after).toMatch(/<div class="wp"><div class="main"><article><aside class="side"><div class="card">[\s\S]*<\/aside>[\s\S]*<\/article><hr class="rule"><section class="hist"><h2 id="h-change-history">Change history<\/h2>[\s\S]*<\/section><\/div><\/div>/);
       expect(after).toMatch(/<aside class="side"><div class="card">[\s\S]*<a class="pic" id="pic" href="[^"]*\/p\/alpha\/diagram\/[^"]*"[\s\S]*click to enlarge/);
       expect(after).toContain('id="lightbox"');
       expect(after).toMatch(/<nav class="card contents"><strong>Contents<\/strong>[\s\S]*href="#h-change-history"/);

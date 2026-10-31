@@ -823,12 +823,12 @@ const HOME_CSS = `
 .toc{padding:14px 18px;border:1px solid var(--line);border-radius:12px;background:var(--panel2);max-width:420px}
 .toc strong{color:var(--teal)}.toc ol,.toc ul{margin:6px 0 0;padding-left:18px}.toc li{margin:2px 0;font-size:14px}.toc a{color:var(--text);text-decoration:none}.toc a:hover{color:var(--teal)}
 .toc ul{padding-left:16px;list-style:circle;color:var(--muted)}
-.wp{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:28px;align-items:start;margin-top:18px}
-@media(max-width:900px){.wp{grid-template-columns:minmax(0,1fr)}}
-.side{position:sticky;top:16px;display:flex;flex-direction:column;gap:16px;max-height:calc(100vh - 32px);overflow:auto}
-/* the cards never shrink to fit the window (overflow:hidden would let a flex item be squashed and clipped): a tall column scrolls instead */
-.side>*{flex-shrink:0}
-@media(max-width:900px){.side{position:static;max-height:none;order:-1}}
+.wp{margin-top:18px}
+/* Wikipedia layout, ONE scrollbar (the page's): the info box floats at the top right INSIDE the article card and the text flows around it,
+   then continues over the full width below it. No sticky column, no inner scrollbar. */
+.wp article{display:flow-root}
+.side{float:right;width:310px;margin:0 0 18px 26px;display:flex;flex-direction:column;gap:16px;line-height:1.5}
+@media(max-width:900px){.side{float:none;width:auto;margin:0 0 18px}}
 .card{border:1px solid var(--line);border-radius:12px;background:var(--panel2);overflow:hidden}
 .contents{padding:12px 16px 14px}.contents strong{color:var(--title);font:600 16px/1.2 "Palatino Linotype","Book Antiqua",Palatino,Georgia,serif}.contents ol,.contents ul{margin:8px 0 0;padding-left:18px}.contents li{margin:3px 0;font-size:13.5px}.contents ul{list-style:circle;color:var(--muted)}.contents a{color:var(--text);text-decoration:none}.contents a:hover{color:var(--teal)}
 .card h3{margin:0;padding:11px 14px;text-align:center;font:600 18px/1.2 "Palatino Linotype","Book Antiqua",Palatino,Georgia,serif;color:var(--title);border-bottom:1px solid var(--line)}
@@ -903,7 +903,7 @@ export function projectHome(v: ProjectHomeView): string {
   const article = v.wiki
     ? `<div class="banner"><span><b>Documentation</b> generated <b>${esc(when(v.wiki.meta.generatedAt))}</b></span><span>by ${esc(v.wiki.meta.model)}</span><span>from ${v.wiki.meta.noteCount ?? '?'} project notes</span></div>
 ${v.wikiVersions.length > 1 ? `<p class="versions">Other versions: ${v.wikiVersions.slice(0, 8).map((m, i) => (m.id === v.wiki!.meta.id ? `<b>${esc(when(m.generatedAt))}</b>` : `<a href="${base}/p/${enc}?v=${esc(m.id)}">${esc(when(m.generatedAt))}${i === 0 ? ' (latest)' : ''}</a>`)).join(' · ')}</p>` : ''}
-<div class="wp"><div class="main"><article>${v.wiki.html}</article>${hist}</div>${card}</div>
+<div class="wp"><div class="main"><article>${card}${v.wiki.html}</article>${hist}</div></div>
 ${v.diagram ? `<div id="lightbox" hidden><img alt="Workflow diagram of ${esc(v.project)}"></div>` : ''}`
     : `<div class="blank"><strong>No documentation has been generated yet</strong><span>${v.isAdmin ? 'Use “Generate documentation” to write the project page from all its notes.' : 'An administrator can generate it from the project notes.'}</span></div>`;
 
