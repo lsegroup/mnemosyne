@@ -6,8 +6,9 @@
  * Cost: billed per token by the provider. Meta's list price for muse-spark-1.3 is $1.25 per million
  *   input tokens and $4.25 per million output tokens (muse-spark-1.3-contributor $0.10 / $0.20 but it
  *   trains on inputs; muse-wonder-1.0 $4.00 / $20.00). Every call reports its token usage.
- * Called only from the documentation generator, only after an administrator pressed a button and
- *   confirmed the cost estimate. Nothing in Mnemosyne calls a model on its own.
+ * Called only from the documentation generator (web.ts), and only in one of two ways: after an administrator pressed a
+ *   button and confirmed the cost estimate, or by the Auto scheduler (auto.ts) on a schedule that an administrator agreed to
+ *   in the popup of Admin -> Auto, bound to that exact setup and to a dollar limit per run. Nothing else calls a model.
  */
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';

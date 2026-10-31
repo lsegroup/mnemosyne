@@ -15,6 +15,8 @@ import { modelsUrl, parseModelIds } from '../src/llm-models.js';
 import { MnemosyneService } from '../src/service.js';
 import { deriveKeys, hashPassword, open, seal, signToken, verifyPassword, verifyToken } from '../src/secrets.js';
 import { SettingsStore } from '../src/settings-store.js';
+import { AutoStore } from '../src/auto.js';
+import { DocStore } from '../src/docgen.js';
 import { createWebPortal } from '../src/web.js';
 import { adminPage } from '../src/web-pages.js';
 import { renderMarkdown } from '../src/markdown.js';
@@ -226,7 +228,9 @@ describe('web portal', () => {
     webCfg = cfg;
     portalApp = express();
     portalApp.use(express.json());
-    portalApp.use(cfg.http.basePath, createWebPortal(cfg).router);
+    const built = createWebPortal(cfg);
+    autoRunner = built.auto;
+    portalApp.use(cfg.http.basePath, built.router);
     base = `${origin}${cfg.http.basePath}`;
   });
 
@@ -237,6 +241,7 @@ describe('web portal', () => {
   });
 
   let webCfg: ReturnType<typeof loadConfig>;
+  let autoRunner: ReturnType<typeof createWebPortal>['auto'];
 
   const cookiesOf = (res: Response) =>
     res.headers.getSetCookie().map((c) => c.split(';')[0]!).filter((c) => !c.endsWith('=')).join('; ');
@@ -1024,6 +1029,124 @@ describe('web portal', () => {
       expect(audit.some((e) => e.event === 'denied' && /daily limit/.test(e.description))).toBe(true);
       expect(audit.some((e) => e.event === 'denied' && /no valid agreement/.test(e.description))).toBe(true);
     });
+
+    it('Auto: new tabs; no schedule without the agreement; it updates only what changed, within its own dollar limit, beside the daily cap', async () => {
+      const adminArea = cookiesOf(await signIn('admin-code', '/admin'));
+      const h = { cookie: adminArea, 'content-type': 'application/json', 'x-requested-with': 'mnemosyne-admin' };
+      const get = (path: string) => fetch(`${base}/admin/api${path}`, { headers: h });
+      const send = (method: string, path: string, body: object) => fetch(`${base}/admin/api${path}`, { method, headers: h, body: JSON.stringify(body) });
+      const store = new ProviderStore(join(tmp, '.mnemosyne', 'providers.enc'), deriveKeys(SECRET).enc);
+
+      // the menu: LLM, Auto, SSO, Audit, License; License is a blank page (its heading only)
+      const page = await (await fetch(`${base}/admin/`, { headers: h })).text();
+      const order = ['llm', 'auto', 'sso', 'audit', 'license'].map((t) => page.indexOf(`data-tab="${t}"`));
+      expect(order.every((i) => i > 0)).toBe(true);
+      expect([...order].sort((a, b) => a - b)).toEqual(order);
+      expect(page).toMatch(/<section id="tab-license" class="tab" hidden>\s*<h2>License<\/h2>\s*<\/section>/);
+      expect(page).toContain('id="tab-auto"');
+
+      // closed to anonymous visitors and to calls from other sites
+      expect((await fetch(`${base}/admin/api/auto`)).status).toBe(401);
+      expect((await fetch(`${base}/admin/api/auto/switch`, { method: 'PUT', headers: { cookie: adminArea, 'content-type': 'application/json' }, body: '{}' })).status).toBe(403);
+
+      const config = { schedule: { mode: 'weekly', days: [6], time: '02:00', tz: 'UTC' }, projects: ['alpha'], text: false, charts: true, limitUsd: '5' };
+      // a model without a list price: the dollar limit could not be enforced, so nothing can be agreed
+      const unpriced = await send('POST', '/auto/estimate', { config });
+      expect(unpriced.status).toBe(400);
+      expect((await unpriced.json()).error).toContain('list price');
+      // bad input is explained
+      expect((await send('POST', '/auto/estimate', { config: { ...config, projects: [] } })).status).toBe(400);
+
+      // a priced model for Text
+      const text = (await store.list()).assignments.text!;
+      await store.setModels(text.providerId, ['text-model', 'image-model', 'muse-spark-1.3', 'muse-spark-1.2']);
+      const assign = (model: string) => store.setAssignments({ text: { providerId: text.providerId, model }, image: { providerId: text.providerId, model: 'image-model' } });
+      await assign('muse-spark-1.3');
+
+      const est = await (await send('POST', '/auto/estimate', { config })).json();
+      const agree = Object.fromEntries(est.agree as string[][]);
+      expect(agree['Provider / model']).toBe('Fake AI / muse-spark-1.3');
+      expect(agree.Creates).toBe('AI flow charts, only for projects whose notes changed');
+      expect(agree['Your spending limit']).toBe('a run stops at $5.00 → at most $25.00 a month (5 runs)');
+      expect(Object.fromEntries(est.live as string[][])['Worst case of one run']).toMatch(/^at most \$/);
+
+      // the server only saves a setup together with the agreement to exactly that setup
+      for (const token of [undefined, 'garbage']) expect((await send('PUT', '/auto', { config, token })).status).toBe(403);
+      expect((await send('PUT', '/auto', { config: { ...config, limitUsd: '500' }, token: est.token })).status).toBe(403); // the agreement was for another limit
+      expect((await (await get('/auto')).json()).config).toBeNull();
+
+      const saved = await send('PUT', '/auto', { config, token: est.token });
+      expect(saved.status).toBe(200);
+      const view = await saved.json();
+      expect(view.config).toMatchObject({ enabled: true, projects: ['alpha'], text: false, charts: true, limitUsd: 5, agreement: { by: 'store' } });
+      expect(view.agreementOk).toBe(true);
+      expect(new Date(view.nextRunAt).getUTCDay()).toBe(6); // a Saturday, 02:00 UTC
+      expect(view.nextRunAt).toMatch(/T02:00:00\.000Z$/);
+      expect((await send('PUT', '/auto', { config, token: est.token })).status).toBe(403); // an agreement is used once
+      // what the list shows: alpha's article is current but its charts are older; the others have no article
+      type Row = { project: string; hasArticle: boolean; textDue: boolean; chartsDue: boolean; detail: string; est: { textTypical: number; textWorst: number } };
+      const by = Object.fromEntries((view.projects as Row[]).map((p) => [p.project, p])) as Record<string, Row>;
+      expect(by.alpha).toMatchObject({ hasArticle: true, textDue: false, chartsDue: true, detail: 'charts older than the article' });
+      expect(by.beta).toMatchObject({ hasArticle: false, textDue: true, detail: 'no article yet' });
+      expect(by.alpha.est.textWorst).toBeGreaterThan(by.alpha.est.textTypical);
+
+      // the time comes: only the charts of alpha (the article is current, text is not ticked), and the daily cap of people does not stop it
+      const auto = new AutoStore(webCfg.web.autoFile);
+      const due = () => auto.update((s) => void (s.nextRunAt = new Date(Date.now() - 60_000).toISOString()));
+      const before = calls.chat;
+      await due();
+      await autoRunner!.tick();
+      expect(calls.chat - before).toBe(1);
+      const st1 = await (await get('/auto/status')).json();
+      expect(st1.run).toBeNull();
+      expect(st1.runs[0]).toMatchObject({ status: 'completed', updated: ['alpha'], failed: [], notReached: [] });
+      expect(st1.runs[0].usd).toBeGreaterThan(0);
+      expect(st1.runs[0].inputTokens).toBe(1200);
+      const docs = new DocStore(webCfg.web.docsDir);
+      const [diagram, article] = [await docs.latest('alpha', 'diagram'), await docs.latest('alpha', 'wiki')];
+      expect(diagram!.basedOn).toBe(article!.id);
+      expect(diagram!.by).toBe('auto (agreed by store)');
+      expect(new Date(st1.nextRunAt).getUTCDay()).toBe(6);
+
+      // nothing is due now: alpha is up to date, so the next run finds nothing to do and calls no model
+      await due();
+      await autoRunner!.tick();
+      expect(calls.chat - before).toBe(1);
+      expect((await (await get('/auto/status')).json()).runs[0]).toMatchObject({ status: 'nothing', unchanged: ['alpha'] });
+
+      // the audit trail: the agreement, every automatic call as its own event; the people's daily count is untouched
+      await new Promise((r) => setTimeout(r, 250));
+      const audit = (await readFile(join(tmp, '.mnemosyne', 'audit.jsonl'), 'utf8')).split('\n').filter(Boolean).map((l) => JSON.parse(l));
+      expect(audit.filter((e) => e.event === 'ai_start')).toHaveLength(3);
+      expect(audit.filter((e) => e.event === 'auto_start')).toHaveLength(1);
+      expect(audit.find((e) => e.event === 'auto_agree').description).toContain('Agreed to automatic AI use');
+      expect(audit.some((e) => e.event === 'denied' && e.entityType === 'auto')).toBe(true);
+      expect(audit.filter((e) => e.event === 'auto_run').length).toBeGreaterThanOrEqual(4);
+
+      // the model changes after the agreement: the schedule pauses, makes no call, and cannot be switched on until it is agreed again
+      await assign('muse-spark-1.2');
+      await due();
+      await autoRunner!.tick();
+      expect(calls.chat - before).toBe(1);
+      const paused = await (await get('/auto/status')).json();
+      expect(paused.pausedReason).toContain('no longer matches');
+      const refused = await send('PUT', '/auto/switch', { enabled: true });
+      expect(refused.status).toBe(409);
+      expect((await refused.json()).error).toContain('agree again');
+
+      // the kill switch: off needs nothing; on again once the setup fits the agreement
+      const off = await (await send('PUT', '/auto/switch', { enabled: false })).json();
+      expect(off.config.enabled).toBe(false);
+      expect(off.nextRunAt).toBeNull();
+      await due();
+      await autoRunner!.tick();
+      expect(calls.chat - before).toBe(1);
+      await assign('muse-spark-1.3');
+      const on = await (await send('PUT', '/auto/switch', { enabled: true })).json();
+      expect(on.config.enabled).toBe(true);
+      expect(on.agreementOk).toBe(true);
+      expect(new Date(on.nextRunAt).getTime()).toBeGreaterThan(Date.now());
+    });
   });
 
   it('keeps the two sign-in systems apart: a public GitLab session never opens admin', async () => {
@@ -1382,11 +1505,116 @@ describe('admin page script', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(missing).toEqual([]);
     for (const form of ['form', 'job-text', 'job-image', 'job-pdf', 'ssoForm']) expect(typeof els.get(form)!.handlers.submit).toBe('function');
-    for (const btn of ['auditRefresh', 'cancel']) expect(typeof els.get(btn)!.handlers.click).toBe('function');
+    for (const btn of ['auditRefresh', 'cancel', 'autoSave', 'autoGo', 'autoCancel', 'autoAll', 'autoNone', 'autoChanged']) expect(typeof els.get(btn)!.handlers.click).toBe('function');
+    expect(typeof els.get('autoOn')!.handlers.change).toBe('function'); // the kill switch
+    expect(els.get('tab-auto')!.hidden).toBe(true); // the Auto and License tabs exist and stay closed until chosen
+    expect(els.get('tab-license')!.hidden).toBe(true);
     expect(els.has('auditPager')).toBe(true); // numbered pages, 10 events each
     expect(html).not.toContain('Load more');
     expect(els.get('tab-audit')!.hidden).toBe(false); // #audit opens the Audit tab
     expect(els.get('tab-llm')!.hidden).toBe(true);
+  });
+});
+
+describe('the Auto tab script', () => {
+  it('lists the projects, selects them, shows the cost, asks for the agreement and saves only after it', async () => {
+    const html = adminPage({ basePath: '/mnemosyne', nonce: 'n', user: { name: 'A', username: 'a' }, redirectUris: [] });
+    const js = /<script nonce="n">([\s\S]*?)<\/script>/.exec(html)![1]!;
+    const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]!);
+    type El = Record<string, unknown> & { handlers: Record<string, () => void>; children: { className: string }[]; textContent: string; hidden: boolean; disabled: boolean; checked: boolean };
+    const make = (id: string): El => {
+      const el = {
+        id, handlers: {}, style: {}, hidden: false, className: '', textContent: '', value: '', disabled: false, checked: false, placeholder: '', children: [],
+        appendChild(c: unknown) { el.children.push(c as never); return c; },
+        addEventListener(type: string, fn: () => void) { el.handlers[type] = fn; },
+        scrollIntoView() {}, getAttribute: () => 'auto', reset() {},
+      } as unknown as El;
+      return el;
+    };
+    const els = new Map(ids.map((id) => [id, make(id)]));
+    const missing: string[] = [];
+    const projects = [
+      { project: 'alpha', glPath: 'grp/alpha', notes: 12, lastArticle: '2026-10-29T17:00:00.000Z', hasArticle: true, textDue: true, chartsDue: true, detail: '3 notes new or changed', est: null },
+      { project: 'beta', glPath: null, notes: 4, lastArticle: null, hasArticle: false, textDue: true, chartsDue: true, detail: 'no article yet', est: null },
+      { project: 'gamma', glPath: 'grp/gamma', notes: 9, lastArticle: '2026-10-30T10:00:00.000Z', hasArticle: true, textDue: false, chartsDue: false, detail: 'up to date', est: null },
+    ];
+    const view = (config: object | null) => ({ config, projects, runs: [], run: null, nextRunAt: config ? '2026-11-07T02:00:00.000Z' : null, pausedReason: null, enabled: Boolean(config), agreementOk: Boolean(config), model: { label: 'Fake / m', priced: true } });
+    const sent: { method: string; path: string; body: Record<string, unknown> }[] = [];
+    const fetchStub = async (url: string, init?: { method?: string; body?: string }) => {
+      const path = url.replace('/mnemosyne/admin/api', '');
+      const method = init?.method ?? 'GET';
+      const body = init?.body ? (JSON.parse(init.body) as Record<string, unknown>) : {};
+      sent.push({ method, path, body });
+      let payload: object = {};
+      if (path === '/auto' && method === 'GET') payload = view(null);
+      else if (path === '/auto/estimate') payload = { live: [['Model for TEXT and charts', 'Fake / m']], agree: [['Schedule', 'every Saturday and Sunday at 02:00 UTC']], token: 'tok' };
+      else if (path === '/auto' && method === 'PUT') payload = view({ enabled: true, schedule: (body.config as { schedule: object }).schedule, projects: (body.config as { projects: string[] }).projects, known: ['alpha', 'beta', 'gamma'], text: true, charts: true, limitUsd: 10, agreement: { by: 'a', at: 'x', key: 'k' } });
+      else if (path === '/auto/switch') payload = { ...view({ enabled: (body as { enabled: boolean }).enabled, schedule: { mode: 'weekly', days: [6, 0], time: '02:00', tz: 'UTC' }, projects: [], known: ['alpha', 'beta', 'gamma'], text: true, charts: true, limitUsd: 10 }) };
+      return { status: 200, ok: true, json: async () => payload };
+    };
+    const sandbox = {
+      document: { getElementById: (id: string) => els.get(id) ?? (missing.push(id), null), createElement: () => make('new'), querySelectorAll: () => [make('a')], querySelector: () => make('r') },
+      window: { addEventListener() {} }, location: { hash: '#auto', href: '' }, fetch: fetchStub, confirm: () => true,
+      Intl, Date, setInterval: () => 0, setTimeout, clearTimeout, encodeURIComponent,
+    };
+    new Script(js).runInContext(createContext(sandbox));
+    const settle = () => new Promise((r) => setTimeout(r, 60));
+    await settle();
+    expect(missing).toEqual([]);
+    const get = (id: string) => els.get(id)!;
+
+    // opened: the saved setup is empty, so the defaults show (Saturday and Sunday, 02:00, both ticked) and the three projects are listed
+    expect(sent[0]).toMatchObject({ method: 'GET', path: '/auto' });
+    expect(get('tab-auto').hidden).toBe(false);
+    expect(get('autoRows').children).toHaveLength(3);
+    expect(get('autoDays').children.map((d) => d.className)).toEqual(['day', 'day', 'day', 'day', 'day', 'day on', 'day on']); // Mon ... Sat, Sun
+    expect(get('autoOnText').textContent).toBe('Automatic update is OFF');
+    expect(get('autoNext').textContent).toContain('Not set up yet');
+    expect(get('autoCount').textContent).toBe('0 of 3 selected · 0 have changes · 0 have no article yet');
+    expect(get('autoLimit').value).toBe('10.00');
+
+    // the selection buttons
+    get('autoChanged').handlers.click!();
+    expect(get('autoCount').textContent).toBe('2 of 3 selected · 2 have changes · 1 have no article yet'); // alpha changed, beta has no article, gamma is up to date
+    get('autoNone').handlers.click!();
+    expect(get('autoCount').textContent).toBe('0 of 3 selected · 0 have changes · 0 have no article yet');
+    get('autoAll').handlers.click!();
+    expect(get('autoCount').textContent).toBe('3 of 3 selected · 2 have changes · 1 have no article yet');
+
+    // "Save schedule…" asks the server for the estimate and shows the agreement popup; saving is impossible until it is ticked
+    get('autoSave').handlers.click!();
+    await settle();
+    const est = sent.filter((c) => c.path === '/auto/estimate').pop()!;
+    expect(est.body.config).toEqual({ schedule: { mode: 'weekly', days: [0, 6], date: '', time: '02:00', tz: 'UTC' }, projects: ['alpha', 'beta', 'gamma'], text: true, charts: true, limitUsd: '10.00' });
+    expect(get('autoModal').hidden).toBe(false);
+    expect(get('autoModalFacts').children.length).toBeGreaterThan(0);
+    expect(get('autoGo').disabled).toBe(true);
+    get('autoAgree').checked = true;
+    get('autoAgree').handlers.change!();
+    expect(get('autoGo').disabled).toBe(false);
+
+    // agreeing sends the setup together with the agreement token, and the switch shows ON
+    get('autoGo').handlers.click!();
+    await settle();
+    const put = sent.filter((c) => c.method === 'PUT' && c.path === '/auto').pop()!;
+    expect(put.body.token).toBe('tok');
+    expect(get('autoModal').hidden).toBe(true);
+    expect(get('autoMsg').textContent).toContain('Saved and agreed');
+    expect(get('autoOnText').textContent).toBe('Automatic update is ON');
+    expect(get('autoNext').children.map((c) => (c as { textContent: string }).textContent).join(' ')).toContain('Next run:');
+
+    // the kill switch
+    get('autoOn').checked = false;
+    get('autoOn').handlers.change!();
+    await settle();
+    expect(sent.filter((c) => c.path === '/auto/switch').pop()!.body).toEqual({ enabled: false });
+    expect(get('autoOnText').textContent).toBe('Automatic update is OFF');
+
+    // cancelling the popup sends nothing
+    const puts = sent.filter((c) => c.method === 'PUT').length;
+    get('autoCancel').handlers.click!();
+    expect(get('autoModal').hidden).toBe(true);
+    expect(sent.filter((c) => c.method === 'PUT').length).toBe(puts);
   });
 });
 

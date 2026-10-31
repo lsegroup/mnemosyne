@@ -77,7 +77,9 @@ export interface MnemosyneConfig {
     auditFile: string;
     /** Generated project documentation (articles, diagrams, PDFs), kept with their date stamps. */
     docsDir: string;
-    /** Spending guard: most AI generation runs allowed per UTC day, across all projects. */
+    /** The Auto tab: schedule, selection, agreement and the list of runs (no secrets in it). */
+    autoFile: string;
+    /** Spending guard: most AI generation runs a PERSON may start per UTC day, across all projects (automatic runs have their own dollar limit). */
     aiDailyLimit: number;
     /**
      * Built-in admin account so the portal can be configured before (or without) GitLab SSO.
@@ -154,6 +156,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, repoOverride?: 
       membersFile: resolve(env.MNEMOSYNE_MEMBERS_FILE ?? `${dirname(dbPath)}/members.enc`),
       auditFile: resolve(env.MNEMOSYNE_AUDIT_FILE ?? `${dirname(dbPath)}/audit.jsonl`),
       docsDir: resolve(env.MNEMOSYNE_DOCS_DIR ?? `${dirname(dbPath)}/docs`),
+      autoFile: resolve(env.MNEMOSYNE_AUTO_FILE ?? `${dirname(dbPath)}/auto.json`),
       aiDailyLimit: int(env.MNEMOSYNE_AI_DAILY_LIMIT, 20),
       localAdmin: {
         user: env.MNEMOSYNE_LOCAL_ADMIN_USER,

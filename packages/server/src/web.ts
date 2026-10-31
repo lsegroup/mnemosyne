@@ -16,6 +16,7 @@ import { DocStore, approxTokens, buildDiagramPlanPrompt, buildWikiPrompt, change
 import { chat } from './llm-call-chat.js';
 import { PlanError, drawScene, layout, parsePlanSet, renderSvg, type DiagramPlan, type DiagramSet } from './diagram.js';
 import { buildPdf, type PdfInput } from './pdf.js';
+import { AutoRunner, AutoStore, AutoValidationError, agreementKey, describeSchedule, inspectProject, nextRun, noteHashes, parseAutoInput, summarize, type AutoConfig, type ProjectEstimate } from './auto.js';
 import { LOGO_WEBP_BASE64 } from './web-assets.js';
 
 // Two independent sign-in systems: the public page (cookie below) and the admin area
@@ -75,6 +76,18 @@ export interface WebPortal {
   router: Router;
   /** Provider settings store; null while the portal is not configured. */
   providers: ProviderStore | null;
+  /** The Auto scheduler (Admin -> Auto); null while the portal is not configured. */
+  auto: AutoRunner | null;
+}
+
+/** An admin API answer with its own status (the others are 400 for bad input). */
+class AdminHttpError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
 }
 
 /** Everything the portal needs to be switched on; any gap leaves it in "not configured". */
@@ -725,19 +738,23 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
 
   const stripFence = (t: string) => t.trim().replace(/^```(?:markdown|md)?\n([\s\S]*?)\n```$/i, '$1').trim();
 
-  const runJob = async (project: string, kind: 'wiki' | 'diagram', user: string, ip: string, glName: string | null) => {
-    const started = Date.now();
+  /**
+   * ONE AI job for one project: builds the prompt, makes the ONE model call, stores the result. Used by the page buttons (after the
+   * person agreed in the popup) and by the Auto scheduler (after an administrator agreed to the schedule). Throws when it fails.
+   */
+  const generate = async (project: string, kind: 'wiki' | 'diagram', user: string, glName: string | null, log: (e: AuditInput) => unknown) => {
     let warning: string | undefined;
-    jobs.set(project, { kind, state: 'running', startedAt: started });
-    const log = (e: AuditInput) => audit?.log({ ip, user, entityType: `docs_${kind}`, entityName: project, ...e });
-    try {
+    let used = { inputTokens: 0, outputTokens: 0 };
+    {
       const text = (await providers!.getAssigned('text'))!;
       if (kind === 'wiki') {
         const tj = effectiveJob('text', (await providers!.getJobs()).text);
-        const prompt = buildWikiPrompt(project, glName, await nodeIndex!.inProject(project), { system: tj.systemPrompt, user: tj.userPrompt });
+        const notes = await nodeIndex!.inProject(project);
+        const prompt = buildWikiPrompt(project, glName, notes, { system: tj.systemPrompt, user: tj.userPrompt });
         const out = await chat(text.provider, text.model, prompt.system, prompt.user, { maxTokens: tj.maxTokens, temperature: tj.temperature, topP: tj.topP, timeoutMs: tj.timeoutMinutes * 60_000 });
+        used = out;
         const meta = await docStore!.save(
-          { kind: 'wiki', project, model: `${text.provider.label} / ${text.model}`, by: user, noteCount: prompt.noteCount, inputTokens: out.inputTokens, outputTokens: out.outputTokens, ext: 'md' },
+          { kind: 'wiki', project, model: `${text.provider.label} / ${text.model}`, by: user, noteCount: prompt.noteCount, noteHashes: noteHashes(notes), inputTokens: out.inputTokens, outputTokens: out.outputTokens, ext: 'md' },
           redact(stripFence(out.text)),
         );
         const missing = missingSections(out.text);
@@ -750,6 +767,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         const ij = effectiveJob('image', (await providers!.getJobs()).image);
         const ask = buildDiagramPlanPrompt(project, wikiText, { system: ij.systemPrompt, user: ij.userPrompt });
         const out = await chat(text.provider, text.model, ask.system, ask.user, { maxTokens: ij.maxTokens, temperature: ij.temperature, topP: ij.topP, timeoutMs: ij.timeoutMinutes * 60_000 });
+        used = out;
         let set: DiagramSet;
         try {
           set = parsePlanSet(out.text, glName ?? project);
@@ -773,10 +791,26 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
           description: `Architecture diagrams drawn by Mnemosyne from a plan written by ${text.model} (${set.pictures.length} picture${set.pictures.length > 1 ? 's' : ''}: ${set.pictures.map((p) => p.name).join(', ')}; ${boxes} boxes, ${arrows} arrows; ${out.inputTokens} tokens in, ${out.outputTokens} out)${set.dropped.length ? `; left out of the plan: ${set.dropped.length}` : ''}`,
         });
       }
-      jobs.set(project, { kind, state: 'done', startedAt: started, warning });
+      return { inputTokens: used.inputTokens, outputTokens: used.outputTokens, usd: estimateText(text.model, used.inputTokens, used.outputTokens).usd, warning };
+    }
+  };
+
+  /** What the person (or the run list) is told when a job fails; unexpected errors go to the server log only. */
+  const failureMessage = (err: unknown, kind: string, project: string) => {
+    if (!(err instanceof ProviderValidationError)) console.error(`docs ${kind} job for ${project} failed:`, err);
+    return err instanceof ProviderValidationError ? err.message : 'The generation failed unexpectedly.';
+  };
+
+  /** A job started by a person: runs in the background, the page polls its state. */
+  const runJob = async (project: string, kind: 'wiki' | 'diagram', user: string, ip: string, glName: string | null) => {
+    const started = Date.now();
+    jobs.set(project, { kind, state: 'running', startedAt: started });
+    const log = (e: AuditInput) => audit?.log({ ip, user, entityType: `docs_${kind}`, entityName: project, ...e });
+    try {
+      const r = await generate(project, kind, user, glName, log);
+      jobs.set(project, { kind, state: 'done', startedAt: started, warning: r.warning });
     } catch (err) {
-      const msg = err instanceof ProviderValidationError ? err.message : 'The generation failed unexpectedly.';
-      if (!(err instanceof ProviderValidationError)) console.error(`docs ${kind} job for ${project} failed:`, err);
+      const msg = failureMessage(err, kind, project);
       jobs.set(project, { kind, state: 'error', startedAt: started, error: msg });
       void log({ event: 'ai_failed', description: msg });
     }
@@ -795,12 +829,14 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       return void fail400(res, 'The agreement has expired or does not match. Please start again and agree to the estimate.', 403);
     }
     // 2) spending guards
-    if ([...jobs.values()].some((j) => j.state === 'running')) return void fail400(res, 'An AI generation is already running. Please wait for it to finish.', 409);
+    const aiBusy = () => Boolean(autoRunner?.active) || aiRunning();
+    if (aiBusy()) return void fail400(res, autoRunner?.active ? 'An automatic documentation update is running (Admin → Auto). Please wait for it to finish.' : 'An AI generation is already running. Please wait for it to finish.', 409);
     const dayStart = new Date().toISOString().slice(0, 10) + 'T00:00:00.000Z';
     if ((await audit!.countSince(dayStart, 'ai_start')) >= cfg.web.aiDailyLimit) {
       void rec(req, { event: 'denied', entityType: `docs_${kind}`, entityName: g.project, user: g.ds.s.u, description: `AI generation refused: daily limit of ${cfg.web.aiDailyLimit} runs reached` });
       return void fail400(res, `The daily limit of ${cfg.web.aiDailyLimit} AI runs has been reached. It resets at 00:00 UTC.`, 429);
     }
+    if (aiBusy()) return void fail400(res, 'An AI generation is already running. Please wait for it to finish.', 409); // someone else got in while the audit trail was read
     usedConsents.set(c.n, c.exp);
     for (const [n, exp] of usedConsents) if (exp < Date.now() / 1000) usedConsents.delete(n);
     void rec(req, {
@@ -821,6 +857,101 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     res.setHeader('Cache-Control', 'no-store');
     res.json(j ? { state: j.state, kind: j.kind, seconds: Math.round((Date.now() - j.startedAt) / 1000), error: j.error, warning: j.warning } : { state: 'idle' });
   });
+
+  // --------------------------------------------------------------------------
+  // Auto (Admin -> Auto): the scheduler. It runs the very same job code as the page buttons, one project after the other, only for
+  // projects whose notes changed, only after an administrator agreed to the exact setup, and never past the dollar limit of the run.
+  // Its own spending guard is that limit; the daily cap above counts what PEOPLE start ('ai_start'), automatic calls are 'auto_start'.
+  // --------------------------------------------------------------------------
+  const autoStore = keys ? new AutoStore(cfg.web.autoFile) : null;
+
+  /** GitLab projects that signed-in people have told us about (the admin area has no project list of its own): only for a path and a name. */
+  const knownGitLab = (): GitLabProject[] => {
+    const byId = new Map<number, GitLabProject>();
+    for (const m of members.values()) for (const p of m.projects ?? []) byId.set(p.id, p);
+    return [...byId.values()];
+  };
+
+  /** The model for TEXT (it also plans the charts) and everything that decides what a call can cost, as one fingerprint. */
+  const autoModel = async () => {
+    const text = await providers!.getAssigned('text');
+    if (!text) return null;
+    const stored = await providers!.getJobs();
+    const tj = effectiveJob('text', stored.text);
+    const ij = effectiveJob('image', stored.image);
+    return {
+      text,
+      tj,
+      ij,
+      label: `${text.provider.label} / ${text.model}`,
+      priced: estimateText(text.model, 1, 1).usd !== null,
+      key: createHash('sha256').update(JSON.stringify([text.provider.id, text.model, tj, ij])).digest('hex'),
+    };
+  };
+  type AutoModel = NonNullable<Awaited<ReturnType<typeof autoModel>>>;
+
+  /** What a run would do for one project, from the notes and the stored articles: nothing is sent to a model. */
+  const autoState = async (project: string) => {
+    const notes = await nodeIndex!.inProject(project);
+    const wiki = (await docStore!.list(project, 'wiki'))[0] ?? null;
+    const diagram = (await docStore!.list(project, 'diagram'))[0] ?? null;
+    return { notes, wiki, state: inspectProject(project, notes, wiki, diagram) };
+  };
+
+  /** The same plus what its calls would cost (typical and worst case), the way the agreement popup counts them. */
+  const autoFacts = async (project: string, model: AutoModel) => {
+    const { notes, wiki, state } = await autoState(project);
+    const prompt = buildWikiPrompt(project, null, notes, { system: model.tj.systemPrompt, user: model.tj.userPrompt });
+    const m = model.text.model;
+    const planIn = approxTokens(wiki ? Math.min((await docStore!.read(wiki)).length, 60_000) : 40_000) + 1500;
+    const est: ProjectEstimate = {
+      textTypical: estimateText(m, prompt.inputTokens, Math.min(12_000, model.tj.maxTokens)).usd,
+      textWorst: estimateText(m, prompt.inputTokens, model.tj.maxTokens).usd,
+      chartsTypical: estimateText(m, planIn, Math.min(12_000, model.ij.maxTokens)).usd,
+      chartsWorst: estimateText(m, planIn, model.ij.maxTokens).usd,
+    };
+    return { state, est };
+  };
+
+  const aiRunning = () => [...jobs.values()].some((j) => j.state === 'running');
+
+  const autoRunner =
+    keys && autoStore && docStore && nodeIndex
+      ? new AutoRunner({
+          store: autoStore,
+          keyFor: async (c) => {
+            const m = await autoModel();
+            return m?.priced ? agreementKey(c, m.key) : null;
+          },
+          projects: async () => (await nodeIndex.projects()).map((p) => p.project),
+          inspect: async (project) => (await autoState(project)).state,
+          worst: async (project, kind) => {
+            const m = await autoModel();
+            if (!m?.priced) return null;
+            const f = await autoFacts(project, m);
+            return kind === 'wiki' ? f.est.textWorst : f.est.chartsWorst;
+          },
+          generate: async (project, kind, by) => {
+            const started = Date.now();
+            jobs.set(project, { kind, state: 'running', startedAt: started });
+            try {
+              const r = await generate(project, kind, `auto (agreed by ${by})`, matchProject(project, knownGitLab())?.name ?? null, (e) =>
+                audit?.log({ user: 'auto', entityType: `docs_${kind}`, entityName: project, ...e }),
+              );
+              jobs.set(project, { kind, state: 'done', startedAt: started, warning: r.warning });
+              return r;
+            } catch (err) {
+              const msg = failureMessage(err, kind, project);
+              jobs.set(project, { kind, state: 'error', startedAt: started, error: msg });
+              void audit?.log({ event: 'ai_failed', user: 'auto', entityType: `docs_${kind}`, entityName: project, description: msg });
+              throw new Error(msg);
+            }
+          },
+          busy: aiRunning,
+          log: (e) => void audit?.log(e),
+        })
+      : null;
+  autoRunner?.start();
 
   // PDF: no AI, no cost — cover, index, article and the latest diagram.
   router.post('/p/:project/api/pdf', async (req, res) => {
@@ -1078,7 +1209,8 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       try {
         res.json(await fn(req, res));
       } catch (err) {
-        if (err instanceof ProviderValidationError || err instanceof SettingsValidationError) res.status(400).json({ error: err.message });
+        if (err instanceof AdminHttpError) res.status(err.status).json({ error: err.message });
+        else if (err instanceof ProviderValidationError || err instanceof SettingsValidationError || err instanceof AutoValidationError) res.status(400).json({ error: err.message });
         else res.status(500).json({ error: 'internal error' });
       }
     };
@@ -1241,5 +1373,114 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     handle((req) => audit!.list({ q: typeof req.query.q === 'string' ? req.query.q : '', offset: Number(req.query.offset) || 0, limit: Number(req.query.limit) || undefined })),
   );
 
-  return { router, providers };
+  // --- Auto: schedule, project selection, agreement, run list ---
+  const runStatus = async () => {
+    const st = await autoStore!.get();
+    return { enabled: st.config?.enabled ?? false, nextRunAt: st.nextRunAt ?? null, pausedReason: st.pausedReason ?? null, run: st.run ?? null, runs: st.runs };
+  };
+
+  /** Everything the Auto tab shows: the saved setup, the state of every project with notes, the estimates, the runs. */
+  const autoPayload = async () => {
+    const st = await autoStore!.get();
+    const model = await autoModel();
+    const gl = knownGitLab();
+    const projects = await Promise.all(
+      (await nodeIndex!.projects()).map(async (p) => {
+        const f = model ? await autoFacts(p.project, model) : { state: (await autoState(p.project)).state, est: null };
+        const g = matchProject(p.project, gl);
+        return { glPath: g?.fullPath ?? null, ...f.state, est: f.est };
+      }),
+    );
+    return {
+      ...(await runStatus()),
+      config: st.config ?? null,
+      agreementOk: st.config ? await autoRunner!.agreementOk(st.config) : false,
+      model: model ? { label: model.label, priced: model.priced } : null,
+      projects,
+      serverTime: new Date().toISOString(),
+    };
+  };
+
+  /** Checks the submitted setup and works out what it would cost; throws a plain message when it cannot be saved. */
+  const autoPlan = async (body: unknown) => {
+    const model = await autoModel();
+    if (!model) throw new ProviderValidationError('Choose a model for Text in Admin → LLM first.');
+    if (!model.priced) throw new ProviderValidationError(`No list price is known for ${model.text.model}, so a dollar limit cannot be enforced. Choose a priced model for Text in LLM.`);
+    const known = (await nodeIndex!.projects()).map((p) => p.project);
+    const c = parseAutoInput((body as { config?: unknown } | null)?.config, known, new Date());
+    const rows = await Promise.all(c.projects.map((project) => autoFacts(project, model)));
+    return { c, model, summary: summarize(c, rows, model.label), key: agreementKey(c, model.key) };
+  };
+
+  const flatAuto = (c: AutoConfig | undefined): Record<string, unknown> =>
+    c ? { enabled: c.enabled, schedule: describeSchedule(c.schedule), projects: c.projects.join(', '), creates: [c.text ? 'TEXT' : '', c.charts ? 'AI flow charts' : ''].filter(Boolean).join(' + '), limitUsd: c.limitUsd } : {};
+
+  api.get('/auto', handle(autoPayload));
+  api.get('/auto/status', handle(runStatus));
+
+  // Step 4 of the tab: what the setup would cost (free: reads notes only) and the one-time agreement token for saving it.
+  api.post(
+    '/auto/estimate',
+    handle(async (req) => {
+      const p = await autoPlan(req.body);
+      const token = signToken(keys!.sign, { p: 'auto', m: p.key, u: who(req), n: randomBytes(12).toString('base64url'), exp: Math.floor(Date.now() / 1000) + CONSENT_TTL_S });
+      return { live: p.summary.live, agree: p.summary.agree, token };
+    }),
+  );
+
+  // Save the setup. Only with the agreement token of exactly this setup; saving agrees to it and switches the schedule on.
+  api.put(
+    '/auto',
+    handle(async (req) => {
+      const p = await autoPlan(req.body);
+      const c = verifyToken<{ p: string; m: string; u: string; n: string; exp: number }>(keys!.sign, typeof req.body?.token === 'string' ? req.body.token : undefined);
+      if (!c || c.p !== 'auto' || c.m !== p.key || c.u !== who(req) || usedConsents.has(c.n)) {
+        void rec(req, { event: 'denied', entityType: 'auto', entityName: 'Automatic update', user: who(req), description: 'Automatic update refused: no valid agreement (token missing, expired, reused or for a different setup)' });
+        throw new AdminHttpError(403, 'The agreement has expired or does not match this setup. Press “Save schedule…” again and agree.');
+      }
+      if (autoRunner!.active) throw new AdminHttpError(409, 'An automatic run is going. Wait until it has finished before changing the schedule.');
+      usedConsents.set(c.n, c.exp);
+      const before = (await autoStore!.get()).config;
+      const user = who(req);
+      const now = new Date();
+      const saved = await autoStore!.update((s) => {
+        s.config = { ...p.c, enabled: true, agreement: { by: user, at: now.toISOString(), key: p.key } };
+        s.nextRunAt = nextRun(p.c.schedule, now)?.toISOString() ?? null;
+        s.pausedReason = null;
+      });
+      void rec(req, {
+        event: 'auto_agree',
+        entityType: 'auto',
+        entityName: 'Automatic update',
+        user,
+        changes: diffLines(flatAuto(before), flatAuto(saved.config)),
+        description: `Agreed to automatic AI use (${p.summary.agree.map((f) => `${f[0]}: ${f[1]}`).join('; ')})`,
+      });
+      return autoPayload();
+    }),
+  );
+
+  // The kill switch. Off needs nothing; on only when the saved agreement still matches the setup, the model and its limits.
+  api.put(
+    '/auto/switch',
+    handle(async (req) => {
+      const on = req.body?.enabled === true;
+      const st = await autoStore!.get();
+      if (!st.config) throw new AdminHttpError(409, 'Set up the schedule first.');
+      const next = on ? nextRun(st.config.schedule, new Date()) : null;
+      if (on) {
+        if (!(await autoRunner!.agreementOk(st.config))) throw new AdminHttpError(409, 'The agreement does not match the current setup (or no priced model is chosen). Press “Save schedule…” and agree again.');
+        if (!next) throw new AdminHttpError(409, 'The one-time moment is already in the past. Choose a new date and press “Save schedule…”.');
+      }
+      await autoStore!.update((s) => {
+        s.config!.enabled = on;
+        s.nextRunAt = next?.toISOString() ?? null;
+        s.pausedReason = null;
+      });
+      void rec(req, { event: 'update', entityType: 'auto', entityName: 'Automatic update', user: who(req), changes: diffLines({ enabled: st.config.enabled }, { enabled: on }), description: `Automatic update switched ${on ? 'ON' : 'OFF'}` });
+      return autoPayload();
+    }),
+  );
+
+  return { router, providers, auto: autoRunner };
 }

@@ -27,6 +27,8 @@ export interface DocMeta {
   model: string;
   by: string;
   noteCount?: number;
+  /** Wiki only: a fingerprint of every note the article was written from (note id -> hash), so Auto can tell which notes changed since. */
+  noteHashes?: Record<string, string>;
   inputTokens?: number;
   outputTokens?: number;
   /** The wiki version a diagram or PDF was made from. */

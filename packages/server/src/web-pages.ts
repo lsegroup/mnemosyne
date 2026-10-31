@@ -274,7 +274,56 @@ table.audit td.desc{min-width:170px;max-width:280px}
 pre.chg{margin:0;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
 pre.chg .p{color:#6ee7a0}pre.chg .m{color:#ff9a9a}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#a3a8b8}
-@media(max-width:860px){.layout{grid-template-columns:1fr}.side{flex-direction:row;position:static}.job .nums,form.grid{grid-template-columns:1fr}}`;
+.ev.auto_start,.ev.auto_run,.ev.auto_agree{color:#f0c36a;border-color:#6b5320}
+.btn:disabled{opacity:.45;cursor:not-allowed}.btn:disabled:hover{border-color:var(--line)}.btn.primary:disabled:hover{border-color:var(--accent)}
+.between{justify-content:space-between}
+.switch{flex-direction:row;align-items:center;gap:10px;color:var(--text);font-weight:600;font-size:14px;cursor:pointer}
+input.swin{appearance:none;-webkit-appearance:none;width:44px;height:24px;padding:0;border-radius:99px;border:0;background:#2a2e3b;position:relative;cursor:pointer;flex:none}
+input.swin:after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:left .15s}
+input.swin:checked{background:var(--accent)}input.swin:checked:after{left:23px}
+input.cbx{appearance:none;-webkit-appearance:none;width:18px;height:18px;padding:0;border-radius:5px;border:1.5px solid var(--muted);background:transparent;position:relative;cursor:pointer;flex:none}
+input.cbx:checked{background:var(--accent);border-color:var(--accent)}
+input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;height:10px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.when{display:grid;grid-template-columns:1.25fr 1fr;gap:22px}
+.box{border:1px solid var(--line);border-radius:12px;background:var(--panel2);padding:16px 18px;display:flex;flex-direction:column;gap:12px}
+.radio{flex-direction:row;align-items:center;gap:10px;color:var(--text);font-size:14px;font-weight:600;cursor:pointer}
+.radio input{padding:0;width:16px;height:16px;accent-color:var(--accent)}
+.days{display:flex;gap:8px;flex-wrap:wrap;padding-left:26px}
+.day{min-width:56px;text-align:center;padding:8px 0;border-radius:8px;border:1px solid var(--line);background:#0f1117;color:var(--muted);font:inherit;font-weight:600;font-size:13px;cursor:pointer}
+.day.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.fields{display:grid;grid-template-columns:1fr 1.3fr;gap:14px}
+.next{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:10px;border:1px solid #1d5f64;background:#0e1c1f;color:#bfeff2;font-size:14px}
+.next b{color:#fff}
+.hint2{color:var(--muted);font-size:12.5px;line-height:1.5}
+.tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.tools input{flex:1;min-width:220px}
+.count{color:var(--muted);font-size:13px;margin-left:auto}
+.plist{height:330px;overflow-y:scroll;border:1px solid var(--line);border-radius:10px;background:var(--panel2)}
+.plist::-webkit-scrollbar{width:12px}.plist::-webkit-scrollbar-track{background:#0f1117}.plist::-webkit-scrollbar-thumb{background:#3a4052;border-radius:8px;border:2px solid #0f1117}
+.ph,.pr{display:grid;grid-template-columns:40px minmax(190px,1.3fr) minmax(170px,1fr) 90px 130px 250px;align-items:center;padding:9px 14px;gap:8px;border-bottom:1px solid var(--line);font-size:14px}
+.ph{position:sticky;top:0;background:#171a23;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;z-index:1}
+.pr:hover{background:#171b25}.pr .nm{font-weight:600}.pr .pa{color:var(--muted);font-size:13px}
+.pr.none{display:block;color:var(--muted)}
+.st{display:inline-block;padding:1px 9px;border-radius:99px;font-size:12px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.st.chg{color:#f0c36a;border-color:#6b5320;background:#211b0c}.st.new{color:#b3a3ff;border-color:#4b3f94;background:#171335}.st.ok{color:#4ade80;border-color:#1f5a38}
+.what{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.opt{flex-direction:row;display:flex;gap:14px;align-items:flex-start;padding:16px 18px;border:1px solid var(--line);border-radius:12px;background:var(--panel2);cursor:pointer;color:var(--text)}
+.opt.on{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
+.opt b{display:block;font-size:15px;margin-bottom:3px}.opt .d{display:block;color:var(--muted);font-size:13.5px;line-height:1.5}
+.opt input{margin-top:2px}
+.money{display:grid;grid-template-columns:1.1fr 1fr;gap:22px;align-items:start}
+.facts{display:grid;grid-template-columns:auto 1fr;gap:7px 18px;font-size:14px;margin:0}.facts dt{color:var(--muted)}.facts dd{margin:0}
+.cap{display:flex;align-items:center;gap:10px}.cap input{width:130px}
+.live{display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:10px;border:1px solid #1d5f64;background:#0e1c1f;color:#bfeff2;font-size:14px;margin-bottom:14px}
+.bar{height:7px;border-radius:99px;background:#0b2a2d;flex:1;overflow:hidden}.bar i{display:block;height:100%;width:0;background:var(--teal)}
+.fail{color:#ff8b8b}
+.veil{position:fixed;inset:0;background:rgba(5,6,10,.72);display:flex;align-items:flex-start;justify-content:center;padding:70px 16px 0;z-index:9;overflow:auto}
+.modal{width:760px;max-width:100%;border:1px solid var(--line);border-radius:16px;background:var(--panel);padding:26px 28px;box-shadow:0 30px 80px rgba(0,0,0,.6)}
+.modal h3{font:600 22px/1.2 "Palatino Linotype","Book Antiqua",Palatino,Georgia,serif;color:var(--title);margin:0 0 6px;display:block}
+.warn{margin:16px 0;padding:12px 14px;border-radius:10px;border:1px solid #6b5320;background:#211b0c;color:#f0c36a;font-size:14px;line-height:1.5}
+.agree{display:flex;gap:12px;align-items:flex-start;color:var(--text);font-size:14px;line-height:1.5;margin:6px 0 18px;flex-direction:row}
+.agree input{margin-top:3px}
+@media(max-width:860px){.layout{grid-template-columns:1fr}.side{flex-direction:row;position:static;flex-wrap:wrap}.job .nums,form.grid,.when,.what,.money{grid-template-columns:1fr}.ph,.pr{grid-template-columns:34px minmax(100px,1fr) 100px 130px}.ph span:nth-child(3),.pr span:nth-child(3),.ph span:nth-child(4),.pr span:nth-child(4){display:none}}`;
 
 /** Admin shell; the interactive part lives in {@link ADMIN_JS}, run under the CSP nonce. */
 
@@ -317,7 +366,7 @@ export function adminPage(v: AdminView): string {
   <form method="post" action="${base}/admin/auth/logout"><button class="btn small" type="submit">Sign out</button></form></div>
 </header>
 <div class="layout">
-  <nav class="side" aria-label="Admin sections"><a href="#llm" data-tab="llm" class="active">LLM</a><a href="#sso" data-tab="sso">SSO</a><a href="#audit" data-tab="audit">Audit</a></nav>
+  <nav class="side" aria-label="Admin sections"><a href="#llm" data-tab="llm" class="active">LLM</a><a href="#auto" data-tab="auto">Auto</a><a href="#sso" data-tab="sso">SSO</a><a href="#audit" data-tab="audit">Audit</a><a href="#license" data-tab="license">License</a></nav>
   <main>
     <section id="tab-llm" class="tab">
       <h2>LLM</h2>
@@ -362,6 +411,82 @@ export function adminPage(v: AdminView): string {
       </div>
     </section>
 
+    <section id="tab-auto" class="tab" hidden>
+      <h2>Auto</h2>
+      <p class="lead">Let Mnemosyne update the documentation by itself at a time when nobody is working. Only projects whose notes changed since their last article are touched; everything else is left alone.</p>
+      <div class="notice error" id="autoPaused" hidden></div>
+
+      <div class="step">
+        <div class="row between"><h3><span class="num">1</span> When</h3>
+          <label class="switch"><input type="checkbox" id="autoOn" class="swin"><b id="autoOnText">Automatic update is OFF</b></label></div>
+        <p class="sub">Set the day and the time. The switch is the kill switch: turned off, nothing runs and nothing is spent.</p>
+        <div class="when">
+          <div class="box">
+            <label class="radio"><input type="radio" name="autoMode" id="autoWeekly" checked> Every week on</label>
+            <div class="days" id="autoDays"></div>
+            <label class="radio" style="margin-top:6px"><input type="radio" name="autoMode" id="autoOnce"> Once, on a date</label>
+            <div class="days"><input type="date" id="autoDate" style="width:180px"></div>
+          </div>
+          <div class="box">
+            <div class="fields">
+              <label>Start at (24-hour clock, HH:MM)<input id="autoTime" value="02:00" maxlength="5" placeholder="02:00" inputmode="numeric" autocomplete="off"></label>
+              <label>Time zone<select id="autoTz"></select></label>
+            </div>
+            <div class="next" id="autoNext">Loading…</div>
+            <span class="hint2">A run that was missed because the server was down starts when it is back, if it is less than 12 hours late; otherwise it is skipped and shown in the run list.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <h3><span class="num">2</span> Which projects</h3>
+        <p class="sub">Tick the projects that are kept up to date automatically. The badge shows what a run would do <em>right now</em>; this check reads the notes only and costs nothing.</p>
+        <div class="tools">
+          <input type="search" id="autoSearch" placeholder="Search projects…">
+          <button class="btn small" type="button" id="autoAll">Select all</button>
+          <button class="btn small" type="button" id="autoChanged">Only projects with changes</button>
+          <button class="btn small" type="button" id="autoNone">Clear</button>
+          <span class="count" id="autoCount"></span>
+        </div>
+        <div class="plist">
+          <div class="ph"><span></span><span>Project</span><span>GitLab</span><span>Notes</span><span>Last article</span><span>State</span></div>
+          <div id="autoRows"></div>
+        </div>
+        <p class="hint2" id="autoNewNote" hidden style="margin:10px 0 0">Projects added since you saved are marked “new” and are <b>not</b> included until you tick them: nothing is added to the spending without you.</p>
+      </div>
+
+      <div class="step">
+        <h3><span class="num">3</span> What to create</h3>
+        <p class="sub">Both are AI calls and cost money. The picture is always made from the newest article of the project.</p>
+        <div class="what">
+          <label class="opt on" id="autoTextBox"><input type="checkbox" class="cbx" id="autoText" checked><span><b>TEXT</b><span class="d">The project documentation article, written by AI from all notes of the project (what “Generate documentation” does today).</span></span></label>
+          <label class="opt on" id="autoChartsBox"><input type="checkbox" class="cbx" id="autoCharts" checked><span><b>AI flow charts</b><span class="d">The architecture diagrams: AI plans the pictures from the article, Mnemosyne draws them (what “Create workflow diagram” does today).</span></span></label>
+        </div>
+      </div>
+
+      <div class="step">
+        <h3><span class="num">4</span> Spending limit and agreement</h3>
+        <p class="sub">Automatic runs use the models and limits chosen in LLM. Nothing runs until you have agreed to the cost below.</p>
+        <div class="money">
+          <div><dl class="facts" id="autoFacts"></dl><p class="err" id="autoFactsErr"></p></div>
+          <div class="box">
+            <label>Stop the run when the cost reaches (USD, required)
+              <span class="cap"><input id="autoLimit" inputmode="decimal" value="10.00" autocomplete="off"> <span class="muted">per run</span></span></label>
+            <span class="hint2">The cost is counted from the tokens the provider reports. When the next project could take the run over this limit, the run stops and lists the projects it did not reach. The agreement popup shows the highest amount a month can cost with this limit.</span>
+            <div class="row"><button class="btn primary" type="button" id="autoSave">Save schedule…</button><span class="msg" id="autoMsg"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <h3><span class="num">5</span> Runs</h3>
+        <div class="live" id="autoLive" hidden><span id="autoLiveText"></span><span class="bar"><i id="autoBar"></i></span><span id="autoLiveTime"></span></div>
+        <div class="tablewrap"><table><thead><tr><th>Started (UTC)</th><th>Trigger</th><th>Updated</th><th>Unchanged</th><th>Failed / not reached</th><th>Tokens in / out</th><th>Cost</th><th>Result</th></tr></thead>
+          <tbody id="autoRuns"><tr><td colspan="8" class="muted">Loading…</td></tr></tbody></table></div>
+        <p class="hint2" style="margin:10px 0 0">Every automatic AI call is also written to the Audit tab (who agreed, which project, tokens, cost).</p>
+      </div>
+    </section>
+
     <section id="tab-sso" class="tab" hidden>
       <h2>SSO</h2>
       <p class="lead">Let GitLab users sign in with their GitLab account. Admin access comes from GitLab itself: only a GitLab administrator can open this admin area.</p>
@@ -396,7 +521,21 @@ export function adminPage(v: AdminView): string {
         <div class="row" style="margin-top:8px"><span id="auditMsg" class="msg"></span></div>
       </div>
     </section>
+
+    <section id="tab-license" class="tab" hidden>
+      <h2>License</h2>
+    </section>
   </main>
+</div>
+<div class="veil" id="autoModal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="autoModalTitle">
+    <h3 id="autoModalTitle">Agree to automatic AI use</h3>
+    <p class="sub" style="margin:0">Mnemosyne will call an AI model by itself, on a schedule, with no one pressing a button. This costs money.</p>
+    <dl class="facts" id="autoModalFacts" style="margin-top:16px"></dl>
+    <div class="warn">The agreement is tied to exactly this setup. If the project list, what is created, the schedule, the model, the token limits or the spending limit change, the schedule pauses and asks you to agree again. The switch in step 1 stops everything at any time.</div>
+    <label class="agree"><input type="checkbox" class="cbx" id="autoAgree"><span>I agree that Mnemosyne uses AI automatically on this schedule and I accept the cost.</span></label>
+    <div class="row"><button class="btn primary" type="button" id="autoGo" disabled>Agree and save schedule</button><button class="btn" type="button" id="autoCancel">Cancel</button><span class="msg" id="autoModalMsg"></span></div>
+  </div>
 </div>
 <script nonce="${esc(v.nonce)}">${ADMIN_JS(v.basePath)}</script>`,
     ADMIN_CSS,
@@ -430,11 +569,14 @@ function ADMIN_JS(basePath: string): string {
   }
   // --- tabs (left menu) ---
   function showTab(){
-    var t=(location.hash||'#llm').slice(1);if(t!=='sso'&&t!=='audit')t='llm';
-    ['llm','sso','audit'].forEach(function(n){$('tab-'+n).hidden=(n!==t)});
+    var TABS=['llm','auto','sso','audit','license'];
+    var t=(location.hash||'#llm').slice(1);if(TABS.indexOf(t)<0)t='llm';
+    TABS.forEach(function(n){$('tab-'+n).hidden=(n!==t)});
     if(t==='audit')loadAudit();
+    if(t==='auto')loadAuto(autoLoaded);
     Array.prototype.forEach.call(document.querySelectorAll('.side a'),function(a){a.className=a.getAttribute('data-tab')===t?'active':''});
   }
+  var autoLoaded=false;
   window.addEventListener('hashchange',showTab);showTab();
 
   function cell(tr,text,cls){var td=document.createElement('td');td.textContent=text;if(cls)td.className=cls;tr.appendChild(td);return td}
@@ -592,6 +734,165 @@ function ADMIN_JS(basePath: string): string {
   var st;$('auditSearch').addEventListener('input',function(){clearTimeout(st);st=setTimeout(function(){auditPage=0;loadAudit()},250)});
   $('auditRefresh').addEventListener('click',function(){loadAudit()});
   setInterval(function(){if(!$('tab-audit').hidden&&auditPage===0&&!$('auditSearch').value)loadAudit()},15000);
+
+  // --- Auto tab: schedule, project selection, agreement, runs ---
+  var DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  var ZONES=['UTC','Europe/London','Europe/Zurich','Europe/Berlin','Europe/Paris','Europe/Amsterdam','Europe/Madrid','Europe/Rome','Europe/Vienna','Europe/Istanbul','Europe/Moscow','Africa/Johannesburg','Asia/Dubai','Asia/Kolkata','Asia/Singapore','Asia/Hong_Kong','Asia/Shanghai','Asia/Tokyo','Asia/Seoul','Australia/Sydney','Pacific/Auckland','America/Sao_Paulo','America/New_York','America/Chicago','America/Denver','America/Los_Angeles','America/Anchorage','Pacific/Honolulu'];
+  var RESULT={completed:'completed',nothing:'nothing changed',limit:'stopped at the limit',missed:'missed',stopped:'stopped',running:'running'};
+  var AUTO=null,autoSel={},autoDay={},autoWas=false,autoTimer=0,autoToken=null;
+  function span(parent,text,cls){var s=document.createElement('span');s.textContent=text;if(cls)s.className=cls;parent.appendChild(s);return s}
+  function fillDl(dl,rows){dl.textContent='';(rows||[]).forEach(function(r){var dt=document.createElement('dt');dt.textContent=r[0];var dd=document.createElement('dd');dd.textContent=r[1];dl.appendChild(dt);dl.appendChild(dd)})}
+  function fmtZ(iso,tz){try{return new Date(iso).toLocaleString('en-GB',{timeZone:tz,weekday:'long',day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:false})+' ('+tz+')'}catch(e){return iso}}
+  function fmtT(iso){return iso?iso.slice(0,16).replace('T',' '):''}
+  function secs(since){var s=Math.max(0,Math.round((Date.now()-Date.parse(since))/1000));return Math.floor(s/60)+':'+('0'+(s%60)).slice(-2)}
+  function autoZones(want){
+    var sel=$('autoTz'),list=ZONES.slice(),mine='';
+    try{mine=Intl.DateTimeFormat().resolvedOptions().timeZone}catch(e){}
+    [mine,want].forEach(function(z){if(z&&list.indexOf(z)<0)list.push(z)});
+    sel.textContent='';list.forEach(function(z){var o=document.createElement('option');o.value=z;o.textContent=z;sel.appendChild(o)});
+    sel.value=want||'UTC';
+  }
+  function autoDays(){
+    var box=$('autoDays');box.textContent='';
+    [1,2,3,4,5,6,0].forEach(function(d){
+      var b=document.createElement('button');b.type='button';b.className='day'+(autoDay[d]?' on':'');b.textContent=DAYS[d];
+      b.addEventListener('click',function(){autoDay[d]=!autoDay[d];autoDays();autoDirty()});box.appendChild(b);
+    });
+  }
+  // what a run would do for this project with the ticks as they are now
+  function autoWould(p){
+    var t=$('autoText').checked,c=$('autoCharts').checked;
+    var text=t&&p.textDue,charts=c&&(p.chartsDue||text)&&(p.hasArticle||text);
+    if(text)return p.hasArticle?{k:'chg',l:p.detail,w:true}:{k:'new',l:'no article yet',w:true};
+    if(charts)return {k:'chg',l:p.detail,w:true};
+    if(p.textDue)return {k:'',l:'changed - TEXT is not ticked',w:false};
+    return {k:'ok',l:'up to date',w:false};
+  }
+  function autoRows(){
+    var rows=$('autoRows');rows.textContent='';
+    var q=$('autoSearch').value.trim().toLowerCase(),known=AUTO&&AUTO.config?AUTO.config.known:null,shown=0;
+    (AUTO?AUTO.projects:[]).forEach(function(p){
+      if(q&&(p.project+' '+(p.glPath||'')).toLowerCase().indexOf(q)<0)return;
+      shown++;
+      var r=document.createElement('div');r.className='pr';
+      var cb=document.createElement('input');cb.type='checkbox';cb.className='cbx';cb.checked=!!autoSel[p.project];
+      cb.addEventListener('change',function(){autoSel[p.project]=cb.checked;autoDirty()});r.appendChild(cb);
+      var nm=span(r,p.project,'nm');
+      if(known&&known.indexOf(p.project)<0){var nw=span(nm,'new','st new');nw.style.marginLeft='8px'}
+      span(r,p.glPath||'—','pa');span(r,String(p.notes));span(r,p.lastArticle?p.lastArticle.slice(0,10):'—');
+      var w=autoWould(p),c=document.createElement('span');span(c,w.l,'st '+w.k);r.appendChild(c);
+      rows.appendChild(r);
+    });
+    if(!shown){var e=document.createElement('div');e.className='pr none';e.textContent=AUTO&&AUTO.projects.length?'No matching project.':'No project has notes yet.';rows.appendChild(e)}
+  }
+  function autoCounts(){
+    var n=0,ch=0,nw=0,all=AUTO?AUTO.projects:[];
+    all.forEach(function(p){if(autoSel[p.project]){n++;if(autoWould(p).w)ch++;if(!p.hasArticle)nw++}});
+    $('autoCount').textContent=n+' of '+all.length+' selected · '+ch+' have changes · '+nw+' have no article yet';
+  }
+  function autoRead(){
+    var d=[],sel=[];
+    [0,1,2,3,4,5,6].forEach(function(x){if(autoDay[x])d.push(x)});
+    (AUTO?AUTO.projects:[]).forEach(function(p){if(autoSel[p.project])sel.push(p.project)});
+    return {schedule:{mode:$('autoOnce').checked?'once':'weekly',days:d,date:$('autoDate').value,time:$('autoTime').value,tz:$('autoTz').value},projects:sel,text:$('autoText').checked,charts:$('autoCharts').checked,limitUsd:$('autoLimit').value};
+  }
+  function autoOpts(){$('autoTextBox').className='opt'+($('autoText').checked?' on':'');$('autoChartsBox').className='opt'+($('autoCharts').checked?' on':'')}
+  // the form shows the saved setup (or the defaults: Saturday and Sunday, 02:00, both ticked, 10 dollars)
+  function autoWrite(){
+    var c=AUTO&&AUTO.config,s=c?c.schedule:{mode:'weekly',days:[6,0],time:'02:00',tz:'UTC',date:''};
+    autoDay={};(s.days||[]).forEach(function(d){autoDay[d]=true});autoDays();
+    $('autoWeekly').checked=s.mode!=='once';$('autoOnce').checked=s.mode==='once';
+    $('autoDate').value=s.date||'';$('autoTime').value=s.time;autoZones(s.tz);
+    $('autoText').checked=c?c.text:true;$('autoCharts').checked=c?c.charts:true;autoOpts();
+    $('autoLimit').value=c?Number(c.limitUsd).toFixed(2):'10.00';
+    autoSel={};if(c)c.projects.forEach(function(p){autoSel[p]=true});
+  }
+  function autoSwitch(){var on=!!(AUTO&&AUTO.config&&AUTO.config.enabled);$('autoOn').checked=on;$('autoOnText').textContent='Automatic update is '+(on?'ON':'OFF')}
+  function autoNext(){
+    var el=$('autoNext');el.textContent='';var s=AUTO,c=s&&s.config;
+    if(!c){el.textContent='Not set up yet. Choose the days, the projects and the limit, then press “Save schedule…”.';return}
+    if(!c.enabled){el.textContent='Switched off — nothing will run.';return}
+    if(s.pausedReason){el.textContent='Paused — see the warning at the top of this page.';return}
+    if(!s.nextRunAt){el.textContent='No further run is planned (a one-time schedule has run).';return}
+    span(el,'Next run:');var b=document.createElement('b');b.textContent=fmtZ(s.nextRunAt,c.schedule.tz);el.appendChild(b);
+  }
+  function autoPaused(){var el=$('autoPaused');el.hidden=!(AUTO&&AUTO.pausedReason);el.textContent=AUTO&&AUTO.pausedReason?AUTO.pausedReason:''}
+  function autoRuns(runs){
+    var tb=$('autoRuns');tb.textContent='';
+    if(!runs||!runs.length){var e=document.createElement('tr');cell(e,'No automatic run yet.','muted').colSpan=8;tb.appendChild(e);return}
+    runs.forEach(function(r){
+      var tr=document.createElement('tr');
+      cell(tr,fmtT(r.startedAt));cell(tr,r.trigger);cell(tr,String(r.updated.length));cell(tr,String(r.unchanged.length));
+      var f=cell(tr,r.failed.length+' / '+r.notReached.length+(r.failed.length?' — '+r.failed[0].project+': '+r.failed[0].error:''));if(r.failed.length)f.className='fail';
+      cell(tr,Number(r.inputTokens).toLocaleString('en-US')+' / '+Number(r.outputTokens).toLocaleString('en-US'));cell(tr,'$'+Number(r.usd).toFixed(2));
+      var td=cell(tr,'');var b=document.createElement('span');b.className='badge'+(r.status==='completed'?' ok':'');b.textContent=RESULT[r.status]||r.status;td.appendChild(b);
+      if(r.note){var n=document.createElement('div');n.className='hint2';n.textContent=r.note;td.appendChild(n)}
+      tb.appendChild(tr);
+    });
+  }
+  function autoLive(run){
+    var box=$('autoLive');if(!run){box.hidden=true;return}box.hidden=false;
+    var done=run.total-run.queue.length,cur=run.current;
+    $('autoLiveText').textContent=(cur?'While a run is going: project '+(done+1)+' of '+run.total+' — '+cur.project+' — '+(cur.kind==='wiki'?'writing the article':'planning the diagrams'):'Run in progress: '+done+' of '+run.total+' projects done')+' · spent so far $'+Number(run.usd).toFixed(2);
+    $('autoBar').style.width=(run.total?Math.round(100*done/run.total):0)+'%';
+    $('autoLiveTime').textContent=cur?secs(cur.since):'';
+  }
+  // what the setup would cost (free: reads notes only), asked from the server so the numbers are the ones the agreement shows
+  function autoFacts(){
+    clearTimeout(autoTimer);
+    autoTimer=setTimeout(function(){
+      if(AUTO&&!AUTO.model){fillDl($('autoFacts'),[]);$('autoFactsErr').textContent='Choose a model for Text in LLM first.';return}
+      call('POST','/auto/estimate',{config:autoRead()}).then(function(r){$('autoFactsErr').textContent='';fillDl($('autoFacts'),r.live)})
+        .catch(function(e){fillDl($('autoFacts'),[]);$('autoFactsErr').textContent=e.message});
+    },300);
+  }
+  function autoDirty(){autoCounts();autoFacts()}
+  function autoShow(keepForm){
+    if(!keepForm)autoWrite();
+    autoSwitch();autoNext();autoPaused();autoRows();autoCounts();autoRuns(AUTO.runs);autoLive(AUTO.run);autoWas=!!AUTO.run;
+    $('autoNewNote').hidden=!(AUTO.config&&AUTO.projects.some(function(p){return AUTO.config.known.indexOf(p.project)<0}));
+    autoFacts();
+  }
+  function loadAuto(keepForm){
+    return call('GET','/auto').then(function(d){d.projects=d.projects||[];d.runs=d.runs||[];AUTO=d;autoLoaded=true;autoShow(keepForm)}).catch(function(e){note('autoMsg',e.message)});
+  }
+  function autoPoll(){
+    if($('tab-auto').hidden||!AUTO)return;
+    call('GET','/auto/status').then(function(s){
+      var now=!!s.run;AUTO.run=s.run||null;AUTO.runs=s.runs||[];AUTO.nextRunAt=s.nextRunAt;AUTO.pausedReason=s.pausedReason;
+      if(AUTO.config)AUTO.config.enabled=!!s.enabled;
+      autoLive(s.run);autoRuns(AUTO.runs);autoNext();autoPaused();autoSwitch();
+      if(autoWas&&!now)loadAuto(true);autoWas=now;
+    }).catch(function(){});
+  }
+  setInterval(autoPoll,5000);
+  ['autoWeekly','autoOnce'].forEach(function(id){$(id).addEventListener('change',autoDirty)});
+  ['autoDate','autoTime','autoTz','autoLimit'].forEach(function(id){$(id).addEventListener('input',autoDirty);$(id).addEventListener('change',autoDirty)});
+  ['autoText','autoCharts'].forEach(function(id){$(id).addEventListener('change',function(){autoOpts();autoRows();autoDirty()})});
+  $('autoSearch').addEventListener('input',autoRows);
+  function pick(all,fn){(AUTO?AUTO.projects:[]).forEach(function(p){if(all||!$('autoSearch').value.trim()||(p.project+' '+(p.glPath||'')).toLowerCase().indexOf($('autoSearch').value.trim().toLowerCase())>=0)fn(p)});autoRows();autoDirty()}
+  $('autoAll').addEventListener('click',function(){pick(false,function(p){autoSel[p.project]=true})});
+  $('autoNone').addEventListener('click',function(){pick(false,function(p){autoSel[p.project]=false})});
+  $('autoChanged').addEventListener('click',function(){autoSel={};pick(true,function(p){if(autoWould(p).w)autoSel[p.project]=true})});
+  $('autoOn').addEventListener('change',function(){
+    var want=$('autoOn').checked;note('autoMsg','');
+    call('PUT','/auto/switch',{enabled:want}).then(function(d){d.projects=d.projects||[];d.runs=d.runs||[];AUTO=d;autoShow(true)}).catch(function(e){note('autoMsg',e.message);autoSwitch()});
+  });
+  // saving asks for the agreement first: the popup shows what it can cost, the server only accepts the setup with that agreement
+  $('autoSave').addEventListener('click',function(){
+    note('autoMsg','');$('autoSave').disabled=true;
+    call('POST','/auto/estimate',{config:autoRead()}).then(function(r){
+      autoToken=r.token;fillDl($('autoModalFacts'),r.agree);$('autoAgree').checked=false;$('autoGo').disabled=true;note('autoModalMsg','');$('autoModal').hidden=false;
+    }).catch(function(e){note('autoMsg',e.message)}).then(function(){$('autoSave').disabled=false});
+  });
+  $('autoAgree').addEventListener('change',function(){$('autoGo').disabled=!$('autoAgree').checked});
+  $('autoCancel').addEventListener('click',function(){$('autoModal').hidden=true});
+  $('autoGo').addEventListener('click',function(){
+    $('autoGo').disabled=true;
+    call('PUT','/auto',{config:autoRead(),token:autoToken}).then(function(d){
+      $('autoModal').hidden=true;d.projects=d.projects||[];d.runs=d.runs||[];AUTO=d;autoShow(false);note('autoMsg','Saved and agreed. The schedule is ON.',true);
+    }).catch(function(e){note('autoModalMsg',e.message);$('autoGo').disabled=!$('autoAgree').checked});
+  });
 
   load();loadSso();
 })();`;
