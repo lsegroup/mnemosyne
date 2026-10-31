@@ -12,7 +12,7 @@
  */
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
-import { ProviderValidationError, type Provider } from './provider-store.js';
+import { ProviderUnreachableError, ProviderValidationError, type Provider } from './provider-store.js';
 
 export interface ChatResult {
   text: string;
@@ -82,7 +82,9 @@ export async function fetchWithRetry(url: string, init: RequestInit, timeoutMs: 
       if (attempt < 2) await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
     }
   }
-  throw new ProviderValidationError(`Could not reach ${what} (${detail}).`);
+  const msg = `Could not reach ${what} (${detail}).`;
+  // a timeout may have reached the provider and been billed; a connection that never opened was not
+  throw detail === 'timed out' ? new ProviderValidationError(msg) : new ProviderUnreachableError(msg);
 }
 
 function endpoint(p: Pick<Provider, 'kind' | 'baseUrl'>): string {

@@ -833,7 +833,7 @@ function ADMIN_JS(basePath: string): string {
   function autoLive(run){
     var box=$('autoLive');if(!run){box.hidden=true;return}box.hidden=false;
     var done=run.total-run.queue.length,cur=run.current;
-    $('autoLiveText').textContent=(cur?'While a run is going: project '+(done+1)+' of '+run.total+' — '+cur.project+' — '+(cur.kind==='wiki'?'writing the article':'planning the diagrams'):'Run in progress: '+done+' of '+run.total+' projects done')+' · spent so far $'+Number(run.usd).toFixed(2);
+    $('autoLiveText').textContent=(cur?'While a run is going: project '+(done+1)+' of '+run.total+' — '+cur.project+' — '+(cur.waiting||(cur.kind==='wiki'?'writing the article':'planning the diagrams')):'Run in progress: '+done+' of '+run.total+' projects done')+' · spent so far $'+Number(run.usd).toFixed(2);
     $('autoBar').style.width=(run.total?Math.round(100*done/run.total):0)+'%';
     $('autoLiveTime').textContent=cur?secs(cur.since):'';
   }

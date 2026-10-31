@@ -21,6 +21,7 @@ import {
   type ProjectState,
 } from '../src/auto.js';
 import type { DocMeta } from '../src/docgen.js';
+import { ProviderUnreachableError } from '../src/provider-store.js';
 
 const note = (id: string, body = 'text', observed = '2026-10-20') =>
   ({ id, title: id, type: 'howto', status: 'working', project: 'p', components: [], links: [], code_refs: [], authors: [], observed_at: observed, body }) as unknown as MemoryNode;
@@ -230,6 +231,7 @@ describe('the runner (no AI is called: the model call is a fake)', () => {
       key: 'K1',
       busy: false,
       calls: [] as string[],
+      sleeps: [] as number[],
       activeDuring: [] as boolean[],
       logs: [] as { event: string; description?: string }[],
       states: over.states ?? { a: state('a', 'changed'), b: state('b', 'ok'), c: state('c', 'new') },
@@ -245,7 +247,7 @@ describe('the runner (no AI is called: the model call is a fake)', () => {
     h.runner = new AutoRunner({
       store,
       now: () => h.clock,
-      sleep: async () => {},
+      sleep: async (ms) => void h.sleeps.push(ms),
       keyFor: async () => h.key,
       projects: async () => Object.keys(h.states),
       inspect: async (p) => h.states[p]!,
@@ -349,6 +351,65 @@ describe('the runner (no AI is called: the model call is a fake)', () => {
     expect(run.status).toBe('completed');
     expect(run.failed).toEqual([{ project: 'a', error: 'article: The AI answered, but not with a usable plan' }]);
     expect(run.updated).toEqual(['c']);
+  });
+
+  const unreachable = () => new ProviderUnreachableError('Could not reach the provider (EAI_AGAIN).');
+
+  it('waits a minute and sends the SAME call again when the provider cannot be reached, then goes on; the failed tries cost nothing', async () => {
+    let down = 3;
+    const h = await harness({
+      gen: (p, k) => {
+        if (p === 'a' && k === 'wiki' && down-- > 0) throw unreachable();
+      },
+    });
+    await h.runner.tick();
+    expect(h.calls).toEqual(['a:wiki', 'a:wiki', 'a:wiki', 'a:wiki', 'a:diagram', 'c:wiki', 'c:diagram']);
+    expect(h.sleeps.filter((ms) => ms === 5000)).toHaveLength(3 * 12); // three waits of one minute
+    const run = (await h.store.get()).runs[0]!;
+    expect(run).toMatchObject({ status: 'completed', updated: ['a', 'c'], failed: [], notReached: [] });
+    expect(run.usd).toBeCloseTo(0.8, 6); // four successful calls; the three that never arrived were not billed
+    expect(h.logs.filter((l) => l.event === 'auto_run').map((l) => l.description)).toEqual(
+      expect.arrayContaining([expect.stringMatching(/EAI_AGAIN\) while working on a; the run waits one minute/), expect.stringMatching(/reachable again after 3 minute/)]),
+    );
+  });
+
+  it('stops after 15 minutes of outage: nothing is marked failed, the article that was saved counts, the rest is listed as not reached', async () => {
+    const h = await harness({
+      gen: (p, k) => {
+        if (p === 'a' && k === 'diagram') throw unreachable();
+      },
+    });
+    await h.runner.tick();
+    expect(h.calls.filter((c) => c === 'a:diagram')).toHaveLength(16); // the first try and 15 retries
+    expect(h.calls).not.toContain('c:wiki');
+    const run = (await h.store.get()).runs[0]!;
+    expect(run).toMatchObject({ status: 'stopped', updated: ['a'], failed: [], notReached: ['c'] });
+    expect(run.note).toMatch(/Could not reach the provider \(EAI_AGAIN\) for 15 minutes.*still due at the next run/);
+    expect(run.usd).toBeCloseTo(0.2, 6); // only the article was billed
+    expect(h.runner.active).toBe(false);
+  });
+
+  it('an outage in the first call leaves the project itself in the not-reached list, not in the failed list', async () => {
+    const h = await harness({
+      gen: () => {
+        throw unreachable();
+      },
+    });
+    await h.runner.tick();
+    expect(h.calls).toHaveLength(16);
+    expect((await h.store.get()).runs[0]).toMatchObject({ status: 'stopped', updated: [], failed: [], notReached: ['a', 'c'], usd: 0 });
+  });
+
+  it('the switch is noticed while it waits for the provider', async () => {
+    const h = await harness({
+      gen: async () => {
+        await h.store.update((s) => void (s.config!.enabled = false));
+        throw unreachable();
+      },
+    });
+    await h.runner.tick();
+    expect(h.calls).toHaveLength(1);
+    expect((await h.store.get()).runs[0]).toMatchObject({ status: 'stopped', note: 'Switched off during the run', notReached: ['a', 'c'] });
   });
 
   it('skips a run that is more than 12 hours late instead of starting it in the middle of the working day', async () => {

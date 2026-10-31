@@ -10,7 +10,7 @@ import { simpleGit } from 'simple-git';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { createHttpApp } from '../src/http.js';
-import { ProviderStore, ProviderValidationError } from '../src/provider-store.js';
+import { ProviderStore, ProviderUnreachableError, ProviderValidationError } from '../src/provider-store.js';
 import { modelsUrl, parseModelIds } from '../src/llm-models.js';
 import { MnemosyneService } from '../src/service.js';
 import { deriveKeys, hashPassword, open, seal, signToken, verifyPassword, verifyToken } from '../src/secrets.js';
@@ -811,6 +811,8 @@ describe('web portal', () => {
       const ok = await chat(provider, 'm', 'sys', 'DROP-ONCE hello', { maxTokens: 100 });
       expect(ok.text.length).toBeGreaterThan(0); // the second try went through
       await expect(chat(provider, 'm', 'sys', 'DROP-ALWAYS hello', { maxTokens: 100 })).rejects.toThrow(/Could not reach the provider \((?!network error)[^)]+\)/);
+      // a connection that never opened is typed, so the Auto run knows it may wait and send the same call again
+      await expect(chat(provider, 'm', 'sys', 'DROP-ALWAYS hello', { maxTokens: 100 })).rejects.toBeInstanceOf(ProviderUnreachableError);
       calls.chat = before;
     }, 20_000);
 

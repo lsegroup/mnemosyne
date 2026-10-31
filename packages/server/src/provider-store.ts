@@ -52,6 +52,9 @@ interface StoreFile {
 
 export class ProviderValidationError extends Error {}
 
+/** The connection to the provider itself failed (DNS, reset, closed, refused): the request never arrived, so nothing was billed and it is safe to send again. */
+export class ProviderUnreachableError extends ProviderValidationError {}
+
 function text(v: unknown, field: string, max: number): string {
   const s = typeof v === 'string' ? v.trim() : '';
   if (!s) throw new ProviderValidationError(`${field} is required`);

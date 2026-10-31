@@ -10,7 +10,9 @@
  *   - every run has a dollar limit: before each call the worst case of that call is added to what the run has already cost, and when
  *     the sum would pass the limit the run stops and lists the projects it did not reach;
  *   - only projects whose notes changed since their last article are touched (a fingerprint of every note is stored with the article);
- *   - one AI job at a time, the switch in the Admin stops everything, and a run that was missed by more than 12 hours is skipped.
+ *   - one AI job at a time, the switch in the Admin stops everything, and a run that was missed by more than 12 hours is skipped;
+ *   - when the provider cannot be reached at all the run waits a minute and sends the same call again, for at most 15 minutes, then stops
+ *     (such a call never arrived, so it costs nothing; an answer that is merely bad is never retried).
  * The cost of a call is counted from the tokens the provider reports, times the price list in docgen.ts.
  */
 import { createHash } from 'node:crypto';
@@ -19,6 +21,7 @@ import { dirname } from 'node:path';
 import type { MemoryNode } from '@mnemosyne/core';
 import type { AuditInput } from './audit.js';
 import type { DocMeta } from './docgen.js';
+import { ProviderUnreachableError } from './provider-store.js';
 
 export const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 export const RUN_HISTORY = 30;
@@ -26,6 +29,13 @@ export const RUN_HISTORY = 30;
 export const MAX_LATE_MS = 12 * 3600 * 1000;
 /** A project whose call was cut off (service restarted) this many times is given up on. */
 export const MAX_ATTEMPTS = 2;
+/**
+ * When the connection to the provider fails (its name does not resolve, the connection is refused or reset) the run waits this long and
+ * sends the SAME call again, for at most OUTAGE_MAX_WAIT_MS in total, and then stops. A minute is deliberate: resolvers keep a failed
+ * lookup for about that long, so retrying faster only reads the same cached failure. Such a call never reached the provider, so it costs nothing.
+ */
+export const OUTAGE_WAIT_MS = 60_000;
+export const OUTAGE_MAX_WAIT_MS = 15 * 60_000;
 
 export type AutoKind = 'wiki' | 'diagram';
 
@@ -73,7 +83,7 @@ export interface AutoRun {
   /** Still to do (first = current). */
   queue: { project: string; text: boolean; charts: boolean; attempts: number; wikiDone?: boolean; chartsDone?: boolean }[];
   total: number;
-  current?: { project: string; kind: AutoKind; since: string };
+  current?: { project: string; kind: AutoKind; since: string; /** set while waiting for the provider to come back */ waiting?: string };
   inputTokens: number;
   outputTokens: number;
   usd: number;
@@ -402,7 +412,7 @@ export interface RunnerDeps {
   inspect(project: string): Promise<ProjectState>;
   /** The worst case in US dollars of the next call of this kind for this project; null when unknown. */
   worst(project: string, kind: AutoKind): Promise<number | null>;
-  /** Runs ONE AI job and returns what it used. Throws an Error with a plain message when it fails. */
+  /** Runs ONE AI job and returns what it used. Throws an Error with a plain message when it fails; a ProviderUnreachableError when the connection itself failed (the run waits and sends it again). */
   generate(project: string, kind: AutoKind, by: string): Promise<GenOutcome>;
   /** A job started by a person is running. */
   busy(): boolean;
@@ -566,6 +576,16 @@ export class AutoRunner {
     return !this.d.busy();
   }
 
+  /** One minute of waiting for the provider, in 5-second steps so the switch is noticed quickly. Returns why the run must stop, or null. */
+  private async waitOutage(): Promise<string | null> {
+    for (let i = 0; i < OUTAGE_WAIT_MS / 5000; i++) {
+      await this.sleep(5000);
+      const stop = await this.stopReason();
+      if (stop) return stop;
+    }
+    return null;
+  }
+
   /** The caller has set `executing`; it is cleared when the run is over, however it ends. */
   private async execute(id: string): Promise<void> {
     try {
@@ -619,21 +639,42 @@ export class AutoRunner {
           if (spent + worst > cfg.limitUsd) return await stopHere('limit', `Stopped before ${item.project}: its next call could cost up to ${usd(worst)} and the run had used ${usd(spent)} of the ${usd(cfg.limitUsd)} limit.`);
           await this.mutate(id, (r) => void (r.current = { project: item.project, kind, since: this.now().toISOString() }));
           this.d.log({ event: 'auto_start', entityType: `docs_${kind}`, entityName: item.project, user: 'auto', description: `Automatic update (agreed by ${cfg.agreement!.by}): ${kind === 'wiki' ? 'article' : 'diagrams'} for ${item.project}; at most ${usd(worst)}; run so far ${usd(spent)} of ${usd(cfg.limitUsd)}` });
-          try {
-            const out = await this.d.generate(item.project, kind, cfg.agreement!.by);
-            did++;
-            await this.mutate(id, (r) => {
-              r.inputTokens += out.inputTokens;
-              r.outputTokens += out.outputTokens;
-              r.usd = round(r.usd + (out.usd ?? worst));
-              if (out.warning) r.warnings.push(`${item.project}: ${out.warning}`);
-              if (kind === 'wiki') r.queue[0]!.wikiDone = true;
-              else r.queue[0]!.chartsDone = true;
-            });
-          } catch (err) {
-            failure = `${kind === 'wiki' ? 'article' : 'diagrams'}: ${(err as Error).message}`;
-            break;
+          let waited = 0;
+          for (;;) {
+            try {
+              const out = await this.d.generate(item.project, kind, cfg.agreement!.by);
+              did++;
+              await this.mutate(id, (r) => {
+                r.inputTokens += out.inputTokens;
+                r.outputTokens += out.outputTokens;
+                r.usd = round(r.usd + (out.usd ?? worst));
+                if (out.warning) r.warnings.push(`${item.project}: ${out.warning}`);
+                if (r.current) r.current.waiting = undefined;
+                if (kind === 'wiki') r.queue[0]!.wikiDone = true;
+                else r.queue[0]!.chartsDone = true;
+              });
+              if (waited) this.d.log({ event: 'auto_run', entityType: 'auto', entityName: 'Automatic update', user: 'auto', description: `The provider is reachable again after ${Math.round(waited / 60_000)} minute(s); the run goes on` });
+              break;
+            } catch (err) {
+              if (!(err instanceof ProviderUnreachableError)) {
+                failure = `${kind === 'wiki' ? 'article' : 'diagrams'}: ${(err as Error).message}`;
+                break;
+              }
+              // The connection itself failed, so nothing reached the provider and nothing was billed: wait and send the same call again.
+              const why = err.message.replace(/\.$/, '');
+              if (waited >= OUTAGE_MAX_WAIT_MS) {
+                return await stopHere('stopped', `${why} for ${OUTAGE_MAX_WAIT_MS / 60_000} minutes, so the run was stopped. Nothing was lost: what was not done is listed as not reached and is still due at the next run.`);
+              }
+              if (!waited) this.d.log({ event: 'auto_run', entityType: 'auto', entityName: 'Automatic update', user: 'auto', description: `${why} while working on ${item.project}; the run waits one minute and tries again, for at most ${OUTAGE_MAX_WAIT_MS / 60_000} minutes` });
+              waited += OUTAGE_WAIT_MS;
+              await this.mutate(id, (r) => {
+                if (r.current) r.current.waiting = `${why}: waiting one minute (retry ${waited / OUTAGE_WAIT_MS} of ${OUTAGE_MAX_WAIT_MS / OUTAGE_WAIT_MS})`;
+              });
+              const stopNow = await this.waitOutage();
+              if (stopNow) return await stopHere('stopped', stopNow);
+            }
           }
+          if (failure) break;
         }
         await this.mutate(id, (r) => {
           r.current = undefined;

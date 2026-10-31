@@ -3,7 +3,7 @@ import { gzipSync } from 'node:zlib';
 import { Router, urlencoded, type NextFunction, type Request, type Response } from 'express';
 import type { MnemosyneConfig } from './config.js';
 import { MIN_SECRET_LENGTH, deriveKeys, hashPassword, signToken, verifyPassword, verifyToken, type DerivedKeys } from './secrets.js';
-import { ProviderStore, ProviderValidationError, ROLES, type Role } from './provider-store.js';
+import { ProviderStore, ProviderUnreachableError, ProviderValidationError, ROLES, type Role } from './provider-store.js';
 import { fetchModels } from './llm-models.js';
 import { AuditLog, clientIp, diffLines, type AuditInput } from './audit.js';
 import { SettingsStore, SettingsValidationError, applyPortalInput, type GitLabSettings, type PortalSettings } from './settings-store.js';
@@ -944,7 +944,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
               const msg = failureMessage(err, kind, project);
               jobs.set(project, { kind, state: 'error', startedAt: started, error: msg });
               void audit?.log({ event: 'ai_failed', user: 'auto', entityType: `docs_${kind}`, entityName: project, description: msg });
-              throw new Error(msg);
+              throw err instanceof ProviderUnreachableError ? new ProviderUnreachableError(msg) : new Error(msg);
             }
           },
           busy: aiRunning,
