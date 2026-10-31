@@ -126,6 +126,28 @@ export class AuditLog {
     return n;
   }
 
+  /** Every event at or after `sinceIso`, oldest first. Reads the current file only. */
+  async since(sinceIso: string): Promise<AuditEvent[]> {
+    await this.queue;
+    let raw = '';
+    try {
+      raw = await readFile(this.file, 'utf8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
+    const out: AuditEvent[] = [];
+    for (const line of raw.split('\n')) {
+      if (!line) continue;
+      try {
+        const e = JSON.parse(line) as AuditEvent;
+        if (e.time >= sinceIso) out.push(e);
+      } catch {
+        /* a torn last line must not hide the rest */
+      }
+    }
+    return out;
+  }
+
   /** Newest first. `q` matches any text field, case-insensitively. Reads the current file only. */
   async list(opts: { q?: string; offset?: number; limit?: number } = {}): Promise<{ events: AuditEvent[]; total: number }> {
     await this.queue;

@@ -17,7 +17,7 @@ import { chat } from './llm-call-chat.js';
 import { checkPin, setHostPins, validatePins, type HostPin } from './host-pins.js';
 import { PlanError, drawScene, layout, parsePlanSet, renderSvg, type DiagramPlan, type DiagramSet } from './diagram.js';
 import { buildPdf, type PdfInput } from './pdf.js';
-import { AutoRunner, AutoStore, AutoValidationError, agreementKey, describeSchedule, inspectProject, nextRun, noteHashes, parseAutoInput, summarize, type AutoConfig, type ProjectEstimate } from './auto.js';
+import { AutoRunner, AutoStore, AutoValidationError, agreementKey, backfillUsage, describeSchedule, inspectProject, nextRun, noteHashes, parseAutoInput, summarize, type AutoConfig, type ProjectEstimate } from './auto.js';
 import { LOGO_WEBP_BASE64 } from './web-assets.js';
 
 // Two independent sign-in systems: the public page (cookie below) and the admin area
@@ -797,7 +797,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
           description: `Architecture diagrams drawn by Mnemosyne from a plan written by ${text.model} (${set.pictures.length} picture${set.pictures.length > 1 ? 's' : ''}: ${set.pictures.map((p) => p.name).join(', ')}; ${boxes} boxes, ${arrows} arrows; ${out.inputTokens} tokens in, ${out.outputTokens} out)${set.dropped.length ? `; left out of the plan: ${set.dropped.length}` : ''}`,
         });
       }
-      return { inputTokens: used.inputTokens, outputTokens: used.outputTokens, usd: estimateText(text.model, used.inputTokens, used.outputTokens).usd, warning };
+      return { model: text.model, inputTokens: used.inputTokens, outputTokens: used.outputTokens, usd: estimateText(text.model, used.inputTokens, used.outputTokens).usd, warning };
     }
   };
 
@@ -958,6 +958,12 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         })
       : null;
   autoRunner?.start();
+  // Runs made before the TEXT / IMAGES split was recorded get it from the audit trail, but only where the trail adds up to the run's own totals.
+  if (autoStore && audit) {
+    backfillUsage(autoStore, (since) => audit.since(since), (model, i, o) => estimateText(model, i, o).usd)
+      .then((n) => n && console.log(`auto: rebuilt the TEXT / IMAGES split of ${n} past run(s) from the audit trail`))
+      .catch((err) => console.error('auto: could not rebuild the usage of past runs:', (err as Error).message));
+  }
 
   // PDF: no AI, no cost — cover, index, article and the latest diagram.
   router.post('/p/:project/api/pdf', async (req, res) => {

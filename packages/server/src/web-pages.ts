@@ -264,6 +264,13 @@ input:focus,select:focus{outline:none;border-color:var(--accent)}
 .job textarea{font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;min-height:120px;resize:vertical;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text)}
 .layout>main{min-width:0}.tab>.step{min-width:0}
 .tablewrap{overflow-x:auto;max-width:100%}
+.sumline{margin:0 0 14px;font-size:14px;line-height:1.7}.sumline b{color:var(--teal);font-weight:600}
+td.nw,th.nw{white-space:nowrap}
+#autoRuns tr.run>td{border-bottom:0}
+#autoRuns tr.usage>td{padding:0 8px 14px}
+table.use{width:auto;font-size:13px}table.use th,table.use td{padding:3px 22px 3px 0;border-bottom:0}
+table.use th.n,table.use td.n{text-align:right;white-space:nowrap}
+table.use tr.sum td{border-top:1px solid var(--line);font-weight:600}
 table.audit{font-size:13px;width:100%;min-width:900px}
 table.audit td{vertical-align:top}
 table.audit td.t{white-space:nowrap;color:var(--muted)}
@@ -492,9 +499,10 @@ export function adminPage(v: AdminView): string {
       <div class="step">
         <h3><span class="num">5</span> Runs</h3>
         <div class="live" id="autoLive" hidden><span id="autoLiveText"></span><span class="bar"><i id="autoBar"></i></span><span id="autoLiveTime"></span></div>
-        <div class="tablewrap"><table><thead><tr><th>Started (UTC)</th><th>Trigger</th><th>Updated</th><th>Unchanged</th><th>Failed / not reached</th><th>Tokens in / out</th><th>Cost</th><th>Result</th></tr></thead>
-          <tbody id="autoRuns"><tr><td colspan="8" class="muted">Loading…</td></tr></tbody></table></div>
-        <p class="hint2" style="margin:10px 0 0">Every automatic AI call is also written to the Audit tab (who agreed, which project, tokens, cost).</p>
+        <p class="sumline" id="autoTotals" hidden></p>
+        <div class="tablewrap"><table><thead><tr><th class="nw">Start (UTC)</th><th class="nw">End (UTC)</th><th class="nw">Runtime</th><th>Trigger</th><th>Updated</th><th>Unchanged</th><th>Failed / not reached</th><th>Tokens in / out</th><th>Cost</th><th>Result</th></tr></thead>
+          <tbody id="autoRuns"><tr><td colspan="10" class="muted">Loading…</td></tr></tbody></table></div>
+        <p class="hint2" style="margin:10px 0 0">Under every run: what each model used for TEXT (the articles) and for IMAGES (the AI flow charts), and how long its calls took. IMAGES is not an image model: the AI writes the plan as text, Mnemosyne draws the pictures, so only those text tokens are used. The cost is the tokens the provider reported times the list price of the model; what the provider really charges you is on its own billing page. Every automatic AI call is also written to the Audit tab (who agreed, which project, tokens, cost).</p>
       </div>
     </section>
 
@@ -869,23 +877,69 @@ function ADMIN_JS(basePath: string): string {
     span(el,'Next run:');var b=document.createElement('b');b.textContent=fmtZ(s.nextRunAt,c.schedule.tz);el.appendChild(b);
   }
   function autoPaused(){var el=$('autoPaused');el.hidden=!(AUTO&&AUTO.pausedReason);el.textContent=AUTO&&AUTO.pausedReason?AUTO.pausedReason:''}
+  function dur(ms){var s=Math.max(0,Math.round(ms/1000));if(s<60)return s+' s';var m=Math.floor(s/60);if(m<60)return m+' min '+s%60+' s';return Math.floor(m/60)+' h '+m%60+' min'}
+  function num(n){return Number(n).toLocaleString('en-US')}
+  function usd4(n){return '$'+Number(n).toFixed(4)}
+  function fmtS(iso){return iso?iso.slice(0,19).replace('T',' '):''}
+  var KIND={wiki:'TEXT (articles)',diagram:'IMAGES (AI flow charts)'};
+  // what each model used in one run: one row per model and kind, and a total when there is more than one
+  function usageTable(u){
+    var t=document.createElement('table');t.className='use';
+    var hr=document.createElement('tr');
+    ['Model','What','Calls','Tokens in','Tokens out','Cost','AI time'].forEach(function(x,i){var th=document.createElement('th');th.textContent=x;if(i>1)th.className='n';hr.appendChild(th)});
+    var hd=document.createElement('thead');hd.appendChild(hr);t.appendChild(hd);
+    var b=document.createElement('tbody');t.appendChild(b);
+    var tot={c:0,i:0,o:0,u:0,ms:0};
+    function row(tr,m,w,x,cls){cell(tr,m);cell(tr,w);[num(x.c),num(x.i),num(x.o),usd4(x.u),dur(x.ms)].forEach(function(v){cell(tr,v,'n')});if(cls)tr.className=cls;b.appendChild(tr)}
+    u.slice().sort(function(a,c){return a.model!==c.model?(a.model<c.model?-1:1):(a.kind===c.kind?0:a.kind==='wiki'?-1:1)}).forEach(function(x){
+      var v={c:x.calls,i:x.inputTokens,o:x.outputTokens,u:x.usd,ms:x.ms};
+      tot.c+=v.c;tot.i+=v.i;tot.o+=v.o;tot.u+=v.u;tot.ms+=v.ms;
+      row(document.createElement('tr'),x.model,KIND[x.kind]||x.kind,v);
+    });
+    if(u.length>1)row(document.createElement('tr'),'','Together',tot,'sum');
+    return t;
+  }
   function autoRuns(runs){
     var tb=$('autoRuns');tb.textContent='';
-    if(!runs||!runs.length){var e=document.createElement('tr');cell(e,'No automatic run yet.','muted').colSpan=8;tb.appendChild(e);return}
+    if(!runs||!runs.length){var e=document.createElement('tr');cell(e,'No automatic run yet.','muted').colSpan=10;tb.appendChild(e);return}
     runs.forEach(function(r){
-      var tr=document.createElement('tr');
-      cell(tr,fmtT(r.startedAt));cell(tr,r.trigger);cell(tr,String(r.updated.length));cell(tr,String(r.unchanged.length));
+      var tr=document.createElement('tr');tr.className='run';
+      var end=r.finishedAt&&r.finishedAt.slice(0,10)===r.startedAt.slice(0,10)?r.finishedAt.slice(11,19):fmtS(r.finishedAt);
+      cell(tr,fmtS(r.startedAt),'nw');cell(tr,end,'nw');cell(tr,r.finishedAt?dur(Date.parse(r.finishedAt)-Date.parse(r.startedAt)):'','nw');
+      cell(tr,r.trigger);cell(tr,String(r.updated.length));cell(tr,String(r.unchanged.length));
       var f=cell(tr,r.failed.length+' / '+r.notReached.length+(r.failed.length?' — '+r.failed[0].project+': '+r.failed[0].error:''));if(r.failed.length)f.className='fail';
-      cell(tr,Number(r.inputTokens).toLocaleString('en-US')+' / '+Number(r.outputTokens).toLocaleString('en-US'));cell(tr,'$'+Number(r.usd).toFixed(2));
+      cell(tr,num(r.inputTokens)+' / '+num(r.outputTokens),'nw');cell(tr,usd4(r.usd),'nw');
       var td=cell(tr,'');var b=document.createElement('span');b.className='badge'+(r.status==='completed'?' ok':'');b.textContent=RESULT[r.status]||r.status;td.appendChild(b);
       if(r.note){var n=document.createElement('div');n.className='hint2';n.textContent=r.note;td.appendChild(n)}
       tb.appendChild(tr);
+      // the split under the run: a run without calls has nothing to split, an old run whose split could not be proven says so
+      if(r.usage&&r.usage.length||!r.usage&&r.inputTokens){
+        var dr=document.createElement('tr');dr.className='usage';var dc=document.createElement('td');dc.colSpan=10;
+        if(r.usage)dc.appendChild(usageTable(r.usage));else{dc.textContent='The split by model, TEXT and IMAGES is not available for this run (it was made before the split was recorded and the audit trail no longer matches its totals).';dc.className='muted'}
+        dr.appendChild(dc);tb.appendChild(dr);
+      }
     });
+  }
+  // all runs of the list together: time, tokens, cost, and what part was TEXT and what part IMAGES
+  function autoTotals(runs){
+    var el=$('autoTotals'),done=(runs||[]).filter(function(r){return r.finishedAt});
+    if(!done.length){el.hidden=true;return}
+    var ms=0,i=0,o=0,u=0,miss=0,k={wiki:{c:0,u:0,ms:0},diagram:{c:0,u:0,ms:0}};
+    done.forEach(function(r){
+      ms+=Date.parse(r.finishedAt)-Date.parse(r.startedAt);i+=r.inputTokens;o+=r.outputTokens;u+=r.usd;
+      if(r.usage)r.usage.forEach(function(x){k[x.kind].c+=x.calls;k[x.kind].u+=x.usd;k[x.kind].ms+=x.ms});else if(r.inputTokens)miss++;
+    });
+    el.textContent='';
+    function kv(l,v){span(el,l+' ');var b=document.createElement('b');b.textContent=v;el.appendChild(b);span(el,'   ')}
+    kv('All '+done.length+(done.length===1?' run':' runs')+' below:',dur(ms));kv('·',num(i)+' tokens in / '+num(o)+' out');kv('·',usd4(u));
+    kv('— TEXT',usd4(k.wiki.u)+' ('+num(k.wiki.c)+' calls, '+dur(k.wiki.ms)+')');kv('· IMAGES',usd4(k.diagram.u)+' ('+num(k.diagram.c)+' calls, '+dur(k.diagram.ms)+')');
+    if(miss)span(el,'· the split is missing for '+miss+(miss===1?' run':' runs'),'muted');
+    el.hidden=false;
   }
   function autoLive(run){
     var box=$('autoLive');if(!run){box.hidden=true;return}box.hidden=false;
     var done=run.total-run.queue.length,cur=run.current;
-    $('autoLiveText').textContent=(cur?'While a run is going: project '+(done+1)+' of '+run.total+' — '+cur.project+' — '+(cur.waiting||(cur.kind==='wiki'?'writing the article':'planning the diagrams')):'Run in progress: '+done+' of '+run.total+' projects done')+' · spent so far $'+Number(run.usd).toFixed(2);
+    $('autoLiveText').textContent=(cur?'While a run is going: project '+(done+1)+' of '+run.total+' — '+cur.project+' — '+(cur.waiting||(cur.kind==='wiki'?'writing the article':'planning the diagrams')):'Run in progress: '+done+' of '+run.total+' projects done')+' · running for '+dur(Date.now()-Date.parse(run.startedAt))+' · spent so far '+usd4(run.usd);
     $('autoBar').style.width=(run.total?Math.round(100*done/run.total):0)+'%';
     $('autoLiveTime').textContent=cur?secs(cur.since):'';
   }
@@ -901,7 +955,7 @@ function ADMIN_JS(basePath: string): string {
   function autoDirty(){autoCounts();autoFacts()}
   function autoShow(keepForm){
     if(!keepForm)autoWrite();
-    autoSwitch();autoNext();autoPaused();autoRows();autoCounts();autoRuns(AUTO.runs);autoLive(AUTO.run);autoWas=!!AUTO.run;
+    autoSwitch();autoNext();autoPaused();autoRows();autoCounts();autoRuns(AUTO.runs);autoTotals(AUTO.runs);autoLive(AUTO.run);autoWas=!!AUTO.run;
     $('autoNewNote').hidden=!(AUTO.config&&AUTO.projects.some(function(p){return AUTO.config.known.indexOf(p.project)<0}));
     autoFacts();
   }
@@ -913,7 +967,7 @@ function ADMIN_JS(basePath: string): string {
     call('GET','/auto/status').then(function(s){
       var now=!!s.run;AUTO.run=s.run||null;AUTO.runs=s.runs||[];AUTO.nextRunAt=s.nextRunAt;AUTO.pausedReason=s.pausedReason;
       if(AUTO.config)AUTO.config.enabled=!!s.enabled;
-      autoLive(s.run);autoRuns(AUTO.runs);autoNext();autoPaused();autoSwitch();
+      autoLive(s.run);autoRuns(AUTO.runs);autoTotals(AUTO.runs);autoNext();autoPaused();autoSwitch();
       if(autoWas&&!now)loadAuto(true);autoWas=now;
     }).catch(function(){});
   }

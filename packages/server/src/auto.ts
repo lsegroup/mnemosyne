@@ -13,7 +13,8 @@
  *   - one AI job at a time, the switch in the Admin stops everything, and a run that was missed by more than 12 hours is skipped;
  *   - when the provider cannot be reached at all the run waits a minute and sends the same call again, for at most 15 minutes, then stops
  *     (such a call never arrived, so it costs nothing; an answer that is merely bad is never retried).
- * The cost of a call is counted from the tokens the provider reports, times the price list in docgen.ts.
+ * The cost of a call is counted from the tokens the provider reports, times the price list in docgen.ts. Every run also keeps what it used
+ * per model and per kind (TEXT = the articles, IMAGES = the AI flow charts) and how long the calls took.
  */
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
@@ -69,6 +70,18 @@ export interface AutoConfig {
   agreement?: { by: string; at: string; key: string };
 }
 
+/** What one kind of AI call of one model used in one run (Admin -> Auto, Runs). `wiki` is TEXT, `diagram` is IMAGES (the AI flow charts). */
+export interface AutoUsage {
+  model: string;
+  kind: AutoKind;
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  usd: number;
+  /** How long the calls took. Waiting for the provider to come back is not in it. */
+  ms: number;
+}
+
 export interface AutoRun {
   id: string;
   startedAt: string;
@@ -87,6 +100,8 @@ export interface AutoRun {
   inputTokens: number;
   outputTokens: number;
   usd: number;
+  /** The same tokens and cost split by model and kind. Runs made before this was recorded get it from the audit log (`backfillUsage`). */
+  usage?: AutoUsage[];
   note?: string;
   warnings: string[];
 }
@@ -394,6 +409,8 @@ export class AutoStore {
 // The runner
 // ----------------------------------------------------------------------------
 export interface GenOutcome {
+  /** The model that answered (its id, e.g. "muse-spark-1.3-contributor"). */
+  model: string;
   inputTokens: number;
   outputTokens: number;
   /** Cost counted from the reported tokens; null when the model has no list price. */
@@ -420,6 +437,115 @@ export interface RunnerDeps {
 }
 
 const round = (n: number) => Math.round(n * 1e6) / 1e6;
+
+/** Adds one call to the per-model, per-kind list of a run. */
+export function addUsage(list: AutoUsage[], e: AutoUsage): void {
+  const row = list.find((u) => u.model === e.model && u.kind === e.kind);
+  if (!row) {
+    list.push({ ...e, usd: round(e.usd) });
+    return;
+  }
+  row.calls += e.calls;
+  row.inputTokens += e.inputTokens;
+  row.outputTokens += e.outputTokens;
+  row.usd = round(row.usd + e.usd);
+  row.ms += e.ms;
+}
+
+/** "67 min 19 s", "2 h 17 min", "42 s". */
+export function formatDuration(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s} s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} min ${s % 60} s`;
+  return `${Math.floor(m / 60)} h ${m % 60} min`;
+}
+
+const usd4 = (n: number) => `$${n.toFixed(4)}`;
+
+/** The TEXT / IMAGES split of a run in words, for the audit trail. */
+function usageWords(u: AutoUsage[] | undefined): string {
+  if (!u?.length) return '';
+  const parts = (['wiki', 'diagram'] as const)
+    .map((k) => ({ k, rows: u.filter((x) => x.kind === k) }))
+    .filter((x) => x.rows.length)
+    .map(({ k, rows }) => `${k === 'wiki' ? 'TEXT' : 'IMAGES'} ${usd4(rows.reduce((a, x) => a + x.usd, 0))} in ${rows.reduce((a, x) => a + x.calls, 0)} calls (${[...new Set(rows.map((x) => x.model))].join(', ')})`);
+  return ` (${parts.join('; ')})`;
+}
+
+// ----------------------------------------------------------------------------
+// Runs made before the split was recorded: rebuilt from the audit trail, which has one `auto_start` and one `ai_done` per successful call
+// ----------------------------------------------------------------------------
+export interface AuditLike {
+  time: string;
+  event: string;
+  entityType: string;
+  entityName: string;
+  user: string;
+  description: string;
+}
+
+const TOKENS = /(\d+) tokens in, (\d+) out/;
+
+/**
+ * The split of a finished run, or null when the audit trail cannot give it. It is only given when the calls found add up to exactly the
+ * tokens the run recorded (so a trail that was rotated away or cut can never produce a wrong picture) and every model has a price.
+ */
+export function usageFromAudit(
+  events: AuditLike[],
+  run: Pick<AutoRun, 'startedAt' | 'finishedAt' | 'inputTokens' | 'outputTokens'>,
+  priceOf: (model: string, inputTokens: number, outputTokens: number) => number | null,
+): AutoUsage[] | null {
+  if (!run.finishedAt) return null;
+  const from = Date.parse(run.startedAt);
+  const to = Date.parse(run.finishedAt) + 1000;
+  const calls = events.filter((e) => e.user === 'auto' && (e.entityType === 'docs_wiki' || e.entityType === 'docs_diagram')).sort((a, b) => a.time.localeCompare(b.time));
+  const startedAt = new Map<string, number>();
+  const usage: AutoUsage[] = [];
+  let inTok = 0;
+  let outTok = 0;
+  for (const e of calls) {
+    const t = Date.parse(e.time);
+    if (t < from || t > to) continue;
+    const key = `${e.entityType}:${e.entityName}`;
+    if (e.event === 'auto_start') startedAt.set(key, t);
+    if (e.event !== 'ai_done') continue;
+    const tok = TOKENS.exec(e.description);
+    if (!tok) return null;
+    const kind: AutoKind = e.entityType === 'docs_wiki' ? 'wiki' : 'diagram';
+    // "Article written by Meta Model API / muse-spark-1.3 from 3 notes (...)" or "...diagrams drawn by Mnemosyne from a plan written by muse-spark-1.3 (...)"
+    const named = kind === 'wiki' ? /written by (.+?) from \d+ notes/.exec(e.description)?.[1]?.split(' / ').pop() : /plan written by (\S+) \(/.exec(e.description)?.[1];
+    if (!named) return null;
+    const cost = priceOf(named, Number(tok[1]), Number(tok[2]));
+    if (cost === null) return null;
+    addUsage(usage, { model: named, kind, calls: 1, inputTokens: Number(tok[1]), outputTokens: Number(tok[2]), usd: cost, ms: Math.max(0, t - (startedAt.get(key) ?? t)) });
+    startedAt.delete(key);
+    inTok += Number(tok[1]);
+    outTok += Number(tok[2]);
+  }
+  return inTok === run.inputTokens && outTok === run.outputTokens ? usage : null;
+}
+
+/** Gives every finished run that has no split the one the audit trail can prove. Returns how many runs were filled in. Never replaces a split. */
+export async function backfillUsage(
+  store: AutoStore,
+  loadEvents: (sinceIso: string) => Promise<AuditLike[]>,
+  priceOf: (model: string, inputTokens: number, outputTokens: number) => number | null,
+): Promise<number> {
+  const todo = (await store.get()).runs.filter((r) => !r.usage && r.finishedAt);
+  if (!todo.length) return 0;
+  const events = await loadEvents(todo.map((r) => r.startedAt).sort()[0]!);
+  const found = new Map<string, AutoUsage[]>();
+  for (const r of todo) {
+    const u = usageFromAudit(events, r, priceOf);
+    if (u) found.set(r.id, u);
+  }
+  if (!found.size) return 0;
+  await store.update((s) => {
+    for (const r of s.runs) if (!r.usage && found.has(r.id)) r.usage = found.get(r.id);
+  });
+  return found.size;
+}
 
 export class AutoRunner {
   private timer: NodeJS.Timeout | null = null;
@@ -497,7 +623,7 @@ export class AutoRunner {
 
     const next = nextRun(cfg.schedule, new Date(Math.max(now.getTime(), due)))?.toISOString() ?? null;
     const late = now.getTime() - due;
-    const base = { id: stamp(now), scheduledFor: st.nextRunAt, trigger: triggerName(cfg.schedule, new Date(due)), updated: [], unchanged: [], failed: [], notReached: [], queue: [], total: 0, inputTokens: 0, outputTokens: 0, usd: 0, warnings: [] };
+    const base = { id: stamp(now), scheduledFor: st.nextRunAt, trigger: triggerName(cfg.schedule, new Date(due)), updated: [], unchanged: [], failed: [], notReached: [], queue: [], total: 0, inputTokens: 0, outputTokens: 0, usd: 0, usage: [], warnings: [] };
     if (late > MAX_LATE_MS) {
       const hours = Math.round(late / 3600_000);
       await this.d.store.update((s) => {
@@ -557,7 +683,7 @@ export class AutoRunner {
         entityType: 'auto',
         entityName: 'Automatic update',
         user: 'auto',
-        description: `Run ${status}: ${r.updated.length} updated, ${r.unchanged.length} unchanged, ${r.failed.length} failed, ${r.notReached.length} not reached; ${r.inputTokens} tokens in, ${r.outputTokens} out; cost ${usd(r.usd)}${note ? `; ${note}` : ''}`,
+        description: `Run ${status}: ${r.updated.length} updated, ${r.unchanged.length} unchanged, ${r.failed.length} failed, ${r.notReached.length} not reached; ${r.inputTokens} tokens in, ${r.outputTokens} out; cost ${usd4(r.usd)}${usageWords(r.usage)}; ran ${formatDuration(Date.parse(r.finishedAt!) - Date.parse(r.startedAt))}${note ? `; ${note}` : ''}`,
       });
     }
   }
@@ -642,12 +768,16 @@ export class AutoRunner {
           let waited = 0;
           for (;;) {
             try {
+              const began = this.now().getTime();
               const out = await this.d.generate(item.project, kind, cfg.agreement!.by);
+              const took = Math.max(0, this.now().getTime() - began);
               did++;
               await this.mutate(id, (r) => {
+                const cost = out.usd ?? worst;
                 r.inputTokens += out.inputTokens;
                 r.outputTokens += out.outputTokens;
-                r.usd = round(r.usd + (out.usd ?? worst));
+                r.usd = round(r.usd + cost);
+                addUsage((r.usage ??= []), { model: out.model, kind, calls: 1, inputTokens: out.inputTokens, outputTokens: out.outputTokens, usd: cost, ms: took });
                 if (out.warning) r.warnings.push(`${item.project}: ${out.warning}`);
                 if (r.current) r.current.waiting = undefined;
                 if (kind === 'wiki') r.queue[0]!.wikiDone = true;

@@ -8,15 +8,20 @@ import {
   AutoStore,
   AutoValidationError,
   agreementKey,
+  backfillUsage,
   describeSchedule,
+  formatDuration,
   inspectProject,
   nextRun,
   noteHashes,
   parseAutoInput,
   runsPerMonth,
   summarize,
+  usageFromAudit,
   wouldRun,
+  type AuditLike,
   type AutoConfig,
+  type AutoRun,
   type AutoSchedule,
   type ProjectState,
 } from '../src/auto.js';
@@ -237,6 +242,9 @@ describe('the runner (no AI is called: the model call is a fake)', () => {
       states: over.states ?? { a: state('a', 'changed'), b: state('b', 'ok'), c: state('c', 'new') },
       worst: 0.25,
       cost: 0.2,
+      /** The model that answers, and how long every call takes on the fake clock. */
+      model: 'm1',
+      took: 0,
       runner: null as unknown as AutoRunner,
     };
     await store.update((s) => {
@@ -256,7 +264,8 @@ describe('the runner (no AI is called: the model call is a fake)', () => {
         h.calls.push(`${p}:${k}`);
         h.activeDuring.push(h.runner.active);
         await over.gen?.(p, k);
-        return { inputTokens: 1000, outputTokens: 500, usd: h.cost };
+        h.clock = new Date(h.clock.getTime() + h.took);
+        return { model: h.model, inputTokens: 1000, outputTokens: 500, usd: h.cost };
       },
       busy: () => h.busy,
       log: (e) => h.logs.push(e),
@@ -491,5 +500,125 @@ describe('the runner (no AI is called: the model call is a fake)', () => {
       await h.runner.tick();
     }
     expect((await h.store.get()).runs).toHaveLength(30);
+  });
+
+  it('records what each model used for TEXT and for IMAGES and how long the calls took, and says so in the audit trail', async () => {
+    const h = await harness();
+    h.took = 90_000;
+    await h.runner.tick();
+    const run = (await h.store.get()).runs[0]!;
+    expect(run.usage).toEqual([
+      { model: 'm1', kind: 'wiki', calls: 2, inputTokens: 2000, outputTokens: 1000, usd: 0.4, ms: 180_000 },
+      { model: 'm1', kind: 'diagram', calls: 2, inputTokens: 2000, outputTokens: 1000, usd: 0.4, ms: 180_000 },
+    ]);
+    expect(Date.parse(run.finishedAt!) - Date.parse(run.startedAt)).toBe(360_000);
+    const done = h.logs.find((l) => l.event === 'auto_run' && /Run completed/.test(l.description ?? ''))!;
+    expect(done.description).toContain('cost $0.8000 (TEXT $0.4000 in 2 calls (m1); IMAGES $0.4000 in 2 calls (m1)); ran 6 min 0 s');
+  });
+
+  it('keeps a row for every model, and does not count a try that failed or the minutes of waiting as time of the call', async () => {
+    let down = 1;
+    const h = await harness({
+      gen: (p, k) => {
+        h.model = p === 'c' ? 'm2' : 'm1';
+        if (p === 'a' && k === 'wiki' && down-- > 0) {
+          h.clock = new Date(h.clock.getTime() + 30_000); // the failed try took 30 seconds
+          throw unreachable();
+        }
+      },
+    });
+    h.took = 10_000;
+    await h.runner.tick();
+    const run = (await h.store.get()).runs[0]!;
+    expect(run.usage!.map((u) => `${u.model}:${u.kind}:${u.calls}:${u.ms}`)).toEqual(['m1:wiki:1:10000', 'm1:diagram:1:10000', 'm2:wiki:1:10000', 'm2:diagram:1:10000']);
+    expect(run.usage!.reduce((n, u) => n + u.inputTokens, 0)).toBe(run.inputTokens); // the split always adds up to the run's totals
+  });
+});
+
+describe('the length of a run in words', () => {
+  it('says seconds, minutes or hours, whichever is the useful one', () => {
+    expect(formatDuration(0)).toBe('0 s');
+    expect(formatDuration(42_000)).toBe('42 s');
+    expect(formatDuration(59_600)).toBe('1 min 0 s');
+    expect(formatDuration(3_599_000)).toBe('59 min 59 s');
+    expect(formatDuration(4_039_000)).toBe('1 h 7 min');
+    expect(formatDuration(8_230_000)).toBe('2 h 17 min');
+  });
+});
+
+describe('the split of a run that was made before it was recorded', () => {
+  let dir: string;
+  beforeAll(async () => void (dir = await mkdtemp(join(tmpdir(), 'mnemosyne-autousage-'))));
+  afterAll(() => rm(dir, { recursive: true, force: true }));
+
+  const ev = (time: string, event: string, entityType: string, entityName: string, description = '', user = 'auto'): AuditLike => ({ time, event, entityType, entityName, user, description });
+  const trail: AuditLike[] = [
+    ev('2026-11-01T02:00:31.000Z', 'auto_start', 'docs_wiki', 'a'),
+    ev('2026-11-01T02:01:31.000Z', 'ai_done', 'docs_wiki', 'a', 'Article written by Meta Model API / muse-spark-1.3-contributor from 2 notes (1000 tokens in, 4000 out)'),
+    ev('2026-11-01T02:01:32.000Z', 'auto_start', 'docs_diagram', 'a'),
+    ev('2026-11-01T02:03:32.000Z', 'ai_done', 'docs_diagram', 'a', 'Architecture diagrams drawn by Mnemosyne from a plan written by muse-spark-1.3-contributor (5 pictures: Overview, Request path; 31 boxes, 29 arrows; 2000 tokens in, 8000 out)'),
+    // not this run's: a person's call in the same minutes, a failed call (nothing was billed), a call of an earlier day
+    ev('2026-11-01T02:02:00.000Z', 'ai_done', 'docs_wiki', 'z', 'Article written by Meta Model API / muse-spark-1.3-contributor from 9 notes (999 tokens in, 999 out)', 'olaf'),
+    ev('2026-11-01T02:02:30.000Z', 'ai_failed', 'docs_wiki', 'b', 'Could not reach the provider (EAI_AGAIN).'),
+    ev('2026-10-31T18:00:00.000Z', 'ai_done', 'docs_wiki', 'a', 'Article written by Meta Model API / muse-spark-1.3-contributor from 2 notes (5 tokens in, 5 out)'),
+  ];
+  const price = (_model: string, i: number, o: number) => (i * 0.1 + o * 0.2) / 1_000_000;
+  const finished = (over: Partial<AutoRun> = {}): AutoRun => ({
+    id: 'r1',
+    startedAt: '2026-11-01T02:00:30.000Z',
+    finishedAt: '2026-11-01T02:04:00.000Z',
+    scheduledFor: '2026-11-01T02:00:00.000Z',
+    trigger: 'Sunday 02:00 schedule',
+    status: 'completed',
+    updated: ['a'],
+    unchanged: [],
+    failed: [],
+    notReached: [],
+    queue: [],
+    total: 1,
+    inputTokens: 3000,
+    outputTokens: 12000,
+    usd: 0.0027,
+    warnings: [],
+    ...over,
+  });
+
+  it('is rebuilt per model and kind, with the time of every call, from the calls of that run only', () => {
+    const u = usageFromAudit(trail, finished(), price)!;
+    expect(u.map((x) => [x.model, x.kind, x.calls, x.inputTokens, x.outputTokens, x.ms])).toEqual([
+      ['muse-spark-1.3-contributor', 'wiki', 1, 1000, 4000, 60_000],
+      ['muse-spark-1.3-contributor', 'diagram', 1, 2000, 8000, 120_000],
+    ]);
+    expect(u[0]!.usd).toBeCloseTo(0.0009, 8);
+    expect(u[1]!.usd).toBeCloseTo(0.0018, 8);
+  });
+
+  it('is refused when the trail does not add up to the run, or a price is missing: a wrong picture is worse than none', () => {
+    expect(usageFromAudit(trail, finished({ inputTokens: 3001 }), price)).toBeNull();
+    expect(usageFromAudit(trail.slice(0, 2), finished(), price)).toBeNull(); // the trail lost the charts
+    expect(usageFromAudit(trail, finished(), () => null)).toBeNull();
+    expect(usageFromAudit(trail, finished({ finishedAt: undefined }), price)).toBeNull();
+  });
+
+  it('fills in the runs that have no split, and never replaces one that has it', async () => {
+    const store = new AutoStore(join(dir, 'backfill.json'));
+    const kept = [{ model: 'x', kind: 'wiki' as const, calls: 1, inputTokens: 1, outputTokens: 1, usd: 0, ms: 1 }];
+    await store.update((s) => void (s.runs = [finished({ id: 'new' }), finished({ id: 'has', usage: kept }), finished({ id: 'cut', inputTokens: 3001 })]));
+    let since = '';
+    const n = await backfillUsage(
+      store,
+      async (from) => {
+        since = from;
+        return trail;
+      },
+      price,
+    );
+    expect(n).toBe(1);
+    expect(since).toBe('2026-11-01T02:00:30.000Z');
+    const runs = (await store.get()).runs;
+    expect(runs.find((r) => r.id === 'new')!.usage).toHaveLength(2);
+    expect(runs.find((r) => r.id === 'has')!.usage).toEqual(kept);
+    expect(runs.find((r) => r.id === 'cut')!.usage).toBeUndefined();
+    expect(await backfillUsage(store, async () => trail, price)).toBe(0); // nothing left that can be proven
   });
 });
