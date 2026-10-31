@@ -299,11 +299,6 @@ export function layout(plan: DiagramPlan): Scene {
     [...path, ...control].forEach((b, i) => order.set(b.node.id, i));
     return { path, control };
   });
-  const stackH = (l: Box[]) => (l.length ? l.reduce((s, b) => s + b.h, 0) + ROW_GAP * (l.length - 1) : 0);
-  const pathH = Math.max(...stacks.map((s) => stackH(s.path)), 48);
-  const ctrlH = Math.max(...stacks.map((s) => stackH(s.control)), 0);
-  const hasControl = ctrlH > 0;
-
   const lw = (lines: string[]) => Math.max(0, ...lines.map((l) => textWidth(l, 11.5, false))) + 10;
   const lh = (lines: string[]) => lines.length * 14 + 6;
 
@@ -364,6 +359,21 @@ export function layout(plan: DiagramPlan): Scene {
   });
   const skipGaps = (e: Edge): [number, number] => (e.b.col > e.a.col ? [e.a.col, e.b.col - 1] : [e.a.col - 1, e.b.col]);
 
+  // Neighbouring boxes of a column that are joined by a LABELLED vertical arrow are spread apart so the label fits between them
+  // (otherwise it would sit on the boxes).
+  const rowGaps = new Map<string, number>();
+  for (const e of edges) {
+    if (e.kind !== 'vert' || !e.lines.length) continue;
+    const [up, low] = order.get(e.a.node.id)! < order.get(e.b.node.id)! ? [e.a, e.b] : [e.b, e.a];
+    const k = `${up.node.id}|${low.node.id}`;
+    rowGaps.set(k, Math.max(rowGaps.get(k) ?? ROW_GAP, lh(e.lines) + 18));
+  }
+  const rowGap = (up: Box, low: Box) => rowGaps.get(`${up.node.id}|${low.node.id}`) ?? ROW_GAP;
+  const stackH = (l: Box[]) => (l.length ? l.reduce((s, b) => s + b.h, 0) + l.slice(1).reduce((s, b, i) => s + rowGap(l[i]!, b), 0) : 0);
+  const pathH = Math.max(...stacks.map((s) => stackH(s.path)), 48);
+  const ctrlH = Math.max(...stacks.map((s) => stackH(s.control)), 0);
+  const hasControl = ctrlH > 0;
+
   // ---- gaps between columns: wide enough for the widest label and for one lane per arrow
   const gapCount = new Array<number>(Math.max(0, n - 1)).fill(0);
   const gapLabel = new Array<number>(Math.max(0, n - 1)).fill(0);
@@ -385,7 +395,7 @@ export function layout(plan: DiagramPlan): Scene {
   const gaps = gapCount.map((cnt, g) => Math.min(260, Math.max(64, (gapLabel[g]! ? gapLabel[g]! + 34 : 30) + 9 * cnt)));
   const colX: number[] = [];
   for (let i = 0; i < n; i++) colX.push(i === 0 ? MARGIN : colX[i - 1]! + NODE_W + gaps[i - 1]!);
-  const width = colX[n - 1]! + NODE_W + MARGIN;
+  let width = colX[n - 1]! + NODE_W + MARGIN;
 
   const skipPath = edges.filter((e) => e.kind === 'skip' && e.a.node.lane === 'path').length;
   const skipCtrl = edges.filter((e) => e.kind === 'skip' && e.a.node.lane === 'control').length;
@@ -405,11 +415,11 @@ export function layout(plan: DiagramPlan): Scene {
   for (let c = 0; c < n; c++) {
     const place = (list: Box[], top: number, bandH: number) => {
       let y = top + (bandH - stackH(list)) / 2;
-      for (const b of list) {
+      list.forEach((b, i) => {
         b.x = colX[c]!;
         b.y = y;
-        y += b.h + ROW_GAP;
-      }
+        y += b.h + (list[i + 1] ? rowGap(b, list[i + 1]!) : 0);
+      });
     };
     place(stacks[c]!.path, pathTop, pathH);
     place(stacks[c]!.control, ctrlTop, ctrlH);
@@ -585,6 +595,9 @@ export function layout(plan: DiagramPlan): Scene {
     arrows.push({ t: 'arrow', color: C.ink, pts: [end, [end[0] - dx * 10 - dy * 5, end[1] - dy * 10 + dx * 5], [end[0] - dx * 10 + dy * 5, end[1] - dy * 10 - dx * 5]] });
     lines.push({ t: 'path', pts: [...pts.slice(0, -1), [end[0] - dx * 9, end[1] - dy * 9]], dash: e.link.dashed, color: C.ink });
   });
+
+  // a label that sticks out beyond the last column (next to a vertical arrow there) widens the picture instead of being cut off
+  width = Math.max(width, Math.ceil(Math.max(0, ...placed.map((r) => r.x + r.w)) + 16));
 
   // ---- assemble in drawing order: band, arrows, labels, boxes, text
   const scene: Op[] = [];

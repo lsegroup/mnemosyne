@@ -103,8 +103,9 @@ describe('reading a set of pictures (overview + details)', () => {
 });
 
 describe('drawing the plan', () => {
-  // 'real-*' are plans the AI actually wrote on 2026-10-30 (addresses removed): the busiest diagrams we have
-  for (const name of ['mnemosyne', 'load-balancer', 'real-aequitas', 'real-mnemosyne']) {
+  // 'real-*' are plans the AI actually wrote on 2026-10-30/31 (addresses removed): the busiest diagrams we have; real-centest-dense is the 21-arrow
+  // single picture the owner saw with labels on top of each other and cut off at the edge
+  for (const name of ['mnemosyne', 'load-balancer', 'real-aequitas', 'real-mnemosyne', 'real-centest-dense']) {
     it(`${name}: boxes never overlap, no label covers a box or another label, no arrow runs behind a box, everything stays inside the picture`, () => {
       const plan = parsePlan(fixture(name), name);
       const scene = layout(plan);
@@ -129,6 +130,10 @@ describe('drawing the plan', () => {
         for (const b of boxes.slice(i + 1)) expect(overlap(a, b), 'two boxes overlap').toBe(false);
       }
       for (const h of halosOf(scene)) for (const b of boxes) expect(overlap(h, b), 'an arrow label covers a box').toBe(false);
+      for (const h of halosOf(scene)) {
+        expect(h.x, 'an arrow label sticks out on the left').toBeGreaterThanOrEqual(0);
+        expect(h.x + h.w, 'an arrow label sticks out on the right (cut off)').toBeLessThanOrEqual(scene.width);
+      }
       for (const o of scene.ops) {
         if (o.t !== 'text') continue;
         expect(o.x).toBeGreaterThan(0);
