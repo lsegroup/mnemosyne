@@ -527,7 +527,7 @@ describe('web portal', () => {
   describe('AI documentation (agreement, spending guards, PDF)', () => {
     let llm: Server;
     let llmBase = '';
-    const calls = { chat: 0, image: 0, briefMax: 0, limits: [] as number[], lastChat: null as null | { max_tokens?: number; max_completion_tokens?: number; temperature?: number; top_p?: number; messages: { role: string; content: string }[] } };
+    const calls = { chat: 0, image: 0, briefMax: 0, limits: [] as number[], lastChat: null as null | { max_tokens?: number; max_completion_tokens?: number; temperature?: number; top_p?: number; reasoning_effort?: string; messages: { role: string; content: string }[] } };
     const dropped = { once: false };
     // what the fake text model answers when asked for a diagram plan (the label holds characters that must be escaped in the SVG)
     const DIAGRAM_PLAN = {
@@ -948,7 +948,7 @@ describe('web portal', () => {
       expect(jobs.pdf.def.usesAi).toBe(false);
       // the PDF block has the very same fields as the other two, empty because nothing uses them yet
       const pageHtml = await (await fetch(`${base}/admin/`, { headers: h })).text();
-      for (const role of ['text', 'image', 'pdf']) for (const f of ['maxTokens', 'temperature', 'topP', 'timeoutMinutes']) expect(pageHtml, `${f}-${role}`).toContain(`id="${f}-${role}"`);
+      for (const role of ['text', 'image', 'pdf']) for (const f of ['maxTokens', 'temperature', 'topP', 'reasoningEffort', 'timeoutMinutes']) expect(pageHtml, `${f}-${role}`).toContain(`id="${f}-${role}"`);
       for (const id of ['sys-pdf', 'usr-pdf']) expect(pageHtml).toContain(`id="${id}"`);
       expect(jobs.pdf.effective.systemPrompt).toBe('');
       expect(jobs.pdf.effective.userPrompt).toBe('');
@@ -964,7 +964,7 @@ describe('web portal', () => {
       expect(model.model).toBe('text-model');
 
       // refused: out-of-range numbers, text, a missing or unknown placeholder, an unknown job
-      for (const bad of [{ maxTokens: 10 }, { maxTokens: 'abc' }, { maxTokens: 1_000_001 }, { temperature: 5 }, { topP: 0 }, { timeoutMinutes: 999 }, { userPrompt: 'no placeholder here' }, { userPrompt: 'x {{notes}} {{bogus}}' }]) {
+      for (const bad of [{ maxTokens: 10 }, { maxTokens: 'abc' }, { maxTokens: 1_000_001 }, { temperature: 5 }, { topP: 0 }, { reasoningEffort: 'ludicrous' }, { timeoutMinutes: 999 }, { userPrompt: 'no placeholder here' }, { userPrompt: 'x {{notes}} {{bogus}}' }]) {
         expect((await put('text', { model, ...bad })).status, JSON.stringify(bad)).toBe(400);
       }
       expect((await put('nope', {})).status).toBe(400);
@@ -974,10 +974,10 @@ describe('web portal', () => {
       const oldEst = await (await api(admin, '/estimate?kind=wiki')).json();
       expect(oldEst.facts.find((f: string[]) => f[0] === 'Size')[1]).toContain('up to 50,000 out');
 
-      const saved = await put('text', { model, maxTokens: '20000', temperature: '0.2', topP: '0.9', timeoutMinutes: '5', systemPrompt: 'CUSTOM-SYSTEM write short.', userPrompt: 'Project {{project}} CUSTOM-USER\n{{notes}}' });
+      const saved = await put('text', { model, maxTokens: '20000', temperature: '0.2', topP: '0.9', reasoningEffort: 'low', timeoutMinutes: '5', systemPrompt: 'CUSTOM-SYSTEM write short.', userPrompt: 'Project {{project}} CUSTOM-USER\n{{notes}}' });
       expect(saved.status).toBe(200);
       jobs = await get();
-      expect(jobs.text.settings).toMatchObject({ maxTokens: 20_000, temperature: 0.2, topP: 0.9, timeoutMinutes: 5 });
+      expect(jobs.text.settings).toMatchObject({ maxTokens: 20_000, temperature: 0.2, topP: 0.9, reasoningEffort: 'low', timeoutMinutes: 5 });
       expect(jobs.text.effective.systemPrompt).toBe('CUSTOM-SYSTEM write short.');
       expect(jobs.image.assignment).toBeTruthy(); // saving one job leaves the others alone
       expect(jobs.image.settings).toEqual({});
@@ -999,6 +999,7 @@ describe('web portal', () => {
       const ev = audit.filter((e) => e.event === 'update' && e.entityType === 'llm_job' && e.entityId === 'text').pop();
       expect(ev.changes).toContain('+ maxTokens: 20000');
       expect(ev.changes).toContain('+ temperature: 0.2');
+      expect(ev.changes).toContain('+ reasoningEffort: "low"');
     });
 
     it('stops at the daily limit and records every agreement in the audit trail', async () => {
@@ -1012,6 +1013,7 @@ describe('web portal', () => {
       expect(sent.max_tokens ?? sent.max_completion_tokens).toBe(20_000);
       expect(sent.temperature).toBe(0.2);
       expect(sent.top_p).toBe(0.9);
+      expect(sent.reasoning_effort).toBe('low'); // sent because an administrator set it
       expect(sent.messages[0]!.content).toBe('CUSTOM-SYSTEM write short.');
       expect(sent.messages[1]!.content).toContain('CUSTOM-USER');
       expect(sent.messages[1]!.content).toContain('Alpha first note'); // {{notes}} was replaced by the project's notes

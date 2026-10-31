@@ -77,6 +77,8 @@ export interface AutoUsage {
   calls: number;
   inputTokens: number;
   outputTokens: number;
+  /** Of the output tokens, those the provider reported as thinking (not in the answer). Absent when it does not report them, or for runs made before they were read. */
+  reasoningTokens?: number;
   usd: number;
   /** How long the calls took. Waiting for the provider to come back is not in it. */
   ms: number;
@@ -413,6 +415,8 @@ export interface GenOutcome {
   model: string;
   inputTokens: number;
   outputTokens: number;
+  /** Of the output tokens, the ones the provider reported as thinking; absent when it does not report them. */
+  reasoningTokens?: number;
   /** Cost counted from the reported tokens; null when the model has no list price. */
   usd: number | null;
   warning?: string;
@@ -448,6 +452,7 @@ export function addUsage(list: AutoUsage[], e: AutoUsage): void {
   row.calls += e.calls;
   row.inputTokens += e.inputTokens;
   row.outputTokens += e.outputTokens;
+  if (e.reasoningTokens !== undefined) row.reasoningTokens = (row.reasoningTokens ?? 0) + e.reasoningTokens;
   row.usd = round(row.usd + e.usd);
   row.ms += e.ms;
 }
@@ -485,7 +490,7 @@ export interface AuditLike {
   description: string;
 }
 
-const TOKENS = /(\d+) tokens in, (\d+) out/;
+const TOKENS = /(\d+) tokens in, (\d+) out(?:, (\d+) of it reasoning)?/;
 
 /**
  * The split of a finished run, or null when the audit trail cannot give it. It is only given when the calls found add up to exactly the
@@ -518,7 +523,7 @@ export function usageFromAudit(
     if (!named) return null;
     const cost = priceOf(named, Number(tok[1]), Number(tok[2]));
     if (cost === null) return null;
-    addUsage(usage, { model: named, kind, calls: 1, inputTokens: Number(tok[1]), outputTokens: Number(tok[2]), usd: cost, ms: Math.max(0, t - (startedAt.get(key) ?? t)) });
+    addUsage(usage, { model: named, kind, calls: 1, inputTokens: Number(tok[1]), outputTokens: Number(tok[2]), ...(tok[3] !== undefined ? { reasoningTokens: Number(tok[3]) } : {}), usd: cost, ms: Math.max(0, t - (startedAt.get(key) ?? t)) });
     startedAt.delete(key);
     inTok += Number(tok[1]);
     outTok += Number(tok[2]);
@@ -777,7 +782,7 @@ export class AutoRunner {
                 r.inputTokens += out.inputTokens;
                 r.outputTokens += out.outputTokens;
                 r.usd = round(r.usd + cost);
-                addUsage((r.usage ??= []), { model: out.model, kind, calls: 1, inputTokens: out.inputTokens, outputTokens: out.outputTokens, usd: cost, ms: took });
+                addUsage((r.usage ??= []), { model: out.model, kind, calls: 1, inputTokens: out.inputTokens, outputTokens: out.outputTokens, ...(out.reasoningTokens !== undefined ? { reasoningTokens: out.reasoningTokens } : {}), usd: cost, ms: took });
                 if (out.warning) r.warnings.push(`${item.project}: ${out.warning}`);
                 if (r.current) r.current.waiting = undefined;
                 if (kind === 'wiki') r.queue[0]!.wikiDone = true;

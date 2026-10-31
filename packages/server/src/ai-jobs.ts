@@ -6,6 +6,10 @@ import { ProviderValidationError, type Role } from './provider-store.js';
  * samples, how long a call may take, and the words it is given. Nothing here is hard-coded in the generators:
  * they read the effective values, which are the stored settings or, where nothing is stored, the defaults below.
  */
+/** The levels OpenAI-style APIs know for `reasoning_effort`. */
+export const REASONING_EFFORTS = ['minimal', 'low', 'medium', 'high'] as const;
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+
 export interface JobSettings {
   /** Upper limit of the answer (output tokens). You pay per token written, so this is the cost ceiling of one call. */
   maxTokens?: number;
@@ -13,6 +17,11 @@ export interface JobSettings {
   temperature?: number;
   /** 0-1 nucleus sampling. Unset = the provider's own default (not sent). */
   topP?: number;
+  /**
+   * How long a reasoning model thinks before it answers. The thinking is written as output tokens: it is waited for and paid for, and it can be
+   * most of what a call produces. Unset = the provider's own default (not sent). Sent as `reasoning_effort` to OpenAI-compatible providers only.
+   */
+  reasoningEffort?: ReasoningEffort;
   /** Time limit of one call to the provider. */
   timeoutMinutes?: number;
   /** Tells the AI who it is and the rules it must follow. */
@@ -43,7 +52,7 @@ export interface JobDef {
   systemLabel: string;
   userLabel: string;
   placeholders: Placeholder[];
-  defaults: Required<Pick<JobSettings, 'maxTokens' | 'timeoutMinutes' | 'systemPrompt' | 'userPrompt'>> & Pick<JobSettings, 'temperature' | 'topP'>;
+  defaults: Required<Pick<JobSettings, 'maxTokens' | 'timeoutMinutes' | 'systemPrompt' | 'userPrompt'>> & Pick<JobSettings, 'temperature' | 'topP' | 'reasoningEffort'>;
 }
 
 export const JOB_DEFS: Record<Role, JobDef> = {
@@ -96,6 +105,7 @@ export interface EffectiveJob {
   maxTokens: number;
   temperature?: number;
   topP?: number;
+  reasoningEffort?: ReasoningEffort;
   timeoutMinutes: number;
   systemPrompt: string;
   userPrompt: string;
@@ -108,6 +118,7 @@ export function effectiveJob(role: Role, s: JobSettings | undefined): EffectiveJ
     maxTokens: s?.maxTokens ?? d.maxTokens,
     temperature: s?.temperature ?? d.temperature,
     topP: s?.topP ?? d.topP,
+    reasoningEffort: s?.reasoningEffort ?? d.reasoningEffort,
     timeoutMinutes: s?.timeoutMinutes ?? d.timeoutMinutes,
     systemPrompt: s?.systemPrompt?.trim() ? s.systemPrompt : d.systemPrompt,
     userPrompt: s?.userPrompt?.trim() ? s.userPrompt : d.userPrompt,
@@ -133,6 +144,13 @@ export function validateJobSettings(role: Role, input: Record<string, unknown>):
   if (temperature !== undefined) out.temperature = temperature;
   const topP = num(input.topP, 'Top-p', 0.01, 1, false);
   if (topP !== undefined) out.topP = topP;
+  const effort = input.reasoningEffort;
+  if (effort !== undefined && effort !== null && effort !== '') {
+    if (typeof effort !== 'string' || !(REASONING_EFFORTS as readonly string[]).includes(effort)) {
+      throw new ProviderValidationError(`Reasoning effort must be one of ${REASONING_EFFORTS.join(', ')}, or empty for the provider's default`);
+    }
+    out.reasoningEffort = effort as ReasoningEffort;
+  }
   const timeout = num(input.timeoutMinutes, 'Time limit', 1, 60, true);
   if (timeout !== undefined && timeout !== def.defaults.timeoutMinutes) out.timeoutMinutes = timeout;
 

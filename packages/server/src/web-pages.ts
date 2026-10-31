@@ -2,7 +2,7 @@
 
 import { esc } from './html.js';
 import type { DocMeta, HistoryEntry } from './docgen.js';
-import { JOB_DEFS, MAX_OUTPUT_TOKENS } from './ai-jobs.js';
+import { JOB_DEFS, MAX_OUTPUT_TOKENS, REASONING_EFFORTS } from './ai-jobs.js';
 export { esc };
 
 const CSS = `
@@ -350,6 +350,7 @@ function jobBlocks(): string {
       <label>Max output tokens<input id="maxTokens-${role}" inputmode="numeric" placeholder="${fmt(d.defaults.maxTokens)}" autocomplete="off"><span class="hint">The most the AI may write in one call. You pay per token written, so this is the cost ceiling of a call; the agreement popup shows the worst case. Big projects and reasoning models need a high limit. Default ${fmt(d.defaults.maxTokens)}, allowed 256 to ${fmt(MAX_OUTPUT_TOKENS)}.</span></label>
       <label>Temperature<input id="temperature-${role}" inputmode="decimal" placeholder="provider default" autocomplete="off"><span class="hint">0 to 2. Lower = more factual and repeatable, higher = more varied. Empty = the provider's own default (the value is not sent).</span></label>
       <label>Top-p<input id="topP-${role}" inputmode="decimal" placeholder="provider default" autocomplete="off"><span class="hint">0.01 to 1. The share of most-likely words the AI may choose from; lower = safer wording. Empty = the provider's own default (not sent).</span></label>
+      <label>Reasoning effort<select id="reasoningEffort-${role}"><option value="">Provider default (not sent)</option>${REASONING_EFFORTS.map((x) => `<option value="${x}">${x[0]!.toUpperCase()}${x.slice(1)}</option>`).join('')}</select><span class="hint">How long a reasoning model thinks before it answers. The thinking is written as output tokens: you wait for it and pay for it, and it can be most of what a call produces (the Runs list in Auto shows the share the provider reports). Lower = faster and cheaper, perhaps less careful. Sent as <code>reasoning_effort</code> to OpenAI-compatible providers only; a model that does not know the setting may refuse the request, then set it back to the default.</span></label>
       <label>Time limit per call (minutes)<input id="timeoutMinutes-${role}" inputmode="numeric" placeholder="${d.defaults.timeoutMinutes}" autocomplete="off"><span class="hint">A call that takes longer is stopped. Default ${d.defaults.timeoutMinutes}, allowed 1 to 60.</span></label>
     </div>
     <label class="wide">${esc(d.systemLabel)}<textarea id="sys-${role}" rows="6" spellcheck="false"></textarea></label>
@@ -643,7 +644,7 @@ function ADMIN_JS(basePath: string): string {
     var j=JOBS[role];if(!j)return;
     var a=j.assignment;if(a)$('m-'+role).value=a.providerId+'::'+a.model;
     var st=j.settings||{},e=j.effective;
-    ['maxTokens','temperature','topP','timeoutMinutes'].forEach(function(k){$(k+'-'+role).value=st[k]===undefined?'':st[k]});
+    ['maxTokens','temperature','topP','reasoningEffort','timeoutMinutes'].forEach(function(k){$(k+'-'+role).value=st[k]===undefined?'':st[k]});
     $('sys-'+role).value=e.systemPrompt;$('usr-'+role).value=e.userPrompt;
   }
   function renderRoles(){
@@ -657,14 +658,14 @@ function ADMIN_JS(basePath: string): string {
       ev.preventDefault();note('msg-'+role,'');
       var body={},v=$('m-'+role).value;
       if(v){var i=v.indexOf('::');body.model={providerId:v.slice(0,i),model:v.slice(i+2)}}
-      ['maxTokens','temperature','topP','timeoutMinutes'].forEach(function(k){body[k]=$(k+'-'+role).value.trim()});
+      ['maxTokens','temperature','topP','reasoningEffort','timeoutMinutes'].forEach(function(k){body[k]=$(k+'-'+role).value.trim()});
       body.systemPrompt=$('sys-'+role).value;body.userPrompt=$('usr-'+role).value;
       call('PUT','/llm/jobs/'+role,body).then(function(r){JOBS=r.jobs;data.assignments={};ROLES.forEach(function(x){if(JOBS[x].assignment)data.assignments[x]=JOBS[x].assignment});fillJob(role);note('msg-'+role,'Saved. It applies to the next run.',true)}).catch(function(e){note('msg-'+role,e.message)});
     });
     var rb=document.querySelector('[data-reset="'+role+'"]');
     if(rb)rb.addEventListener('click',function(){
       var d=JOBS[role].def.defaults;
-      ['maxTokens','temperature','topP','timeoutMinutes'].forEach(function(k){$(k+'-'+role).value=''});
+      ['maxTokens','temperature','topP','reasoningEffort','timeoutMinutes'].forEach(function(k){$(k+'-'+role).value=''});
       $('sys-'+role).value=d.systemPrompt;$('usr-'+role).value=d.userPrompt;
       note('msg-'+role,'Defaults filled in - press Save to keep them.',true);
     });
@@ -886,14 +887,14 @@ function ADMIN_JS(basePath: string): string {
   function usageTable(u){
     var t=document.createElement('table');t.className='use';
     var hr=document.createElement('tr');
-    ['Model','What','Calls','Tokens in','Tokens out','Cost','AI time'].forEach(function(x,i){var th=document.createElement('th');th.textContent=x;if(i>1)th.className='n';hr.appendChild(th)});
+    ['Model','What','Calls','Tokens in','Tokens out','of it reasoning','Cost','AI time'].forEach(function(x,i){var th=document.createElement('th');th.textContent=x;if(i>1)th.className='n';hr.appendChild(th)});
     var hd=document.createElement('thead');hd.appendChild(hr);t.appendChild(hd);
     var b=document.createElement('tbody');t.appendChild(b);
-    var tot={c:0,i:0,o:0,u:0,ms:0};
-    function row(tr,m,w,x,cls){cell(tr,m);cell(tr,w);[num(x.c),num(x.i),num(x.o),usd4(x.u),dur(x.ms)].forEach(function(v){cell(tr,v,'n')});if(cls)tr.className=cls;b.appendChild(tr)}
+    var tot={c:0,i:0,o:0,r:undefined,u:0,ms:0};
+    function row(tr,m,w,x,cls){cell(tr,m);cell(tr,w);[num(x.c),num(x.i),num(x.o),x.r===undefined?'—':num(x.r),usd4(x.u),dur(x.ms)].forEach(function(v){cell(tr,v,'n')});if(cls)tr.className=cls;b.appendChild(tr)}
     u.slice().sort(function(a,c){return a.model!==c.model?(a.model<c.model?-1:1):(a.kind===c.kind?0:a.kind==='wiki'?-1:1)}).forEach(function(x){
-      var v={c:x.calls,i:x.inputTokens,o:x.outputTokens,u:x.usd,ms:x.ms};
-      tot.c+=v.c;tot.i+=v.i;tot.o+=v.o;tot.u+=v.u;tot.ms+=v.ms;
+      var v={c:x.calls,i:x.inputTokens,o:x.outputTokens,r:x.reasoningTokens,u:x.usd,ms:x.ms};
+      tot.c+=v.c;tot.i+=v.i;tot.o+=v.o;tot.u+=v.u;tot.ms+=v.ms;if(v.r!==undefined)tot.r=(tot.r||0)+v.r;
       row(document.createElement('tr'),x.model,KIND[x.kind]||x.kind,v);
     });
     if(u.length>1)row(document.createElement('tr'),'','Together',tot,'sum');

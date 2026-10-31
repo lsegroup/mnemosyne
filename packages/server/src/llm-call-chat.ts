@@ -19,6 +19,8 @@ export interface ChatResult {
   text: string;
   inputTokens: number;
   outputTokens: number;
+  /** Of the output tokens, the ones the provider says were spent thinking (not in the answer). Absent when it does not report them. */
+  reasoningTokens?: number;
 }
 
 /** A 50,000-token answer can take ten minutes; the job runs in the background and the page polls. */
@@ -102,7 +104,7 @@ export async function chat(
   model: string,
   system: string,
   user: string,
-  opts: { maxTokens?: number; timeoutMs?: number; temperature?: number; topP?: number } = {},
+  opts: { maxTokens?: number; timeoutMs?: number; temperature?: number; topP?: number; reasoningEffort?: string } = {},
 ): Promise<ChatResult> {
   const maxTokens = opts.maxTokens ?? 8000;
   const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${p.apiKey}` };
@@ -114,10 +116,12 @@ export async function chat(
   const send = async (limitField: 'max_tokens' | 'max_completion_tokens', limit: number) => {
     // temperature / top_p are sent only when an administrator set them; otherwise the provider's own default applies
     const sampling = { ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}), ...(opts.topP !== undefined ? { top_p: opts.topP } : {}) };
+    // the same for the reasoning effort; it exists in the OpenAI-style format only (the Anthropic format thinks in its own way)
+    const effort = opts.reasoningEffort && p.kind !== 'anthropic-messages' ? { reasoning_effort: opts.reasoningEffort } : {};
     const body =
       p.kind === 'anthropic-messages'
         ? { model, system, max_tokens: limit, ...sampling, messages: [{ role: 'user', content: user }] }
-        : { model, [limitField]: limit, ...sampling, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] };
+        : { model, [limitField]: limit, ...sampling, ...effort, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] };
     return fetchWithRetry(endpoint(p), { method: 'POST', headers, body: JSON.stringify(body) }, opts.timeoutMs ?? DEFAULT_TIMEOUT_MS, 'the provider');
   };
 
@@ -135,7 +139,10 @@ export async function chat(
     const t = await res.text();
     why = (/"message"\s*:\s*"([^"]{1,200})/.exec(t)?.[1] ?? '').trim();
   }
-  if (res.status === 400) throw new ProviderValidationError(`The provider rejected the request (HTTP 400${why ? `: ${why}` : ''}).`);
+  if (res.status === 400) {
+    const sent = opts.reasoningEffort && p.kind !== 'anthropic-messages' ? ` This job sends the reasoning effort "${opts.reasoningEffort}"; if the model does not support it, set it back to "Provider default" in Admin → LLM.` : '';
+    throw new ProviderValidationError(`The provider rejected the request (HTTP 400${why ? `: ${why}` : ''}).${sent}`);
+  }
   if (res.status === 401 || res.status === 403) throw new ProviderValidationError(`The provider rejected the API key (HTTP ${res.status}).`);
   if (res.status === 429) throw new ProviderValidationError('The provider is rate-limiting this key (HTTP 429). Try again in a minute.');
   if (!res.ok) throw new ProviderValidationError(`The provider answered HTTP ${res.status}.`);
@@ -144,7 +151,14 @@ export async function chat(
     choices?: { message?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown }; finish_reason?: string }[];
     stop_reason?: string;
     content?: { type?: string; text?: string }[];
-    usage?: { prompt_tokens?: number; completion_tokens?: number; input_tokens?: number; output_tokens?: number };
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      input_tokens?: number;
+      output_tokens?: number;
+      completion_tokens_details?: { reasoning_tokens?: number };
+      output_tokens_details?: { reasoning_tokens?: number };
+    };
   } | null;
   const content =
     typeof json?.choices?.[0]?.message?.content === 'string'
@@ -160,9 +174,11 @@ export async function chat(
         (finish === 'length' || finish === 'max_tokens' ? `The limit of ${usedLimit} tokens was used up before the answer - it needs a higher limit.` : 'Try again or choose another model in Admin → LLM.'),
     );
   }
+  const thinking = json?.usage?.completion_tokens_details?.reasoning_tokens ?? json?.usage?.output_tokens_details?.reasoning_tokens;
   return {
     text: content,
     inputTokens: json?.usage?.prompt_tokens ?? json?.usage?.input_tokens ?? 0,
     outputTokens: json?.usage?.completion_tokens ?? json?.usage?.output_tokens ?? 0,
+    ...(typeof thinking === 'number' ? { reasoningTokens: thinking } : {}),
   };
 }

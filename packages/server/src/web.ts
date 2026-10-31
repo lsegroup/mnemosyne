@@ -701,7 +701,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       const est = estimateText(text.model, prompt.inputTokens, Math.min(12_000, tj.maxTokens)); // typical answer
       const max = estimateText(text.model, prompt.inputTokens, tj.maxTokens); // whole limit used
       return {
-        key: `${text.provider.id}:${text.model}:${tj.maxTokens}:${tj.userPrompt.length}:${tj.systemPrompt.length}`,
+        key: `${text.provider.id}:${text.model}:${tj.maxTokens}:${tj.userPrompt.length}:${tj.systemPrompt.length}${tj.reasoningEffort ? `:r=${tj.reasoningEffort}` : ''}`,
         what: `Mnemosyne will send this project's notes (credentials masked first) to ${text.provider.label} and ask the AI to write the project page: product description, hardware and software requirements, and disaster-recovery documentation.`,
         facts: [
           ['Provider', `${text.provider.label}`],
@@ -719,7 +719,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     const typical = estimateText(text.model, approxTokens(wikiChars) + 1500, Math.min(12_000, ij.maxTokens)); // the article plus the rules; the real runs wrote about 11,800 tokens (thinking included)
     const worst = estimateText(text.model, approxTokens(wikiChars) + 1500, ij.maxTokens);
     return {
-      key: `${text.provider.id}:${text.model}|plan:${ij.maxTokens}:${ij.userPrompt.length}:${ij.systemPrompt.length}`,
+      key: `${text.provider.id}:${text.model}|plan:${ij.maxTokens}:${ij.userPrompt.length}:${ij.systemPrompt.length}${ij.reasoningEffort ? `:r=${ij.reasoningEffort}` : ''}`,
       what: `One AI call: ${text.provider.label} reads the article and writes the plan of the diagrams (an overview and, for a bigger system, detail pictures: boxes, arrows, ports) as data. Mnemosyne then draws the pictures itself, so every word is spelled exactly. No image model is used.`,
       facts: [
         ['Text model', `${text.provider.label} / ${text.model}`],
@@ -750,14 +750,15 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
    */
   const generate = async (project: string, kind: 'wiki' | 'diagram', user: string, glName: string | null, log: (e: AuditInput) => unknown) => {
     let warning: string | undefined;
-    let used = { inputTokens: 0, outputTokens: 0 };
+    let used: { inputTokens: number; outputTokens: number; reasoningTokens?: number } = { inputTokens: 0, outputTokens: 0 };
+    const thinking = (o: { reasoningTokens?: number }) => (o.reasoningTokens !== undefined ? `, ${o.reasoningTokens} of it reasoning` : '');
     {
       const text = (await providers!.getAssigned('text'))!;
       if (kind === 'wiki') {
         const tj = effectiveJob('text', (await providers!.getJobs()).text);
         const notes = await nodeIndex!.inProject(project);
         const prompt = buildWikiPrompt(project, glName, notes, { system: tj.systemPrompt, user: tj.userPrompt });
-        const out = await chat(text.provider, text.model, prompt.system, prompt.user, { maxTokens: tj.maxTokens, temperature: tj.temperature, topP: tj.topP, timeoutMs: tj.timeoutMinutes * 60_000 });
+        const out = await chat(text.provider, text.model, prompt.system, prompt.user, { maxTokens: tj.maxTokens, temperature: tj.temperature, topP: tj.topP, reasoningEffort: tj.reasoningEffort, timeoutMs: tj.timeoutMinutes * 60_000 });
         used = out;
         const meta = await docStore!.save(
           { kind: 'wiki', project, model: `${text.provider.label} / ${text.model}`, by: user, noteCount: prompt.noteCount, noteHashes: noteHashes(notes), inputTokens: out.inputTokens, outputTokens: out.outputTokens, ext: 'md' },
@@ -765,14 +766,14 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         );
         const missing = missingSections(out.text);
         if (missing.length) warning = `The article was saved, but the AI left out: ${missing.join(', ')}. Click “Regenerate documentation” to try again.`;
-        void log({ event: 'ai_done', entityId: meta.id, description: `Article written by ${meta.model} from ${prompt.noteCount} notes (${out.inputTokens} tokens in, ${out.outputTokens} out)${missing.length ? `; MISSING SECTIONS: ${missing.join(', ')}` : ''}` });
+        void log({ event: 'ai_done', entityId: meta.id, description: `Article written by ${meta.model} from ${prompt.noteCount} notes (${out.inputTokens} tokens in, ${out.outputTokens} out${thinking(out)})${missing.length ? `; MISSING SECTIONS: ${missing.join(', ')}` : ''}` });
       } else {
         // one AI call writes the PLAN (data); Mnemosyne draws the picture itself, so no word in it is misspelled by a model
         const wiki = (await docStore!.latest(project, 'wiki'))!;
         const wikiText = (await docStore!.read(wiki)).toString('utf8');
         const ij = effectiveJob('image', (await providers!.getJobs()).image);
         const ask = buildDiagramPlanPrompt(project, wikiText, { system: ij.systemPrompt, user: ij.userPrompt });
-        const out = await chat(text.provider, text.model, ask.system, ask.user, { maxTokens: ij.maxTokens, temperature: ij.temperature, topP: ij.topP, timeoutMs: ij.timeoutMinutes * 60_000 });
+        const out = await chat(text.provider, text.model, ask.system, ask.user, { maxTokens: ij.maxTokens, temperature: ij.temperature, topP: ij.topP, reasoningEffort: ij.reasoningEffort, timeoutMs: ij.timeoutMinutes * 60_000 });
         used = out;
         let set: DiagramSet;
         try {
@@ -794,10 +795,10 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         void log({
           event: 'ai_done',
           entityId: meta.id,
-          description: `Architecture diagrams drawn by Mnemosyne from a plan written by ${text.model} (${set.pictures.length} picture${set.pictures.length > 1 ? 's' : ''}: ${set.pictures.map((p) => p.name).join(', ')}; ${boxes} boxes, ${arrows} arrows; ${out.inputTokens} tokens in, ${out.outputTokens} out)${set.dropped.length ? `; left out of the plan: ${set.dropped.length}` : ''}`,
+          description: `Architecture diagrams drawn by Mnemosyne from a plan written by ${text.model} (${set.pictures.length} picture${set.pictures.length > 1 ? 's' : ''}: ${set.pictures.map((p) => p.name).join(', ')}; ${boxes} boxes, ${arrows} arrows; ${out.inputTokens} tokens in, ${out.outputTokens} out${thinking(out)})${set.dropped.length ? `; left out of the plan: ${set.dropped.length}` : ''}`,
         });
       }
-      return { model: text.model, inputTokens: used.inputTokens, outputTokens: used.outputTokens, usd: estimateText(text.model, used.inputTokens, used.outputTokens).usd, warning };
+      return { model: text.model, inputTokens: used.inputTokens, outputTokens: used.outputTokens, reasoningTokens: used.reasoningTokens, usd: estimateText(text.model, used.inputTokens, used.outputTokens).usd, warning };
     }
   };
 
@@ -1255,6 +1256,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
           maxTokens: e.maxTokens,
           temperature: e.temperature ?? 'provider default',
           topP: e.topP ?? 'provider default',
+          reasoningEffort: e.reasoningEffort ?? 'provider default',
           timeoutMinutes: e.timeoutMinutes,
           systemPrompt: chars(e.systemPrompt, JOB_DEFS[role].defaults.systemPrompt),
           userPrompt: chars(e.userPrompt, JOB_DEFS[role].defaults.userPrompt),

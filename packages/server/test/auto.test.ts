@@ -533,6 +533,22 @@ describe('the runner (no AI is called: the model call is a fake)', () => {
     expect(run.usage!.map((u) => `${u.model}:${u.kind}:${u.calls}:${u.ms}`)).toEqual(['m1:wiki:1:10000', 'm1:diagram:1:10000', 'm2:wiki:1:10000', 'm2:diagram:1:10000']);
     expect(run.usage!.reduce((n, u) => n + u.inputTokens, 0)).toBe(run.inputTokens); // the split always adds up to the run's totals
   });
+  it('adds up the thinking tokens the provider reports, and leaves them out when it reports none', async () => {
+    const h = await harness();
+    // the fake answers without them (as most providers do) ...
+    await h.runner.tick();
+    expect((await h.store.get()).runs[0]!.usage!.every((u) => !('reasoningTokens' in u))).toBe(true);
+    // ... and with them, per call
+    const r = await harness();
+    const gen = r.runner as unknown as { d: { generate: (p: string, k: string, by: string) => Promise<object> } };
+    const plain = gen.d.generate;
+    gen.d.generate = async (p, k, by) => ({ ...(await plain(p, k, by)), reasoningTokens: k === 'wiki' ? 300 : 400 });
+    await r.runner.tick();
+    expect((await r.store.get()).runs[0]!.usage!.map((u) => [u.kind, u.calls, u.reasoningTokens])).toEqual([
+      ['wiki', 2, 600],
+      ['diagram', 2, 800],
+    ]);
+  });
 });
 
 describe('the length of a run in words', () => {
@@ -591,6 +607,13 @@ describe('the split of a run that was made before it was recorded', () => {
     ]);
     expect(u[0]!.usd).toBeCloseTo(0.0009, 8);
     expect(u[1]!.usd).toBeCloseTo(0.0018, 8);
+  });
+
+  it('reads the thinking tokens from the description when the call reported them', () => {
+    const withThinking = trail.map((e) => (e.event === 'ai_done' && e.entityName === 'a' && e.user === 'auto' && e.time.startsWith('2026-11-01') ? { ...e, description: e.description.replace(/ out\)$/, ' out, 3500 of it reasoning)') } : e));
+    const u = usageFromAudit(withThinking, finished(), price)!;
+    expect(u.map((x) => x.reasoningTokens)).toEqual([3500, 3500]);
+    expect(usageFromAudit(trail, finished(), price)!.every((x) => x.reasoningTokens === undefined)).toBe(true);
   });
 
   it('is refused when the trail does not add up to the run, or a price is missing: a wrong picture is worse than none', () => {
