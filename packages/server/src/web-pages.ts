@@ -242,6 +242,8 @@ table{width:100%;border-collapse:collapse;font-size:14px}
 th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
 th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.5px}
 td.actions{text-align:right;white-space:nowrap}td.actions .btn{margin-left:6px}
+table.hosts input{width:100%;min-width:150px}table.hosts td.hostres{font-size:13px;color:var(--muted)}table.hosts td.hostres.ok{color:#4ade80}table.hosts td.hostres.err{color:#ff8b8b}
+#step4 .row{margin-top:12px}
 .badge{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;border:1px solid var(--line);color:var(--muted)}
 .badge.ok{color:#4ade80;border-color:#1f5a38}
 form.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
@@ -408,6 +410,15 @@ export function adminPage(v: AdminView): string {
         <div class="jobs">
   ${jobBlocks()}
         </div>
+      </div>
+
+      <div class="step" id="step4">
+        <h3><span class="num">4</span> Fixed addresses <span class="muted">(optional)</span></h3>
+        <p class="sub">Pin a host name to an IP address when the provider's DNS is unstable. Mnemosyne then connects to that address for its AI calls and model lists and does not ask DNS at all. The certificate is still checked against the host name. Nothing else on the server is changed. If the provider moves to a new address, its calls fail until the address here is changed, so use “Check” after typing it.</p>
+        <table class="hosts"><thead><tr><th>Host name</th><th>IP address</th><th>Check result</th><th></th></tr></thead>
+          <tbody id="hostRows"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody></table>
+        <datalist id="hostSuggest"></datalist>
+        <div class="row"><button class="btn" type="button" id="hostAdd">Add a host</button><button class="btn primary" type="button" id="hostSave">Save fixed addresses</button><span id="hostMsg" class="msg"></span></div>
       </div>
     </section>
 
@@ -671,6 +682,47 @@ function ADMIN_JS(basePath: string): string {
       .then(function(p){reset();note('msg','Saved. Fetching models…',true);return load().then(function(){return fetchModels(p.id,label)})})
       .then(function(){note('msg','')}).catch(function(e){note('msg',e.message)}).then(function(){$('save').disabled=false});
   });
+
+  // --- step 4: fixed addresses (host name -> IP) ---
+  var HOSTS=[];
+  function hostRowsRead(){
+    return Array.prototype.map.call($('hostRows').querySelectorAll('tr[data-row]'),function(tr){
+      var i=tr.querySelectorAll('input');return {host:i[0].value.trim(),ip:i[1].value.trim()}});
+  }
+  function hostRowAdd(h){
+    var rows=$('hostRows');if(!rows.querySelector('tr[data-row]'))rows.textContent='';
+    var tr=document.createElement('tr');tr.setAttribute('data-row','1');
+    var a=cell(tr,'');var hi=document.createElement('input');hi.setAttribute('list','hostSuggest');hi.placeholder='api.meta.ai';hi.maxLength=253;hi.value=h.host||'';hi.autocomplete='off';a.appendChild(hi);
+    var b=cell(tr,'');var ii=document.createElement('input');ii.placeholder='57.144.64.141';ii.maxLength=45;ii.value=h.ip||'';ii.autocomplete='off';b.appendChild(ii);
+    var res=cell(tr,'','hostres');
+    var act=cell(tr,'','actions');
+    act.appendChild(btn('Check','',function(){
+      res.className='hostres';res.textContent='Connecting…';
+      call('POST','/llm/hosts/check',{host:hi.value,ip:ii.value}).then(function(r){res.className='hostres '+(r.ok?'ok':'err');res.textContent=(r.ok?'OK · ':'Failed · ')+r.ms+' ms · '+r.detail})
+        .catch(function(e){res.className='hostres err';res.textContent=e.message});
+    }));
+    act.appendChild(btn('Remove','danger',function(){tr.remove();if(!$('hostRows').querySelector('tr[data-row]'))hostRowsEmpty()}));
+    rows.appendChild(tr);return hi;
+  }
+  function hostRowsEmpty(){
+    var rows=$('hostRows');rows.textContent='';var tr=document.createElement('tr');
+    cell(tr,'No fixed addresses: DNS is asked as usual.','muted').colSpan=4;rows.appendChild(tr);
+  }
+  function loadHosts(){
+    return call('GET','/llm/hosts').then(function(r){
+      HOSTS=r.hosts||[];$('hostRows').textContent='';
+      if(!HOSTS.length)hostRowsEmpty();else HOSTS.forEach(hostRowAdd);
+      var dl=$('hostSuggest');dl.textContent='';(r.providerHosts||[]).forEach(function(h){var o=document.createElement('option');o.value=h;dl.appendChild(o)});
+    }).catch(function(e){note('hostMsg',e.message)});
+  }
+  $('hostAdd').addEventListener('click',function(){hostRowAdd({host:'',ip:''}).focus()});
+  $('hostSave').addEventListener('click',function(){
+    note('hostMsg','');$('hostSave').disabled=true;
+    call('PUT','/llm/hosts',{hosts:hostRowsRead()}).then(function(r){
+      HOSTS=r.hosts||[];note('hostMsg',HOSTS.length?'Saved. These addresses are used from the next connection on.':'Saved. No fixed addresses: DNS is asked as usual.',true);
+    }).catch(function(e){note('hostMsg',e.message)}).then(function(){$('hostSave').disabled=false});
+  });
+  loadHosts();
 
   // --- SSO tab ---
   function loadSso(){return call('GET','/settings').then(function(c){

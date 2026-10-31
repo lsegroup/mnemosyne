@@ -12,6 +12,7 @@
  */
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
+import { pinnedLookup } from './host-pins.js';
 import { ProviderUnreachableError, ProviderValidationError, type Provider } from './provider-store.js';
 
 export interface ChatResult {
@@ -39,7 +40,7 @@ export function networkDetail(err: unknown): string {
  * One POST over node:http(s). Not fetch: Node's fetch (undici) drops a request that has received no response
  * headers after 5 minutes, and a non-streamed answer of tens of thousands of tokens arrives only when it is complete.
  */
-function postOnce(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+export function requestOnce(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
     const lib = u.protocol === 'http:' ? httpRequest : httpsRequest;
@@ -48,7 +49,10 @@ function postOnce(url: string, init: RequestInit, timeoutMs: number): Promise<Re
       e.name = 'TimeoutError';
       req.destroy(e);
     }, timeoutMs);
-    const req = lib(u, { method: init.method ?? 'POST', headers: init.headers as Record<string, string> }, (res) => {
+    // `lookup`: a host name an administrator pinned to an IP address (Admin -> LLM, "Fixed addresses") is not looked up in DNS at all.
+    // `agent: false`: every call opens its own connection (they are minutes apart anyway), so a pin that was changed or removed applies to the
+    // very next call and is never bypassed by a pooled connection to the old address.
+    const req = lib(u, { method: init.method ?? 'POST', headers: init.headers as Record<string, string>, lookup: pinnedLookup, agent: false }, (res) => {
       const chunks: Buffer[] = [];
       res.on('data', (c: Buffer) => chunks.push(c));
       res.on('error', (e) => {
@@ -66,7 +70,7 @@ function postOnce(url: string, init: RequestInit, timeoutMs: number): Promise<Re
       clearTimeout(timer);
       reject(e);
     });
-    req.write(String(init.body ?? ''));
+    if (init.body !== undefined && init.body !== null) req.write(String(init.body));
     req.end();
   });
 }
@@ -75,7 +79,7 @@ export async function fetchWithRetry(url: string, init: RequestInit, timeoutMs: 
   let detail = '';
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      return await postOnce(url, init, timeoutMs);
+      return await requestOnce(url, init, timeoutMs);
     } catch (err) {
       detail = networkDetail(err);
       if (detail === 'timed out') break;

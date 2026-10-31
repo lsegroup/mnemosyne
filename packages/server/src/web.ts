@@ -14,6 +14,7 @@ import { NodeIndex, fetchMemberships, matchProject, redact, slug, type GitLabPro
 import { outline, renderMarkdown } from './markdown.js';
 import { DocStore, approxTokens, buildDiagramPlanPrompt, buildWikiPrompt, changeHistory, estimateText, historyMarkdown, missingSections, toPdfImage, type DocMeta } from './docgen.js';
 import { chat } from './llm-call-chat.js';
+import { checkPin, setHostPins, validatePins, type HostPin } from './host-pins.js';
 import { PlanError, drawScene, layout, parsePlanSet, renderSvg, type DiagramPlan, type DiagramSet } from './diagram.js';
 import { buildPdf, type PdfInput } from './pdf.js';
 import { AutoRunner, AutoStore, AutoValidationError, agreementKey, describeSchedule, inspectProject, nextRun, noteHashes, parseAutoInput, summarize, type AutoConfig, type ProjectEstimate } from './auto.js';
@@ -109,6 +110,11 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   const secure = Boolean(cfg.web.publicUrl?.startsWith('https://'));
   const keys: DerivedKeys | null = configured ? deriveKeys(cfg.web.secret!) : null;
   const providers = keys ? new ProviderStore(cfg.web.providersFile, keys.enc) : null;
+  // fixed addresses (Admin -> LLM, step 4) are in force from start-up on
+  void providers
+    ?.getHosts()
+    .then(setHostPins)
+    .catch((err) => console.error('fixed addresses could not be loaded:', (err as Error).message));
   const settings = keys ? new SettingsStore(cfg.web.settingsFile, keys.enc) : null;
   const audit = keys ? new AuditLog(cfg.web.auditFile) : null;
   const rec = (req: Request, e: AuditInput) => audit?.log({ ip: clientIp(req), ...e });
@@ -1260,6 +1266,49 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         description: `AI job “${JOB_DEFS[role].title}”: model, limits and prompts saved`,
       });
       return { jobs: await jobView() };
+    }),
+  );
+  // Step 4: host names pinned to an IP address, for when the provider's DNS is unstable. Nothing here makes an AI call.
+  const hostsView = async () => {
+    // the host names of the connected providers are offered as suggestions
+    const names = new Set<string>();
+    for (const p of (await providers!.list()).providers) {
+      try {
+        names.add(new URL(p.baseUrl).hostname);
+      } catch {
+        /* a stored URL that no longer parses has no host to suggest */
+      }
+    }
+    return { hosts: await providers!.getHosts(), providerHosts: [...names] };
+  };
+  api.get('/llm/hosts', handle(hostsView));
+  api.put(
+    '/llm/hosts',
+    handle(async (req) => {
+      const next = validatePins((req.body as { hosts?: unknown } | undefined)?.hosts);
+      const asMap = (l: HostPin[]) => Object.fromEntries(l.map((p) => [p.host, p.ip]));
+      const before = await providers!.getHosts();
+      await providers!.setHosts(next);
+      setHostPins(next); // in force at once, for the next connection
+      void rec(req, {
+        event: 'update',
+        entityType: 'llm_hosts',
+        entityName: 'Fixed addresses',
+        user: who(req),
+        changes: diffLines(asMap(before), asMap(next)),
+        description: next.length ? `Fixed addresses saved: ${next.map((p) => `${p.host} → ${p.ip}`).join(', ')}` : 'Fixed addresses removed: DNS is asked as usual',
+      });
+      return hostsView();
+    }),
+  );
+  // Opens a TLS connection to the address as that host name and checks the certificate; sends no request, costs nothing.
+  api.post(
+    '/llm/hosts/check',
+    handle(async (req) => {
+      const [pin] = validatePins([req.body ?? {}]);
+      const r = await checkPin(pin!.host, pin!.ip);
+      void rec(req, { event: 'check', entityType: 'llm_hosts', entityName: pin!.host, user: who(req), description: `${pin!.host} → ${pin!.ip}: ${r.ok ? 'OK' : 'failed'} (${r.detail})` });
+      return r;
     }),
   );
   api.post(

@@ -1032,6 +1032,51 @@ describe('web portal', () => {
       expect(audit.some((e) => e.event === 'denied' && /no valid agreement/.test(e.description))).toBe(true);
     });
 
+    it('Fixed addresses (LLM step 4): closed to visitors, validated, sealed in the store, in force at once and audited', async () => {
+      const adminArea = cookiesOf(await signIn('admin-code', '/admin'));
+      const h = { cookie: adminArea, 'content-type': 'application/json', 'x-requested-with': 'mnemosyne-admin' };
+      const get = (path: string) => fetch(`${base}/admin/api${path}`, { headers: h });
+      const send = (method: string, path: string, body: object) => fetch(`${base}/admin/api${path}`, { method, headers: h, body: JSON.stringify(body) });
+      const { pinnedLookup } = await import('../src/host-pins.js');
+      const pinned = () => new Promise<unknown>((r) => pinnedLookup('api.meta.ai', { all: true, family: 0 }, (_e, a) => r(a)));
+      try {
+        const page = await (await fetch(`${base}/admin/`, { headers: h })).text();
+        expect(page).toContain('id="step4"');
+        expect(page).toContain('id="hostRows"');
+        expect((await fetch(`${base}/admin/api/llm/hosts`)).status).toBe(401);
+        expect((await fetch(`${base}/admin/api/llm/hosts`, { method: 'PUT', headers: { cookie: adminArea, 'content-type': 'application/json' }, body: '{"hosts":[]}' })).status).toBe(403); // not from another site
+        expect((await (await get('/llm/hosts')).json()).hosts).toEqual([]);
+
+        for (const hosts of [[{ host: 'api.meta.ai', ip: 'not-an-ip' }], [{ host: 'https://api.meta.ai', ip: '57.144.64.141' }], 'api.meta.ai']) {
+          const bad = await send('PUT', '/llm/hosts', { hosts });
+          expect(bad.status).toBe(400);
+          expect((await bad.json()).error).toBeTruthy();
+        }
+        expect((await send('POST', '/llm/hosts/check', { host: 'api.meta.ai', ip: 'nope' })).status).toBe(400);
+
+        const saved = await send('PUT', '/llm/hosts', { hosts: [{ host: 'API.Meta.AI.', ip: '57.144.64.141' }] });
+        expect(saved.status).toBe(200);
+        const view = await saved.json();
+        expect(view.hosts).toEqual([{ host: 'api.meta.ai', ip: '57.144.64.141' }]);
+        expect(view.providerHosts).toContain('127.0.0.1'); // the connected provider's host is offered as a suggestion
+        expect(await new ProviderStore(join(tmp, '.mnemosyne', 'providers.enc'), deriveKeys(SECRET).enc).getHosts()).toEqual(view.hosts); // persisted
+        expect((await readFile(join(tmp, '.mnemosyne', 'providers.enc'), 'utf8')).includes('57.144.64.141')).toBe(false); // sealed, not readable in the file
+        expect(await pinned()).toEqual([{ address: '57.144.64.141', family: 4 }]); // in force without a restart
+
+        let audit = '';
+        for (let i = 0; i < 20 && !audit.includes('Fixed addresses saved'); i++) {
+          audit = JSON.stringify(await (await get('/audit?limit=20')).json());
+          if (!audit.includes('Fixed addresses saved')) await new Promise((r) => setTimeout(r, 50));
+        }
+        expect(audit).toContain('Fixed addresses saved: api.meta.ai → 57.144.64.141');
+
+        expect((await send('PUT', '/llm/hosts', { hosts: [] })).status).toBe(200); // take it away again
+        expect((await (await get('/llm/hosts')).json()).hosts).toEqual([]);
+      } finally {
+        await send('PUT', '/llm/hosts', { hosts: [] }); // the pin is process-wide state: leave nothing behind for the other tests
+      }
+    });
+
     it('Auto: new tabs; no schedule without the agreement; it updates only what changed, within its own dollar limit, beside the daily cap', async () => {
       const adminArea = cookiesOf(await signIn('admin-code', '/admin'));
       const h = { cookie: adminArea, 'content-type': 'application/json', 'x-requested-with': 'mnemosyne-admin' };

@@ -1,4 +1,5 @@
 import type { JobsFile, JobSettings } from './ai-jobs.js';
+import type { HostPin } from './host-pins.js';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -46,6 +47,8 @@ interface StoreFile {
   assignments: Assignments;
   /** Per-job AI settings (limits, sampling, prompts) set in the admin UI; see ai-jobs.ts. */
   jobs?: JobsFile;
+  /** Host names pinned to an IP address (Admin -> LLM, "Fixed addresses"); see host-pins.ts. */
+  hosts?: HostPin[];
   /** Legacy (single "active" provider with one model); migrated on read. */
   activeId?: string | null;
 }
@@ -109,7 +112,7 @@ export class ProviderStore {
   private async write(data: StoreFile): Promise<void> {
     await mkdir(dirname(this.file), { recursive: true });
     const tmp = `${this.file}.${process.pid}.tmp`;
-    const clean: StoreFile = { providers: data.providers.map(({ ...p }) => p), assignments: data.assignments, jobs: data.jobs ?? {} };
+    const clean: StoreFile = { providers: data.providers.map(({ ...p }) => p), assignments: data.assignments, jobs: data.jobs ?? {}, hosts: data.hosts ?? [] };
     await writeFile(tmp, seal(this.encKey, JSON.stringify(clean)), { mode: 0o600 });
     await rename(tmp, this.file);
   }
@@ -129,6 +132,18 @@ export class ProviderStore {
   async list(): Promise<{ providers: ProviderPublic[]; assignments: Assignments; jobs: JobsFile }> {
     const data = await this.read();
     return { providers: data.providers.map(toPublic), assignments: data.assignments, jobs: data.jobs ?? {} };
+  }
+
+  /** The host names pinned to an IP address (already validated when they were saved). */
+  async getHosts(): Promise<HostPin[]> {
+    return (await this.read()).hosts ?? [];
+  }
+
+  setHosts(hosts: HostPin[]): Promise<HostPin[]> {
+    return this.mutate((data) => {
+      data.hosts = hosts;
+      return hosts;
+    });
   }
 
   /** The stored (non-default) settings of every job. */

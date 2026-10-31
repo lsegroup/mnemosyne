@@ -3,6 +3,7 @@
  * Calls: the provider's model-LIST endpoint only. No inference, no tokens, no cost.
  * Used by the admin UI step "fetch available models"; never called on its own.
  */
+import { requestOnce } from './llm-call-chat.js';
 import { ProviderValidationError, type Provider } from './provider-store.js';
 
 const TIMEOUT_MS = 15_000;
@@ -41,7 +42,8 @@ export async function fetchModels(p: Provider): Promise<string[]> {
   }
   let res: Response;
   try {
-    res = await fetch(modelsUrl(p), { headers, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    // the same connection code as the AI calls, so a fixed address (Admin -> LLM, step 4) applies to the model list too
+    res = await requestOnce(modelsUrl(p), { method: 'GET', headers }, TIMEOUT_MS);
   } catch {
     throw new ProviderValidationError('Could not reach the provider (check the base URL and network).');
   }
