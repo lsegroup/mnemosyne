@@ -22,7 +22,18 @@ export function headingId(text: string, seen: Map<string, number>): string {
   return n === 1 ? base : `${base}-${n}`;
 }
 
-export function renderMarkdown(src: string): string {
+export interface RenderOptions {
+  /**
+   * The generated project article has no title of its own (the page title is the h1) and uses '##' for its main sections and '###'
+   * for their sub-sections: they become h2 and h3, and the table of contents lists them. Notes keep the default (their '#' is h2).
+   */
+  article?: boolean;
+}
+
+/** The html heading level of a markdown heading with this many '#'. */
+const headingLevel = (hashes: number, opts?: RenderOptions) => (opts?.article ? Math.max(2, Math.min(6, hashes)) : Math.min(6, hashes + 1));
+
+export function renderMarkdown(src: string, opts?: RenderOptions): string {
   const lines = src.replace(/\r\n?/g, '\n').split('\n');
   const out: string[] = [];
   const ids = new Map<string, number>();
@@ -66,7 +77,7 @@ export function renderMarkdown(src: string): string {
     const h = /^(#{1,6})\s+(.*)$/.exec(line);
     if (h) {
       closeList();
-      const level = Math.min(6, h[1]!.length + 1); // page title is h1; note headings start at h2
+      const level = headingLevel(h[1]!.length, opts); // the page title is the h1
       out.push(`<h${level} id="${headingId(h[2]!, ids)}">${inline(h[2]!)}</h${level}>`);
       i++;
       continue;
@@ -120,7 +131,7 @@ export function renderMarkdown(src: string): string {
 }
 
 /** Headings (as rendered: h2 and below) with the same ids renderMarkdown gives them, for a table of contents. */
-export function outline(src: string): { level: number; text: string; id: string }[] {
+export function outline(src: string, opts?: RenderOptions): { level: number; text: string; id: string }[] {
   const ids = new Map<string, number>();
   const out: { level: number; text: string; id: string }[] = [];
   let fenced = false;
@@ -131,7 +142,7 @@ export function outline(src: string): { level: number; text: string; id: string 
     }
     if (fenced) continue;
     const h = /^(#{1,6})\s+(.*)$/.exec(line);
-    if (h) out.push({ level: Math.min(6, h[1]!.length + 1), text: h[2]!.replace(/[*`]/g, ''), id: headingId(h[2]!, ids) });
+    if (h) out.push({ level: headingLevel(h[1]!.length, opts), text: h[2]!.replace(/[*`]/g, ''), id: headingId(h[2]!, ids) });
   }
   return out;
 }

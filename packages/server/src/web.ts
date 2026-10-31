@@ -526,7 +526,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     let wiki = null;
     if (wanted) {
       const text = redact((await docStore!.read(wanted)).toString('utf8'));
-      wiki = { meta: wanted, html: renderMarkdown(text), toc: outline(text) };
+      wiki = { meta: wanted, html: renderMarkdown(text, { article: true }), toc: outline(text, { article: true }) };
     }
     const diagrams = await docStore!.list(project, 'diagram');
     const pdfs = await docStore!.list(project, 'pdf');

@@ -839,7 +839,9 @@ const HOME_CSS = `
 .card .subs{margin:0 12px 12px;display:flex;flex-direction:column;gap:8px}.card .subs .cap{margin:2px 0 0}.card .pic.sub{margin:0;padding:4px}.card .pic.sub span{display:block;margin-top:4px;font-size:12px;color:#33384a;text-align:center}
 .card dl{margin:0;padding:4px 14px 12px;font-size:13px}.card dt{margin-top:9px;color:var(--teal);font-weight:600}.card dd{margin:2px 0 0;color:var(--text);overflow-wrap:anywhere}
 .card a{color:var(--teal)}
-.wp article h2{margin-top:26px}
+.wp article h2{margin:34px 0 14px;padding-bottom:6px;border-bottom:1px solid var(--line);font:600 25px/1.25 "Palatino Linotype","Book Antiqua",Palatino,Georgia,serif;color:var(--title);scroll-margin-top:16px}
+.wp article h3{margin:24px 0 6px;font-size:18px;color:var(--teal);scroll-margin-top:16px}
+.wp article>h2:first-of-type{margin-top:6px}
 hr.rule{border:0;border-top:1px solid var(--line);margin:34px 0 8px}
 .hist table{width:100%;border-collapse:collapse;font-size:13.5px}.hist th,.hist td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}.hist th{color:var(--teal);font-weight:600}.hist td:first-child{white-space:nowrap;color:var(--muted)}
 #lightbox{position:fixed;inset:0;z-index:60;background:rgba(5,6,10,.88);display:flex;align-items:center;justify-content:center;padding:24px;cursor:zoom-out}

@@ -521,7 +521,7 @@ describe('web portal', () => {
               return;
             }
             reply({
-              choices: [{ message: { content: wantsBrief ? JSON.stringify(DIAGRAM_PLAN) : '# Alpha\n\nAlpha is a test project.\n\n## Overview\n\nIt does **things**.\n\n## History\n\n- first\n- second\n\n## Known issues\n\nNone documented.' } }],
+              choices: [{ message: { content: wantsBrief ? JSON.stringify(DIAGRAM_PLAN) : '# Alpha\n\nAlpha is a test project.\n\n## Overview\n\nIt does **things**.\n\n### Details\n\nMore about the things.\n\n## History\n\n- first\n- second\n\n## Known issues\n\nNone documented.' } }],
               usage: { prompt_tokens: 1200, completion_tokens: 300 },
             });
           } else if (req.url === '/v1/images/generations') {
@@ -608,6 +608,10 @@ describe('web portal', () => {
       expect(page).toMatch(/generated <b>\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC<\/b>/);
       expect(page).toContain('Fake AI / text-model');
       expect(page).not.toContain('id="pdfBtn" disabled'); // active now
+      // headings and Contents: the main sections are h2, their sub-sections h3, and the Contents card lists both as links (owner request 2026-10-31)
+      expect(page).toContain('<h2 id="h-overview">Overview</h2>');
+      expect(page).toContain('<h3 id="h-details">Details</h3>');
+      expect(page).toMatch(/<nav class="card contents"><strong>Contents<\/strong><ol>[\s\S]*<li><a href="#h-overview">Overview<\/a><ul><li><a href="#h-details">Details<\/a><\/li><\/ul><\/li>[\s\S]*<li><a href="#h-known-issues">Known issues<\/a><\/li>[\s\S]*<li><a href="#h-change-history">Change history<\/a><\/li><\/ol><\/nav>/);
       expect(page).toContain('Regenerate documentation');
 
       // workflow diagram: ONE text call writes the plan, Mnemosyne draws it itself (no image model), only after agreement
