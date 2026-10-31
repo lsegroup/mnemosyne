@@ -2,7 +2,7 @@ import { DEFAULT_PLAN_SYSTEM, DEFAULT_PLAN_USER, DEFAULT_WIKI_SYSTEM, DEFAULT_WI
 import { ProviderValidationError, type Role } from './provider-store.js';
 
 /**
- * Everything an administrator can set for one AI job (Admin -> LLM, step 3): how much the AI may write, how it
+ * Everything an administrator can set for one AI job (Admin -> LLM, step 4): how much the AI may write, how it
  * samples, how long a call may take, and the words it is given. Nothing here is hard-coded in the generators:
  * they read the effective values, which are the stored settings or, where nothing is stored, the defaults below.
  */

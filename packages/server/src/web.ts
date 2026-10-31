@@ -110,7 +110,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   const secure = Boolean(cfg.web.publicUrl?.startsWith('https://'));
   const keys: DerivedKeys | null = configured ? deriveKeys(cfg.web.secret!) : null;
   const providers = keys ? new ProviderStore(cfg.web.providersFile, keys.enc) : null;
-  // fixed addresses (Admin -> LLM, step 4) are in force from start-up on
+  // fixed addresses (Admin -> LLM, step 2) are in force from start-up on
   void providers
     ?.getHosts()
     .then(setHostPins)
@@ -1225,7 +1225,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
 
   api.get('/providers', handle(() => providers!.list()));
 
-  // Step 3: every job (text / images / pdf) as one block - model, limits, sampling values and the prompts, all editable.
+  // Step 4: every job (text / images / pdf) as one block - model, limits, sampling values and the prompts, all editable.
   const jobView = async () => {
     const list = await providers!.list();
     return Object.fromEntries(
@@ -1268,7 +1268,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       return { jobs: await jobView() };
     }),
   );
-  // Step 4: host names pinned to an IP address, for when the provider's DNS is unstable. Nothing here makes an AI call.
+  // Step 2: host names pinned to an IP address, for when the provider's DNS is unstable. Nothing here makes an AI call.
   const hostsView = async () => {
     // the host names of the connected providers are offered as suggestions
     const names = new Set<string>();
@@ -1334,7 +1334,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       return saved;
     }),
   );
-  // Step 2 of the LLM flow: ask the provider which models this API key may use (list call only, no inference).
+  // Step 3 of the LLM flow: ask the provider which models this API key may use (list call only, no inference).
   api.post(
     '/providers/:id/models',
     handle(async (req) => {
@@ -1350,7 +1350,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       }
     }),
   );
-  // Step 3: one model per job (text / image / pdf), chosen from the fetched lists.
+  // Step 4: one model per job (text / image / pdf), chosen from the fetched lists.
   api.put(
     '/llm/assignments',
     handle(async (req) => {

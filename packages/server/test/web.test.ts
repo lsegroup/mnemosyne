@@ -353,15 +353,15 @@ describe('web portal', () => {
       expect(listed).toContain('Meta');
       expect(listed).not.toContain('good-key-1234567890');
 
-      // step 3 before step 2 is refused: nothing has been fetched yet
+      // step 4 before step 3 is refused: nothing has been fetched yet
       expect((await post('/llm/assignments', { text: { providerId: created.id, model: 'muse-spark-1.3' } }, 'PUT')).status).toBe(400);
 
-      // step 2: fetch what the key can really use
+      // step 3: fetch what the key can really use
       const pulled = await (await post(`/providers/${created.id}/models`, {})).json();
       expect(pulled.models).toEqual(['muse-image-1.0', 'muse-spark-1.3', 'muse-wonder-1.0']);
       expect(JSON.stringify(pulled)).not.toContain('good-key');
 
-      // step 3: one model per job; a model the provider did not report is refused
+      // step 4: one model per job; a model the provider did not report is refused
       const ok = await post('/llm/assignments', { text: { providerId: created.id, model: 'muse-spark-1.3' }, image: { providerId: created.id, model: 'muse-image-1.0' }, pdf: { providerId: created.id, model: 'muse-wonder-1.0' } }, 'PUT');
       expect(ok.status).toBe(200);
       expect((await post('/llm/assignments', { text: { providerId: created.id, model: 'made-up' } }, 'PUT')).status).toBe(400);
@@ -1032,7 +1032,7 @@ describe('web portal', () => {
       expect(audit.some((e) => e.event === 'denied' && /no valid agreement/.test(e.description))).toBe(true);
     });
 
-    it('Fixed addresses (LLM step 4): closed to visitors, validated, sealed in the store, in force at once and audited', async () => {
+    it('Fixed addresses (LLM step 2, between connecting a provider and fetching its models): closed to visitors, validated, sealed in the store, in force at once and audited', async () => {
       const adminArea = cookiesOf(await signIn('admin-code', '/admin'));
       const h = { cookie: adminArea, 'content-type': 'application/json', 'x-requested-with': 'mnemosyne-admin' };
       const get = (path: string) => fetch(`${base}/admin/api${path}`, { headers: h });
@@ -1041,7 +1041,7 @@ describe('web portal', () => {
       const pinned = () => new Promise<unknown>((r) => pinnedLookup('api.meta.ai', { all: true, family: 0 }, (_e, a) => r(a)));
       try {
         const page = await (await fetch(`${base}/admin/`, { headers: h })).text();
-        expect(page).toContain('id="step4"');
+        expect(page).toContain('id="step2"');
         expect(page).toContain('id="hostRows"');
         expect((await fetch(`${base}/admin/api/llm/hosts`)).status).toBe(401);
         expect((await fetch(`${base}/admin/api/llm/hosts`, { method: 'PUT', headers: { cookie: adminArea, 'content-type': 'application/json' }, body: '{"hosts":[]}' })).status).toBe(403); // not from another site

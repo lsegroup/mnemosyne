@@ -42,7 +42,7 @@ export async function fetchModels(p: Provider): Promise<string[]> {
   }
   let res: Response;
   try {
-    // the same connection code as the AI calls, so a fixed address (Admin -> LLM, step 4) applies to the model list too
+    // the same connection code as the AI calls, so a fixed address (Admin -> LLM, step 2) applies to the model list too
     res = await requestOnce(modelsUrl(p), { method: 'GET', headers }, TIMEOUT_MS);
   } catch {
     throw new ProviderValidationError('Could not reach the provider (check the base URL and network).');

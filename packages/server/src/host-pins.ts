@@ -1,5 +1,5 @@
 /**
- * FIXED ADDRESSES (Admin -> LLM, step 4): a host name pinned to an IP address.
+ * FIXED ADDRESSES (Admin -> LLM, step 2): a host name pinned to an IP address.
  *
  * When the DNS in front of an AI provider is unstable, an administrator can tell Mnemosyne which address a host name has. Every connection
  * Mnemosyne itself makes to such a provider (the AI calls and the model list) then goes straight to that address and DNS is not asked at all.

@@ -243,7 +243,7 @@ th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);vertic
 th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.5px}
 td.actions{text-align:right;white-space:nowrap}td.actions .btn{margin-left:6px}
 table.hosts input{width:100%;min-width:150px}table.hosts td.hostres{font-size:13px;color:var(--muted)}table.hosts td.hostres.ok{color:#4ade80}table.hosts td.hostres.err{color:#ff8b8b}
-#step4 .row{margin-top:12px}
+#step2 .row{margin-top:12px}
 .badge{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;border:1px solid var(--line);color:var(--muted)}
 .badge.ok{color:#4ade80;border-color:#1f5a38}
 form.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
@@ -329,7 +329,7 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
 
 /** Admin shell; the interactive part lives in {@link ADMIN_JS}, run under the CSP nonce. */
 
-/** Step 3 of the LLM tab: one stacked block per AI job (model, limits, sampling values, prompts). Texts come from ai-jobs.ts. */
+/** Step 4 of the LLM tab: one stacked block per AI job (model, limits, sampling values, prompts). Texts come from ai-jobs.ts. */
 function jobBlocks(): string {
   const def = (role: 'text' | 'image' | 'pdf') => JOB_DEFS[role];
   const fmt = (n: number) => n.toLocaleString('en-US');
@@ -350,7 +350,7 @@ function jobBlocks(): string {
       return `<form class="job" data-role="${role}" id="job-${role}">
     <div class="jobhead"><h4>${esc(d.title)}</h4><span class="tag${d.usesAi ? ' ai' : ''}">${d.usesAi ? 'AI call · costs money' : 'no AI call yet'}</span></div>
     <p class="sub">${esc(d.summary)}</p>
-    <label class="wide">Model<select id="m-${role}"></select><span class="hint">Picked from the models your keys can use (step 2).</span></label>
+    <label class="wide">Model<select id="m-${role}"></select><span class="hint">Picked from the models your keys can use (step 3).</span></label>
     ${ai}
     <div class="row"><button class="btn primary" type="submit">Save ${esc(d.title)} settings</button><button class="btn" type="button" data-reset="${role}">Reset to defaults</button><span id="msg-${role}" class="msg"></span></div>
   </form>`;
@@ -397,28 +397,28 @@ export function adminPage(v: AdminView): string {
       </div>
 
       <div class="step" id="step2">
-        <h3><span class="num">2</span> Models your keys can use</h3>
+        <h3><span class="num">2</span> Fixed addresses <span class="muted">(optional)</span></h3>
+        <p class="sub">Pin a host name to an IP address when the provider's DNS is unstable. Mnemosyne then connects to that address for its AI calls and model lists and does not ask DNS at all. The certificate is still checked against the host name. Nothing else on the server is changed. If the provider moves to a new address, its calls fail until the address here is changed, so use “Check” after typing it.</p>
+        <table class="hosts"><thead><tr><th>Host name</th><th>IP address</th><th>Check result</th><th></th></tr></thead>
+          <tbody id="hostRows"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody></table>
+        <datalist id="hostSuggest"></datalist>
+        <div class="row"><button class="btn" type="button" id="hostAdd">Add a host</button><button class="btn primary" type="button" id="hostSave">Save fixed addresses</button><span id="hostMsg" class="msg"></span></div>
+      </div>
+
+      <div class="step" id="step3">
+        <h3><span class="num">3</span> Models your keys can use</h3>
         <p class="sub">Asked from each provider with its own key — only models it really offers are listed. This reads the model list only; it makes no model calls and costs nothing.</p>
         <table><thead><tr><th>Name</th><th>Endpoint</th><th>Key</th><th>Models</th><th></th></tr></thead>
           <tbody id="rows"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody></table>
         <p class="msg" id="fetchMsg"></p>
       </div>
 
-      <div class="step off" id="step3">
-        <h3><span class="num">3</span> Choose the model and settings for each job</h3>
+      <div class="step off" id="step4">
+        <h3><span class="num">4</span> Choose the model and settings for each job</h3>
         <p class="sub">Every value the AI calls use is set here, nothing is fixed in the program. Leave a number empty to use the default; “Reset to defaults” puts the built-in prompts back. A change applies to the next run (the agreement popup then shows the new worst-case cost).</p>
         <div class="jobs">
   ${jobBlocks()}
         </div>
-      </div>
-
-      <div class="step" id="step4">
-        <h3><span class="num">4</span> Fixed addresses <span class="muted">(optional)</span></h3>
-        <p class="sub">Pin a host name to an IP address when the provider's DNS is unstable. Mnemosyne then connects to that address for its AI calls and model lists and does not ask DNS at all. The certificate is still checked against the host name. Nothing else on the server is changed. If the provider moves to a new address, its calls fail until the address here is changed, so use “Check” after typing it.</p>
-        <table class="hosts"><thead><tr><th>Host name</th><th>IP address</th><th>Check result</th><th></th></tr></thead>
-          <tbody id="hostRows"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody></table>
-        <datalist id="hostSuggest"></datalist>
-        <div class="row"><button class="btn" type="button" id="hostAdd">Add a host</button><button class="btn primary" type="button" id="hostSave">Save fixed addresses</button><span id="hostMsg" class="msg"></span></div>
       </div>
     </section>
 
@@ -594,7 +594,7 @@ function ADMIN_JS(basePath: string): string {
   function btn(label,cls,fn){var b=document.createElement('button');b.type='button';b.className='btn small '+cls;b.textContent=label;b.addEventListener('click',fn);return b}
   function ago(ms){if(!ms)return 'never fetched';var m=Math.round((Date.now()-ms)/60000);return m<1?'just now':m<60?m+' min ago':Math.round(m/60)+' h ago'}
 
-  // --- step 2: connections + their fetched models ---
+  // --- step 3: connections + their fetched models ---
   function renderRows(){
     var rows=$('rows');rows.textContent='';
     if(!data.providers.length){var tr=document.createElement('tr');cell(tr,'No provider connected yet — start with step 1.','muted').colSpan=5;rows.appendChild(tr);return}
@@ -616,7 +616,7 @@ function ADMIN_JS(basePath: string): string {
       .catch(function(e){note('fetchMsg',label+': '+e.message);return load()});
   }
 
-  // --- step 3: one model per job ---
+  // --- step 4: one model per job ---
   function ordered(role,ids){
     var re=HINTS[role],hit=[],rest=[];ids.forEach(function(i){(re.test(i)?hit:rest).push(i)});return hit.concat(rest);
   }
@@ -640,9 +640,9 @@ function ADMIN_JS(basePath: string): string {
   }
   function renderRoles(){
     var any=data.providers.some(function(p){return p.models.length});
-    $('step3').className='step'+(any?'':' off');
+    $('step4').className='step'+(any?'':' off');
     ROLES.forEach(function(role){modelOptions(role,$('m-'+role),any);fillJob(role)});
-    Array.prototype.forEach.call(document.querySelectorAll('#step3 .job button[type=submit]'),function(b){b.disabled=!any});
+    Array.prototype.forEach.call(document.querySelectorAll('#step4 .job button[type=submit]'),function(b){b.disabled=!any});
   }
   ROLES.forEach(function(role){
     $('job-'+role).addEventListener('submit',function(ev){
@@ -683,7 +683,7 @@ function ADMIN_JS(basePath: string): string {
       .then(function(){note('msg','')}).catch(function(e){note('msg',e.message)}).then(function(){$('save').disabled=false});
   });
 
-  // --- step 4: fixed addresses (host name -> IP) ---
+  // --- step 2: fixed addresses (host name -> IP) ---
   var HOSTS=[];
   function hostRowsRead(){
     return Array.prototype.map.call($('hostRows').querySelectorAll('tr[data-row]'),function(tr){

@@ -112,7 +112,7 @@ What keeps the spending bounded, in order of importance:
 
 A timer inside the portal looks at the clock every 30 seconds (`AutoRunner`); the schedule, the agreement and the last 30 runs live in one JSON file (`MNEMOSYNE_AUTO_FILE`, default `.mnemosyne/auto.json`). A run is persisted after every call, so a deploy that restarts the service ends the call that was running (its result is lost) and the run goes on with the projects not yet done; a project cut off twice is given up on. Automatic calls are audited as `auto_start` / `auto_run` / `auto_agree` events, separate from the `ai_start` events that `MNEMOSYNE_AI_DAILY_LIMIT` counts for people, so a run of many projects is not stopped by the daily number meant for people (its own limit is the dollar limit).
 
-## Fixed addresses (Admin -> LLM, step 4)
+## Fixed addresses (Admin -> LLM, step 2)
 
 When the DNS in front of an AI provider is unstable (a real run lost 25 projects to `EAI_AGAIN` on 2026-10-31), an administrator can pin a host name to an IP address (`packages/server/src/host-pins.ts`). Every connection Mnemosyne itself makes to the provider, the AI calls and the model list, then uses that address and does not ask DNS at all. Only the *lookup* is replaced (the `lookup` option of the connection); the TLS certificate is still checked against the host name, so a wrong address cannot be used to listen in. Nothing else changes: not `/etc/hosts`, not the system resolver, not other connections of the portal (GitLab sign-in and so on). Every AI call opens its own connection, so a pin that was changed or removed applies to the very next call.
 
