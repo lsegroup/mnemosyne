@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { Script, createContext } from 'node:vm';
@@ -221,6 +221,7 @@ describe('web portal', () => {
       MNEMOSYNE_GITLAB_CLIENT_ID: 'cid',
       MNEMOSYNE_GITLAB_CLIENT_SECRET: 'csecret',
       MNEMOSYNE_AI_DAILY_LIMIT: '3',
+      MNEMOSYNE_ALIAS_HOSTS: 'Old-Name.example.test, other.example.test',
     });
     webCfg = cfg;
     portalApp = express();
@@ -442,6 +443,47 @@ describe('web portal', () => {
     for (const name of ['alpha', 'beta', 'lse']) expect(home).toContain(`/p/${name}`);
     expect(home).toContain('administrators only');
     expect((await fetch(`${base}/p/lse/lse-first`, { headers: { cookie } })).status).toBe(200);
+  });
+
+  describe('one host name for sign-in (owner: the SSO broke when the portal was opened under the gitlab name)', () => {
+    // fetch() cannot choose the Host header reliably, so use http.request
+    const getAs = (host: string, path: string, method = 'GET') =>
+      new Promise<{ status: number; location?: string }>((resolve, reject) => {
+        const u = new URL(base);
+        const req = httpRequest({ host: u.hostname, port: u.port, path: `${u.pathname}${path}`, method, headers: { host } }, (res) => {
+          res.resume();
+          resolve({ status: res.statusCode!, location: res.headers.location });
+        });
+        req.on('error', reject);
+        req.end();
+      });
+
+    it('redirects a page opened under another name of this server to the same path under the public URL, so the sign-in cookie and the return address share one host', async () => {
+      const origin = new URL(base).origin;
+      for (const path of ['/', '/p/alpha?v=20261030T120000Z', '/auth/login', '/admin/', '/admin/auth/login']) {
+        const r = await getAs('old-name.example.test:40000', path);
+        expect(r.status, path).toBe(302);
+        expect(r.location, path).toBe(`${origin}/mnemosyne${path}`);
+      }
+      expect((await getAs('other.example.test', '/')).location).toBe(`${origin}/mnemosyne/`); // second listed name, no port
+    });
+
+    it('does nothing under the public host itself, never follows an unknown Host header, and leaves MCP, REST and non-page requests alone', async () => {
+      const own = new URL(base).host;
+      expect((await getAs(own, '/')).status).toBe(200); // the login page, no redirect
+      expect((await getAs('evil.example.test', '/')).status).toBe(200); // not one of our names: the header is never copied anywhere
+      expect((await getAs('evil.example.test', '/auth/login')).location ?? '').not.toContain('evil.example.test');
+      for (const path of ['/mcp', '/nodes', '/search', '/health']) expect((await getAs('old-name.example.test', path)).status, path).not.toBe(302);
+      expect((await getAs('old-name.example.test', '/auth/login', 'POST')).status).not.toBe(302); // only GET page requests are redirected
+    });
+
+    it('the sign-in started under the public host completes: cookie and return address are on one host', async () => {
+      const login = await fetch(`${base}/auth/login`, { redirect: 'manual' });
+      expect(login.status).toBe(302);
+      const to = new URL(login.headers.get('location')!);
+      expect(to.searchParams.get('redirect_uri')).toBe(`${new URL(base).origin}/mnemosyne/auth/callback`);
+      expect(login.headers.get('set-cookie')).toContain('mnemosyne_oauth=');
+    });
   });
 
   it('fails closed when GitLab does not share the project list (missing read_api scope)', async () => {

@@ -60,6 +60,12 @@ export interface MnemosyneConfig {
     secret?: string;
     /** Externally visible origin, e.g. `https://host:40000`; builds the OAuth redirect URI. */
     publicUrl?: string;
+    /**
+     * Other host names of this same server that people may type (comma separated in `MNEMOSYNE_ALIAS_HOSTS`, host names only).
+     * A browser page opened under one of them is redirected to the same path under `publicUrl`, because the sign-in cookie belongs
+     * to the host name that was typed while GitLab sends the browser back to `publicUrl`. The host of the GitLab URL always counts.
+     */
+    aliasHosts: string[];
     gitlab: { url?: string; clientId?: string; clientSecret?: string };
     /** Sealed file holding the LLM providers configured in the admin UI. */
     providersFile: string;
@@ -137,6 +143,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, repoOverride?: 
     web: {
       secret: env.MNEMOSYNE_SECRET,
       publicUrl: env.MNEMOSYNE_PUBLIC_URL?.replace(/\/+$/, ''),
+      aliasHosts: (env.MNEMOSYNE_ALIAS_HOSTS ?? '').split(/[\s,]+/).map((h) => h.trim().toLowerCase()).filter(Boolean),
       gitlab: {
         url: env.MNEMOSYNE_GITLAB_URL?.replace(/\/+$/, ''),
         clientId: env.MNEMOSYNE_GITLAB_CLIENT_ID,

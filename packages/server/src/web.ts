@@ -148,6 +148,26 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
   };
 
+  // --- one host name for sign-in --------------------------------------------
+  // The sign-in cookie belongs to the host name the person typed, but GitLab sends the browser back to the configured public URL. If the
+  // two names differ, the cookie is missing at the callback and the sign-in fails ("error=state"). So a BROWSER PAGE opened under another
+  // name of this server is redirected, once, to the same path under the public URL. Only the host of the public URL, the host of the
+  // GitLab URL and MNEMOSYNE_ALIAS_HOSTS count as "another name of this server" (the Host header is never copied into the redirect), and
+  // only GET requests for pages: MCP and REST keep answering under every name.
+  const canonical = cfg.web.publicUrl ? new URL(cfg.web.publicUrl) : null;
+  const ownNames = new Set(
+    [...cfg.web.aliasHosts, canonical?.hostname, cfg.web.gitlab.url ? new URL(cfg.web.gitlab.url).hostname : undefined]
+      .filter((h): h is string => Boolean(h))
+      .map((h) => h.toLowerCase()),
+  );
+  const PAGE_PATH = /^\/(?:$|p\/|admin(?:\/|$)|auth\/|assets\/)/;
+  router.use((req, res, next) => {
+    if (!canonical || req.method !== 'GET' || !PAGE_PATH.test(req.path)) return next();
+    const typed = String(req.headers['x-forwarded-host'] ?? req.headers.host ?? '').toLowerCase().split(':')[0] ?? '';
+    if (!typed || typed === canonical.hostname.toLowerCase() || !ownNames.has(typed)) return next();
+    res.redirect(302, `${canonical.origin}${req.originalUrl}`);
+  });
+
   // --- public brand asset (login screen logo) -----------------------------
   const logo = Buffer.from(LOGO_WEBP_BASE64, 'base64');
   router.get('/assets/logo.webp', (_req, res) => {
