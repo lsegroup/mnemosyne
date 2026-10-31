@@ -635,6 +635,7 @@ describe('web portal', () => {
       const detail = /<a class="pic sub" href="([^"]+\/diagram\/\d{8}T\d{6}Z\/1)"/.exec(after)?.[1];
       expect(detail).toBeTruthy();
       expect(after).toContain('Detail pictures · click to enlarge');
+      expect(after).toContain('.side>*{flex-shrink:0}'); // a tall right column scrolls; its cards are never squashed and clipped (owner report 2026-10-31)
       expect(after).toContain('<span>Sign-in and security</span>');
       const dres = await fetch(`${new URL(base).origin}${detail}`, { headers: { cookie: admin } });
       expect(dres.status).toBe(200);

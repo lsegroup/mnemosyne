@@ -826,6 +826,8 @@ const HOME_CSS = `
 .wp{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:28px;align-items:start;margin-top:18px}
 @media(max-width:900px){.wp{grid-template-columns:minmax(0,1fr)}}
 .side{position:sticky;top:16px;display:flex;flex-direction:column;gap:16px;max-height:calc(100vh - 32px);overflow:auto}
+/* the cards never shrink to fit the window (overflow:hidden would let a flex item be squashed and clipped): a tall column scrolls instead */
+.side>*{flex-shrink:0}
 @media(max-width:900px){.side{position:static;max-height:none;order:-1}}
 .card{border:1px solid var(--line);border-radius:12px;background:var(--panel2);overflow:hidden}
 .contents{padding:12px 16px 14px}.contents strong{color:var(--title);font:600 16px/1.2 "Palatino Linotype","Book Antiqua",Palatino,Georgia,serif}.contents ol,.contents ul{margin:8px 0 0;padding-left:18px}.contents li{margin:3px 0;font-size:13.5px}.contents ul{list-style:circle;color:var(--muted)}.contents a{color:var(--text);text-decoration:none}.contents a:hover{color:var(--teal)}
