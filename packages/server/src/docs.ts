@@ -1,5 +1,6 @@
 import { NodeRepo } from './repo.js';
 import type { MemoryNode } from '@mnemosyne/core';
+import { slug } from './slug.js';
 
 /** A GitLab project the signed-in user belongs to (from GitLab itself, never from a list kept here). */
 export interface GitLabProject {
@@ -11,9 +12,7 @@ export interface GitLabProject {
   webUrl: string;
 }
 
-export function slug(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-}
+export { slug };
 
 /**
  * Which GitLab project a notes project belongs to: its slug equals the GitLab project's path or

@@ -96,3 +96,16 @@ The portal (`packages/server/src/web.ts`) turns a project's notes into a documen
 A picture holds at most 10 boxes and 14 arrows (more cannot be read: the arrow labels have no room left), so the plan is a **set**: an overview plus detail pictures by topic (request path, data and storage, sign-in and security, ...), at most 5 pictures. The overview is the stored SVG; the detail plans are stored in the metadata and drawn on request at `/p/<project>/diagram/<id>/<n>`; the project page shows the overview in the card with the details as thumbnails below it, and the PDF gives every picture a page of its own after the index (a wide one turned a quarter turn).
 
 Diagrams made earlier by an image model (png/jpg/webp) are still shown and embedded; new ones are svg.
+
+## A Mnemosyne Wiki link in every GitLab project
+
+`packages/server/src/gitlab-links.ts` (command `packages/server/src/bin/gitlab-links.ts`, plain Node, no dependencies) puts two links into every GitLab project so people reach the project's Mnemosyne page from GitLab: the project's **External wiki** integration (GitLab shows it in the project menu in place of its own wiki; the label "External wiki" is GitLab's) and a **badge named "Mnemosyne Wiki"** on the project page (the badge image is served publicly by the portal at `/assets/wiki-badge.svg`). The target is the project's page key as the portal's home page builds it: the matching notes project, otherwise the slug of the GitLab path. Both links are idempotent (a second run changes nothing, a wrong address is corrected).
+
+```bash
+# dry run (default): prints what would be done, changes nothing
+GITLAB_TOKEN=<token with the api scope, Maintainer on the projects> node packages/server/dist/bin/gitlab-links.js \
+  --gitlab-url https://gitlab.example.com --portal-url https://host:40000/mnemosyne --nodes ./nodes
+# ... --apply   to do it;   --only group/project   to limit it;   --no-badge / --no-wiki   for one of the two links
+```
+
+In this deployment the CI/CD job `gitlab_wiki_links` runs it with the Vault-held GitLab token after every deploy and once a day from a pipeline schedule, so new projects get the links too.

@@ -168,6 +168,20 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     res.redirect(302, `${canonical.origin}${req.originalUrl}`);
   });
 
+  // --- the "Mnemosyne Wiki" badge that gitlab-links puts on every GitLab project (public, no sign-in: GitLab's pages load it) ---
+  const badge = Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="112" height="20" role="img" aria-label="Mnemosyne Wiki"><title>Mnemosyne Wiki</title>' +
+      '<clipPath id="r"><rect width="112" height="20" rx="3" fill="#fff"/></clipPath><g clip-path="url(#r)"><rect width="72" height="20" fill="#6d57d6"/><rect x="72" width="40" height="20" fill="#17a3ad"/></g>' +
+      '<g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11"><text x="36" y="14">Mnemosyne</text><text x="92" y="14">Wiki</text></g></svg>',
+  );
+  router.get('/assets/wiki-badge.svg', (_req, res) => {
+    res.setHeader('Content-Type', 'image/svg+xml');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.send(badge);
+  });
+
   // --- public brand asset (login screen logo) -----------------------------
   const logo = Buffer.from(LOGO_WEBP_BASE64, 'base64');
   router.get('/assets/logo.webp', (_req, res) => {

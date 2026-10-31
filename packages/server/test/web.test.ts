@@ -468,6 +468,17 @@ describe('web portal', () => {
       expect((await getAs('other.example.test', '/')).location).toBe(`${origin}/mnemosyne/`); // second listed name, no port
     });
 
+    it('serves the Mnemosyne Wiki badge that gitlab-links puts on every GitLab project (public, no sign-in, an image that holds no script)', async () => {
+      const r = await fetch(`${base}/assets/wiki-badge.svg`, { redirect: 'manual' });
+      expect(r.status).toBe(200);
+      expect(r.headers.get('content-type')).toBe('image/svg+xml');
+      expect(r.headers.get('content-security-policy')).toContain('sandbox');
+      const svg = await r.text();
+      expect(svg).toContain('>Mnemosyne<');
+      expect(svg).toContain('>Wiki<');
+      expect(svg).not.toMatch(/<script|href=/);
+    });
+
     it('does nothing under the public host itself, never follows an unknown Host header, and leaves MCP, REST and non-page requests alone', async () => {
       const own = new URL(base).host;
       expect((await getAs(own, '/')).status).toBe(200); // the login page, no redirect
