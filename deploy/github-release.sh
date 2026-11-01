@@ -6,24 +6,32 @@
 # is the section of CHANGELOG.md for that version. It is scanned like the mirror is: nothing is published when it holds an internal
 # address or a credential. A release that already exists is left as it is.
 # Needs GITHUB_MIRROR_TOKEN (masked CI variable) with permission to write contents on GITHUB_MIRROR_REPO.
+# RELEASE_DRY_RUN=1 (with CI_COMMIT_TAG and CI_COMMIT_SHA set, no token needed) prints the release that would be created and stops.
 set -euo pipefail
 
 TAG="${CI_COMMIT_TAG:?run inside GitLab CI on a tag pipeline}"
 VERSION="${TAG#v}"
 REPO="${GITHUB_MIRROR_REPO:-lsegroup/mnemosyne}"
-: "${GITHUB_MIRROR_TOKEN:?GITHUB_MIRROR_TOKEN missing}"
+DRY_RUN="${RELEASE_DRY_RUN:-0}"
 TITLE="$(git log -1 --format=%s "${CI_COMMIT_SHA:-HEAD}")"
 
-AUTH=(-H "Authorization: Bearer ${GITHUB_MIRROR_TOKEN}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28")
+AUTH=(-H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28")
+if [ "$DRY_RUN" != "1" ]; then
+  : "${GITHUB_MIRROR_TOKEN:?GITHUB_MIRROR_TOKEN missing}"
+  AUTH+=(-H "Authorization: Bearer ${GITHUB_MIRROR_TOKEN}")
+  CODE="$(curl -sS -o /dev/null -w '%{http_code}' "${AUTH[@]}" "https://api.github.com/repos/${REPO}/releases/tags/${TAG}")"
+  if [ "$CODE" = "200" ]; then echo "GitHub already has the release ${TAG}: left as it is"; exit 0; fi
+fi
 
-CODE="$(curl -sS -o /dev/null -w '%{http_code}' "${AUTH[@]}" "https://api.github.com/repos/${REPO}/releases/tags/${TAG}")"
-if [ "$CODE" = "200" ]; then echo "GitHub already has the release ${TAG}: left as it is"; exit 0; fi
+# the list of commits is far too big for an environment variable: it goes through a file
+LIST_FILE="$(mktemp)"
+curl -sS "${AUTH[@]}" "https://api.github.com/repos/${REPO}/commits?per_page=100" >"$LIST_FILE"
 
-BODY="$(VERSION="$VERSION" TITLE="$TITLE" LIST="$(curl -sS "${AUTH[@]}" "https://api.github.com/repos/${REPO}/commits?per_page=100")" python3 - <<'PY'
+BODY="$(VERSION="$VERSION" TITLE="$TITLE" LIST_FILE="$LIST_FILE" python3 - <<'PY'
 import json, os, re, sys
 version, title = os.environ["VERSION"], os.environ["TITLE"]
 sha = ""
-data = json.loads(os.environ["LIST"] or "[]")
+data = json.loads(open(os.environ["LIST_FILE"], encoding="utf8").read() or "[]")
 if isinstance(data, list):
     for c in data:
         if c["commit"]["message"].split("\n")[0] == title:
@@ -32,7 +40,7 @@ if isinstance(data, list):
 if not sha:
     sys.exit("the tagged commit is not on GitHub yet (title: %s): wait for the mirror job and run this job again" % title)
 text = open("CHANGELOG.md", encoding="utf8").read()
-m = re.search(r"^## %s\b.*\n(.*?)(?=^## |\Z)" % re.escape(version), text, re.S | re.M)
+m = re.search(r"^## %s\b[^\n]*\n(.*?)(?=^## |\Z)" % re.escape(version), text, re.S | re.M)
 if not m:
     sys.exit("CHANGELOG.md has no section for version %s" % version)
 notes = m.group(1).strip()
@@ -42,6 +50,8 @@ if re.search(pattern, notes):
 print(json.dumps({"tag_name": "v" + version, "target_commitish": sha, "name": "Mnemosyne " + version, "body": notes, "draft": False, "prerelease": False, "make_latest": "true"}))
 PY
 )"
+
+if [ "$DRY_RUN" = "1" ]; then echo "dry run: not publishing. The release would be:"; echo "$BODY" | python3 -c 'import json,sys; d=json.load(sys.stdin); b=d.pop("body"); print(json.dumps(d, indent=1)); print("--- text (%d characters) ---" % len(b)); print(b[:400] + " ...")'; exit 0; fi
 
 OUT="$(mktemp)"
 CODE="$(curl -sS -o "$OUT" -w '%{http_code}' -X POST "${AUTH[@]}" -d "$BODY" "https://api.github.com/repos/${REPO}/releases")"
