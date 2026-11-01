@@ -5,6 +5,7 @@ import (
 	"errors"
 	"html"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -30,9 +31,13 @@ func seatsUsed(members *store.Members, tokens *store.Tokens, now time.Time) int 
 
 // initLicense builds the licence manager on the portal's sealed files. It does not talk to the licence server before StartLicense.
 func (s *Server) initLicense() {
-	domain := ""
-	if s.canonical != nil {
-		domain = strings.ToLower(s.canonical.Hostname())
+	// The licensed domain: the one set for it, else the host of the public URL (read here, not from s.canonical: that is set later), and only
+	// when there is neither the name of the machine.
+	domain := s.cfg.LicenseDomain
+	if domain == "" {
+		if u, err := url.Parse(s.cfg.PublicURL); err == nil {
+			domain = strings.ToLower(u.Hostname())
+		}
 	}
 	if domain == "" {
 		domain, _ = os.Hostname()

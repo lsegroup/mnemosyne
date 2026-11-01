@@ -54,6 +54,8 @@ type Config struct {
 	LicenseFile   string
 	LicenseServer string
 	LicenseKey    string
+	// LicenseDomain is the domain this installation is licensed for (the licence server shows it); empty = the host of the public URL.
+	LicenseDomain string
 	// Version is the version of this program (set by main).
 	Version string
 
@@ -158,10 +160,23 @@ func Load(get func(string) string, cwd string) (Config, error) {
 		LicenseFile:   file("MNEMOSYNE_LICENSE_FILE", "license.enc"),
 		LicenseServer: strings.TrimRight(get("MNEMOSYNE_LICENSE_SERVER"), "/"),
 		LicenseKey:    strings.TrimSpace(get("MNEMOSYNE_LICENSE_KEY")),
+		LicenseDomain: licenseDomain(get("MNEMOSYNE_LICENSE_DOMAIN")),
 
 		Listen:   pick("MNEMOSYNE_ADMIN_LISTEN", "127.0.0.1:40001"),
 		Upstream: strings.TrimRight(pick("MNEMOSYNE_UPSTREAM", "http://127.0.0.1:40002"), "/"),
 	}, nil
+}
+
+// licenseDomain makes "https://Lumanet.INFO:40000/x" and " lumanet.info " the same "lumanet.info".
+func licenseDomain(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	if i := strings.Index(v, "://"); i >= 0 {
+		v = v[i+3:]
+	}
+	if i := strings.IndexAny(v, "/:"); i >= 0 {
+		v = v[:i]
+	}
+	return v
 }
 
 // Configured reports whether the portal can be switched on: a long enough secret and a public URL.

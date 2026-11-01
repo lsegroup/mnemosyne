@@ -238,3 +238,15 @@ func TestSeatsAreThePeopleWhoSignedInLastYearOrHoldAnActiveToken(t *testing.T) {
 	eq(t, got, 3, "alice, carol and dave")
 	eq(t, seatsUsed(store.NewMembers(filepath.Join(h.dir, "none.enc"), enc), store.NewTokens(filepath.Join(h.dir, "none2.enc"), enc), now), 0, "no files, no seats")
 }
+
+func TestTheLicensedDomainIsTheHostOfThePublicURLUnlessOneIsSet(t *testing.T) {
+	// the host of MNEMOSYNE_PUBLIC_URL (the harness serves on 127.0.0.1), not the name of the machine
+	h := newHarness(t, withLocal(nil))
+	eq(t, h.srv.lic.Status().Domain, "127.0.0.1", "domain from the public URL")
+
+	// MNEMOSYNE_LICENSE_DOMAIN wins, however it is written
+	for _, written := range []string{"lumanet.info", " Lumanet.INFO ", "https://lumanet.info:40000/x"} {
+		h := newHarness(t, withLocal(map[string]string{"MNEMOSYNE_LICENSE_DOMAIN": written}))
+		eq(t, h.srv.lic.Status().Domain, "lumanet.info", "domain set as "+written)
+	}
+}
