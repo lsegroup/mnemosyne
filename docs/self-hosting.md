@@ -109,7 +109,7 @@ proxy through the existing web server rather than opening a port.
 
 ## Run — the admin program in front of the server
 
-The admin (`/mnemosyne/admin`) is the compiled program in `bin/` (see the README; checksums in `bin/SHA256SUMS`). It becomes the front door:
+The admin (`/mnemosyne/admin`) is the compiled Go program in `bin/` (see the README; checksums in `bin/SHA256SUMS`). It becomes the front door:
 it listens where the server listened (`127.0.0.1:40001`), serves `/mnemosyne/admin` itself, starts the server on `127.0.0.1:40002` and passes
 everything else on to it. A reverse proxy in front keeps sending `/mnemosyne/` to `127.0.0.1:40001`, so nothing changes for people or MCP clients.
 It reads the same environment file as the server. Install it and swap the unit:
