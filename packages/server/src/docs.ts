@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { NodeRepo } from './repo.js';
 import type { MemoryNode } from '@mnemosyne/core';
 import { slug } from './slug.js';
@@ -111,4 +112,13 @@ export class NodeIndex {
   async get(project: string, id: string): Promise<MemoryNode | null> {
     return (await this.all()).find((n) => n.project === project && n.id === id) ?? null;
   }
+}
+
+/** Fingerprint of everything the documentation is written from (stored with an article to tell later which notes changed). */
+export function noteHash(n: MemoryNode): string {
+  return createHash('sha256').update(JSON.stringify([n.id, n.title, n.type, n.status, n.observed_at ?? null, [...n.components].sort(), n.body])).digest('hex').slice(0, 12);
+}
+
+export function noteHashes(notes: MemoryNode[]): Record<string, string> {
+  return Object.fromEntries(notes.map((n) => [n.id, noteHash(n)]));
 }

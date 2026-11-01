@@ -1,24 +1,7 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { effectiveJob, validateJobSettings } from '../src/ai-jobs.js';
 import { chat } from '../src/llm-call-chat.js';
-
-describe('the reasoning effort of a job', () => {
-  it('is an optional setting: only the known levels are accepted, and unset means the provider decides', () => {
-    expect(validateJobSettings('text', {}).reasoningEffort).toBeUndefined();
-    expect(validateJobSettings('text', { reasoningEffort: '' }).reasoningEffort).toBeUndefined();
-    expect(validateJobSettings('text', { reasoningEffort: 'low' }).reasoningEffort).toBe('low');
-    expect(validateJobSettings('image', { reasoningEffort: 'minimal' }).reasoningEffort).toBe('minimal');
-    expect(() => validateJobSettings('text', { reasoningEffort: 'ludicrous' })).toThrow(/Reasoning effort must be one of minimal, low, medium, high/);
-    expect(() => validateJobSettings('text', { reasoningEffort: 3 })).toThrow(/Reasoning effort/);
-    expect(effectiveJob('text', undefined).reasoningEffort).toBeUndefined();
-    expect(effectiveJob('text', { reasoningEffort: 'high' }).reasoningEffort).toBe('high');
-    // an unset effort leaves the effective job (which an agreement is a fingerprint of) exactly as it was before the setting existed
-    expect(JSON.stringify(effectiveJob('text', undefined))).not.toContain('reasoningEffort');
-    expect(JSON.stringify(effectiveJob('text', { reasoningEffort: 'low' }))).toContain('"reasoningEffort":"low"');
-  });
-});
 
 describe('what the call sends and reads back', () => {
   let srv: Server;

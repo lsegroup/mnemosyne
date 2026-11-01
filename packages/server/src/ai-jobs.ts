@@ -1,5 +1,5 @@
 import { DEFAULT_PLAN_SYSTEM, DEFAULT_PLAN_USER, DEFAULT_WIKI_SYSTEM, DEFAULT_WIKI_USER } from './docgen.js';
-import { ProviderValidationError, type Role } from './provider-store.js';
+import type { Role } from './provider-store.js';
 
 /**
  * Everything an administrator can set for one AI job (Admin -> LLM, step 4): how much the AI may write, how it
@@ -123,57 +123,4 @@ export function effectiveJob(role: Role, s: JobSettings | undefined): EffectiveJ
     systemPrompt: s?.systemPrompt?.trim() ? s.systemPrompt : d.systemPrompt,
     userPrompt: s?.userPrompt?.trim() ? s.userPrompt : d.userPrompt,
   };
-}
-
-function num(v: unknown, field: string, min: number, max: number, integer: boolean): number | undefined {
-  if (v === undefined || v === null || v === '') return undefined;
-  const n = typeof v === 'number' ? v : Number(String(v).replace(',', '.'));
-  if (!Number.isFinite(n)) throw new ProviderValidationError(`${field} must be a number`);
-  if (integer && !Number.isInteger(n)) throw new ProviderValidationError(`${field} must be a whole number`);
-  if (n < min || n > max) throw new ProviderValidationError(`${field} must be between ${min} and ${max}`);
-  return n;
-}
-
-/** Validates the admin form; values equal to the default are not stored, so later default improvements still apply. */
-export function validateJobSettings(role: Role, input: Record<string, unknown>): JobSettings {
-  const def = JOB_DEFS[role];
-  const out: JobSettings = {};
-  const maxTokens = num(input.maxTokens, 'Max output tokens', 256, MAX_OUTPUT_TOKENS, true);
-  if (maxTokens !== undefined && maxTokens !== def.defaults.maxTokens) out.maxTokens = maxTokens;
-  const temperature = num(input.temperature, 'Temperature', 0, 2, false);
-  if (temperature !== undefined) out.temperature = temperature;
-  const topP = num(input.topP, 'Top-p', 0.01, 1, false);
-  if (topP !== undefined) out.topP = topP;
-  const effort = input.reasoningEffort;
-  if (effort !== undefined && effort !== null && effort !== '') {
-    if (typeof effort !== 'string' || !(REASONING_EFFORTS as readonly string[]).includes(effort)) {
-      throw new ProviderValidationError(`Reasoning effort must be one of ${REASONING_EFFORTS.join(', ')}, or empty for the provider's default`);
-    }
-    out.reasoningEffort = effort as ReasoningEffort;
-  }
-  const timeout = num(input.timeoutMinutes, 'Time limit', 1, 60, true);
-  if (timeout !== undefined && timeout !== def.defaults.timeoutMinutes) out.timeoutMinutes = timeout;
-
-  for (const [key, label, dflt] of [
-    ['systemPrompt', 'System prompt', def.defaults.systemPrompt],
-    ['userPrompt', 'Instruction', def.defaults.userPrompt],
-  ] as const) {
-    const v = input[key];
-    if (v === undefined || v === null) continue;
-    if (typeof v !== 'string') throw new ProviderValidationError(`${label} must be text`);
-    const t = v.replace(/\r\n?/g, '\n');
-    if (t.length > 30_000) throw new ProviderValidationError(`${label} is too long (30,000 characters at most)`);
-    if (!t.trim() || t.trim() === dflt.trim()) continue; // blank or unchanged = the built-in default
-    out[key] = t;
-  }
-  if (out.userPrompt) {
-    for (const p of def.placeholders.filter((x) => x.required)) {
-      if (!out.userPrompt.includes(`{{${p.name}}}`)) throw new ProviderValidationError(`The instruction must contain {{${p.name}}} - it is replaced by ${p.meaning}`);
-    }
-    const known = new Set(def.placeholders.map((x) => x.name));
-    for (const m of out.userPrompt.matchAll(/\{\{(\w+)\}\}/g)) {
-      if (!known.has(m[1]!)) throw new ProviderValidationError(`Unknown placeholder {{${m[1]}}} (known: ${[...known].map((n) => `{{${n}}}`).join(', ')})`);
-    }
-  }
-  return out;
 }

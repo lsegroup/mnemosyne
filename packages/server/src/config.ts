@@ -85,20 +85,10 @@ export interface MnemosyneConfig {
     auditFile: string;
     /** Generated project documentation (articles, diagrams, PDFs), kept with their date stamps. */
     docsDir: string;
-    /** The Auto tab: schedule, selection, agreement and the list of runs (no secrets in it). */
+    /** The Auto schedule file of the admin program; its folder is also where the one-AI-job lock file lives. */
     autoFile: string;
     /** Spending guard: most AI generation runs a PERSON may start per UTC day, across all projects (automatic runs have their own dollar limit). */
     aiDailyLimit: number;
-    /**
-     * The admin (`/admin`, its API and the Auto scheduler) is served by a separate program in front of this server. This server then
-     * answers 404 for `/admin` and does not start its own Auto scheduler.
-     */
-    adminExternal: boolean;
-    /**
-     * Built-in admin account so the portal can be configured before (or without) GitLab SSO.
-     * Give either a `passwordHash` (`hashPassword()` output) or a plain `password`.
-     */
-    localAdmin: { user?: string; passwordHash?: string; password?: string };
   };
 }
 
@@ -173,12 +163,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, repoOverride?: 
       docsDir: resolve(env.MNEMOSYNE_DOCS_DIR ?? `${dirname(dbPath)}/docs`),
       autoFile: resolve(env.MNEMOSYNE_AUTO_FILE ?? `${dirname(dbPath)}/auto.json`),
       aiDailyLimit: int(env.MNEMOSYNE_AI_DAILY_LIMIT, 20),
-      adminExternal: bool(env.MNEMOSYNE_ADMIN_EXTERNAL, false),
-      localAdmin: {
-        user: env.MNEMOSYNE_LOCAL_ADMIN_USER,
-        passwordHash: env.MNEMOSYNE_LOCAL_ADMIN_PASSWORD_HASH,
-        password: env.MNEMOSYNE_LOCAL_ADMIN_PASSWORD,
-      },
     },
   };
 }

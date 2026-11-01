@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The admin (sign-in, LLM, SSO, Audit, Auto, License) is no longer part of this server: it is a separate program that runs in front of it and
+  starts it. This server has no `/admin` any more (it answers 404) and no Auto scheduler of its own; it still reads the settings the admin saves.
+
 ### Profile and personal MCP tokens
 - The signed-in person's name in the header is now a card with a link to their profile. The profile lists their account details and lets them issue their own MCP token.
 - A token is valid for at most 90 days (1 to 90, default 90), is shown once, can be revoked at any time, and only a hash of it is stored. A person can hold five active tokens; they are still one person.

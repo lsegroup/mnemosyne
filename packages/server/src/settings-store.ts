@@ -50,26 +50,3 @@ export class SettingsStore {
     return run;
   }
 }
-
-function str(v: unknown, field: string, max: number): string {
-  const s = typeof v === 'string' ? v.trim() : '';
-  if (s.length > max) throw new SettingsValidationError(`${field} is too long`);
-  return s;
-}
-
-/** Validate the SSO form; an empty clientSecret keeps the stored one. Admin rights come from GitLab, never from a list here. */
-export function applyPortalInput(s: PortalSettings, input: Record<string, unknown>): void {
-  const url = str(input.gitlabUrl, 'GitLab URL', 300).replace(/\/+$/, '');
-  if (url) {
-    let u: URL;
-    try {
-      u = new URL(url);
-    } catch {
-      throw new SettingsValidationError('GitLab URL is not a valid URL');
-    }
-    if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new SettingsValidationError('GitLab URL must be http(s)');
-  }
-  const clientId = str(input.clientId, 'Application ID', 200);
-  const newSecret = str(input.clientSecret, 'Secret', 500);
-  s.gitlab = { url, clientId, clientSecret: newSecret || s.gitlab?.clientSecret || '' };
-}

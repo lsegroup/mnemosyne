@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { docsNotFound, adminPage, loginPage, siteFooter } from '../src/web-pages.js';
+import { docsNotFound, loginPage, siteFooter } from '../src/web-pages.js';
 import { VERSION, shownVersion } from '../src/version.js';
 
 const pkg = (path: string) => (JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8')) as { version: string }).version;
@@ -31,11 +31,9 @@ describe('the line at the bottom of every page', () => {
     expect(siteFooter(2026)).toBe('<div class="site-foot">2026 &copy; LSE Group Corporation <span aria-hidden="true">|</span>Version 0.6</div>');
   });
 
-  it('is on the sign-in page, the admin page and the pages of the documentation area', () => {
+  it('is on the sign-in page and the pages of the documentation area', () => {
     const user = { name: 'Olaf', username: 'olaf', admin: true } as never;
-    expect(loginPage({ basePath: '/mnemosyne', configured: true, admin: false, local: false, sso: true })).toContain(line);
-    expect(loginPage({ basePath: '/mnemosyne', configured: true, admin: true, local: true, sso: true })).toContain(line);
-    expect(adminPage({ basePath: '/mnemosyne', nonce: 'n', user: { name: 'Olaf', username: 'olaf' }, redirectUris: [] } as never)).toContain(line);
+    expect(loginPage({ basePath: '/mnemosyne', configured: true, sso: true })).toContain(line);
     expect(docsNotFound('/mnemosyne', user, 'No such project')).toContain(line);
   });
 });

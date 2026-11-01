@@ -1,35 +1,29 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { dirname } from 'node:path';
 import { gzipSync } from 'node:zlib';
-import { Router, urlencoded, type NextFunction, type Request, type Response } from 'express';
+import { Router, type Request, type Response } from 'express';
 import type { MnemosyneConfig } from './config.js';
-import { MIN_SECRET_LENGTH, deriveKeys, hashPassword, signToken, verifyPassword, verifyToken, type DerivedKeys } from './secrets.js';
-import { ProviderStore, ProviderUnreachableError, ProviderValidationError, ROLES, type Role } from './provider-store.js';
-import { fetchModels } from './llm-models.js';
-import { AuditLog, clientIp, diffLines, type AuditInput } from './audit.js';
-import { SettingsStore, SettingsValidationError, applyPortalInput, type GitLabSettings, type PortalSettings } from './settings-store.js';
-import { adminPage, docsNotFound, homePage, loginPage, nodePage, notesPage, profilePage, projectHome, type ProjectCard } from './web-pages.js';
+import { MIN_SECRET_LENGTH, deriveKeys, signToken, verifyToken, type DerivedKeys } from './secrets.js';
+import { ProviderStore, ProviderValidationError } from './provider-store.js';
+import { AuditLog, clientIp, type AuditInput } from './audit.js';
+import { SettingsStore, type GitLabSettings, type PortalSettings } from './settings-store.js';
+import { docsNotFound, homePage, loginPage, nodePage, notesPage, profilePage, projectHome, type ProjectCard } from './web-pages.js';
 import { MAX_TOKEN_DAYS, TokenError, TokenStore } from './token-store.js';
 import { aiLockFile, aiLockHeldBy, holdAiLock, releaseAiLock } from './ai-lock.js';
-import { JOB_DEFS, effectiveJob, validateJobSettings, type JobSettings } from './ai-jobs.js';
+import { effectiveJob } from './ai-jobs.js';
 import { MemberStore, type MemberEntry } from './member-store.js';
-import { NodeIndex, fetchMemberships, matchProject, redact, slug, type GitLabProject } from './docs.js';
+import { NodeIndex, fetchMemberships, matchProject, noteHashes, redact, slug, type GitLabProject } from './docs.js';
 import { outline, renderMarkdown } from './markdown.js';
 import { DocStore, approxTokens, buildDiagramPlanPrompt, buildWikiPrompt, changeHistory, estimateText, historyMarkdown, missingSections, toPdfImage, type DocMeta } from './docgen.js';
 import { chat } from './llm-call-chat.js';
-import { checkPin, setHostPins, validatePins, type HostPin } from './host-pins.js';
+import { setHostPins } from './host-pins.js';
 import { PlanError, drawScene, layout, parsePlanSet, renderSvg, type DiagramPlan, type DiagramSet } from './diagram.js';
 import { buildPdf, type PdfInput } from './pdf.js';
-import { AutoRunner, AutoStore, AutoValidationError, agreementKey, backfillUsage, describeSchedule, inspectProject, nextRun, noteHashes, parseAutoInput, summarize, type AutoConfig, type ProjectEstimate } from './auto.js';
 import { LOGO_WEBP_BASE64 } from './web-assets.js';
 
-// Two independent sign-in systems: the public page (cookie below) and the admin area
-// (own cookie, own routes under /admin/*) so the admin can later be served by a different
-// implementation without touching the public side.
+// The documentation area's own sign-in (GitLab SSO). The admin has its own sign-in and lives in a separate program.
 const SESSION_COOKIE = 'mnemosyne_session';
-const ADMIN_COOKIE = 'mnemosyne_admin';
 const OAUTH_COOKIE = 'mnemosyne_oauth';
-const ADMIN_OAUTH_COOKIE = 'mnemosyne_admin_oauth';
 const SESSION_TTL_S = 8 * 3600;
 /** The documentation area stays signed in for a month; GitLab is re-checked silently every 12 h (refresh token). */
 const money = (usd: number) => (usd < 0.01 ? '<0.01' : usd.toFixed(2));
@@ -42,13 +36,11 @@ const DOCS_SESSION_TTL_S = 30 * 24 * 3600;
 const MEMBER_FRESH_MS = 12 * 3600 * 1000;
 const OAUTH_TTL_S = 10 * 60;
 const GITLAB_TIMEOUT_MS = 10_000;
-const LOCAL_ADMIN_GRACE_S = 24 * 3600;
 
 interface Session {
   u: string; // GitLab username
   n: string; // display name
   e: string; // e-mail
-  l?: boolean; // admin session from the local admin account
   exp: number;
 }
 
@@ -80,20 +72,8 @@ export interface WebPortal {
   router: Router;
   /** Provider settings store; null while the portal is not configured. */
   providers: ProviderStore | null;
-  /** The Auto scheduler (Admin -> Auto); null while the portal is not configured. */
-  auto: AutoRunner | null;
   /** The personal MCP tokens people issue in their profile; null while the portal is not configured. */
   tokens: TokenStore | null;
-}
-
-/** An admin API answer with its own status (the others are 400 for bad input). */
-class AdminHttpError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-  ) {
-    super(message);
-  }
 }
 
 /** Everything the portal needs to be switched on; any gap leaves it in "not configured". */
@@ -103,9 +83,9 @@ export function webConfigured(cfg: MnemosyneConfig): boolean {
 }
 
 /**
- * Public login screen at `/`, sign-in (local admin account and GitLab SSO) under `/auth/*`, and the admin area
- * under `/admin/*` (HTML + JSON API). Mounted before the MCP/REST bearer check,
- * so it has its own auth and never touches how MCP clients connect.
+ * The documentation area: the public login screen at `/`, GitLab SSO under `/auth/*`, the project pages with the AI documentation, the
+ * profile with personal MCP tokens. Mounted before the MCP/REST bearer check, so it has its own auth and never touches how MCP clients
+ * connect. There is no admin here: the admin (LLM, SSO, Audit, Auto, License) is a separate program in front of this server.
  */
 export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   const router = Router();
@@ -124,13 +104,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   const audit = keys ? new AuditLog(cfg.web.auditFile) : null;
   const rec = (req: Request, e: AuditInput) => audit?.log({ ip: clientIp(req), ...e });
 
-  // Built-in admin account: lets the portal be configured before GitLab SSO exists.
-  const localUser = (cfg.web.localAdmin.user ?? '').trim() || 'admin';
-  const localHash =
-    cfg.web.localAdmin.passwordHash || (cfg.web.localAdmin.password ? hashPassword(cfg.web.localAdmin.password) : undefined);
-  const localEnabled = Boolean(keys && localHash);
-
-  /** GitLab SSO + admin list: values saved in the admin UI win over the environment. */
+  /** GitLab SSO: values saved in the admin (a separate program) win over the environment. */
   const effective = async () => {
     const st: PortalSettings = settings ? await settings.get().catch(() => ({})) : {};
     const g: GitLabSettings = {
@@ -138,21 +112,8 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       clientId: (st.gitlab?.clientId || cfg.web.gitlab.clientId) || undefined,
       clientSecret: (st.gitlab?.clientSecret || cfg.web.gitlab.clientSecret) || undefined,
     };
-    // The built-in account is a bootstrap: 24h after GitLab SSO is proven live (first admin
-    // sign-in through it) it stops working. MNEMOSYNE_LOCAL_ADMIN_FORCE=1 is the recovery
-    // switch if GitLab is down or SSO was misconfigured.
-    const dueAt = st.ssoLiveAt ? st.ssoLiveAt + LOCAL_ADMIN_GRACE_S : undefined;
-    const force = /^(1|true|yes|on)$/i.test(process.env.MNEMOSYNE_LOCAL_ADMIN_FORCE ?? '');
-    return {
-      gitlab: g,
-      sso: Boolean(g.url && g.clientId && g.clientSecret),
-      ssoLiveAt: st.ssoLiveAt,
-      localActive: localEnabled && (force || !dueAt || Date.now() / 1000 < dueAt),
-    };
+    return { gitlab: g, sso: Boolean(g.url && g.clientId && g.clientSecret) };
   };
-
-  // Brute-force brake for the local login: 5 misses lock that client out for a minute.
-  const misses = new Map<string, { n: number; until: number }>();
 
   const setCookie = (res: Response, name: string, value: string, maxAgeS: number, path = cookiePath) =>
     res.append(
@@ -195,8 +156,6 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     res.redirect(302, `${canonical.origin}${req.originalUrl}`);
   });
 
-  // The admin is served by a separate program in front of this server (MNEMOSYNE_ADMIN_EXTERNAL): this server does not know /admin at all.
-  if (cfg.web.adminExternal) router.use('/admin', (_req, res) => void res.status(404).type('text/plain').send('The admin is served elsewhere.'));
 
   // --- the "Mnemosyne Wiki" badge that gitlab-links puts on every GitLab project (public, no sign-in: GitLab's pages load it) ---
   const badge = Buffer.from(
@@ -526,7 +485,6 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       loginPage({
         basePath,
         configured,
-        local: false,
         sso: configured && (await effective()).sso,
         error: typeof req.query.error === 'string' ? req.query.error : undefined,
       }),
@@ -927,7 +885,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     }
     // 2) spending guards
     // an automatic run is either ours or the admin program's (which says so in the lock file)
-    const autoActive = () => Boolean(autoRunner?.active) || aiLockHeldBy(aiLockPath, 'auto');
+    const autoActive = () => aiLockHeldBy(aiLockPath, 'auto');
     const aiBusy = () => autoActive() || aiRunning();
     if (aiBusy()) return void fail400(res, autoActive() ? 'An automatic documentation update is running (Admin → Auto). Please wait for it to finish.' : 'An AI generation is already running. Please wait for it to finish.', 409);
     const dayStart = new Date().toISOString().slice(0, 10) + 'T00:00:00.000Z';
@@ -957,107 +915,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     res.json(j ? { state: j.state, kind: j.kind, seconds: Math.round((Date.now() - j.startedAt) / 1000), error: j.error, warning: j.warning } : { state: 'idle' });
   });
 
-  // --------------------------------------------------------------------------
-  // Auto (Admin -> Auto): the scheduler. It runs the very same job code as the page buttons, one project after the other, only for
-  // projects whose notes changed, only after an administrator agreed to the exact setup, and never past the dollar limit of the run.
-  // Its own spending guard is that limit; the daily cap above counts what PEOPLE start ('ai_start'), automatic calls are 'auto_start'.
-  // --------------------------------------------------------------------------
-  const autoStore = keys ? new AutoStore(cfg.web.autoFile) : null;
-
-  /** GitLab projects that signed-in people have told us about (the admin area has no project list of its own): only for a path and a name. */
-  const knownGitLab = (): GitLabProject[] => {
-    const byId = new Map<number, GitLabProject>();
-    for (const m of members.values()) for (const p of m.projects ?? []) byId.set(p.id, p);
-    return [...byId.values()];
-  };
-
-  /** The model for TEXT (it also plans the charts) and everything that decides what a call can cost, as one fingerprint. */
-  const autoModel = async () => {
-    const text = await providers!.getAssigned('text');
-    if (!text) return null;
-    const stored = await providers!.getJobs();
-    const tj = effectiveJob('text', stored.text);
-    const ij = effectiveJob('image', stored.image);
-    return {
-      text,
-      tj,
-      ij,
-      label: `${text.provider.label} / ${text.model}`,
-      priced: estimateText(text.model, 1, 1).usd !== null,
-      key: createHash('sha256').update(JSON.stringify([text.provider.id, text.model, tj, ij])).digest('hex'),
-    };
-  };
-  type AutoModel = NonNullable<Awaited<ReturnType<typeof autoModel>>>;
-
-  /** What a run would do for one project, from the notes and the stored articles: nothing is sent to a model. */
-  const autoState = async (project: string) => {
-    const notes = await nodeIndex!.inProject(project);
-    const wiki = (await docStore!.list(project, 'wiki'))[0] ?? null;
-    const diagram = (await docStore!.list(project, 'diagram'))[0] ?? null;
-    return { notes, wiki, state: inspectProject(project, notes, wiki, diagram) };
-  };
-
-  /** The same plus what its calls would cost (typical and worst case), the way the agreement popup counts them. */
-  const autoFacts = async (project: string, model: AutoModel) => {
-    const { notes, wiki, state } = await autoState(project);
-    const prompt = buildWikiPrompt(project, null, notes, { system: model.tj.systemPrompt, user: model.tj.userPrompt });
-    const m = model.text.model;
-    const planIn = approxTokens(wiki ? Math.min((await docStore!.read(wiki)).length, 60_000) : 40_000) + 1500;
-    const est: ProjectEstimate = {
-      textTypical: estimateText(m, prompt.inputTokens, Math.min(12_000, model.tj.maxTokens)).usd,
-      textWorst: estimateText(m, prompt.inputTokens, model.tj.maxTokens).usd,
-      chartsTypical: estimateText(m, planIn, Math.min(12_000, model.ij.maxTokens)).usd,
-      chartsWorst: estimateText(m, planIn, model.ij.maxTokens).usd,
-    };
-    return { state, est };
-  };
-
   const aiRunning = () => [...jobs.values()].some((j) => j.state === 'running');
-
-  // With the admin program in front (MNEMOSYNE_ADMIN_EXTERNAL) the Auto scheduler lives there: two schedulers on one file would run everything twice.
-  const autoRunner =
-    keys && autoStore && docStore && nodeIndex && !cfg.web.adminExternal
-      ? new AutoRunner({
-          store: autoStore,
-          keyFor: async (c) => {
-            const m = await autoModel();
-            return m?.priced ? agreementKey(c, m.key) : null;
-          },
-          projects: async () => (await nodeIndex.projects()).map((p) => p.project),
-          inspect: async (project) => (await autoState(project)).state,
-          worst: async (project, kind) => {
-            const m = await autoModel();
-            if (!m?.priced) return null;
-            const f = await autoFacts(project, m);
-            return kind === 'wiki' ? f.est.textWorst : f.est.chartsWorst;
-          },
-          generate: async (project, kind, by) => {
-            const started = Date.now();
-            jobs.set(project, { kind, state: 'running', startedAt: started });
-            try {
-              const r = await generate(project, kind, `auto (agreed by ${by})`, matchProject(project, knownGitLab())?.name ?? null, (e) =>
-                audit?.log({ user: 'auto', entityType: `docs_${kind}`, entityName: project, ...e }),
-              );
-              jobs.set(project, { kind, state: 'done', startedAt: started, warning: r.warning });
-              return r;
-            } catch (err) {
-              const msg = failureMessage(err, kind, project);
-              jobs.set(project, { kind, state: 'error', startedAt: started, error: msg });
-              void audit?.log({ event: 'ai_failed', user: 'auto', entityType: `docs_${kind}`, entityName: project, description: msg });
-              throw err instanceof ProviderUnreachableError ? new ProviderUnreachableError(msg) : new Error(msg);
-            }
-          },
-          busy: aiRunning,
-          log: (e) => void audit?.log(e),
-        })
-      : null;
-  autoRunner?.start();
-  // Runs made before the TEXT / IMAGES split was recorded get it from the audit trail, but only where the trail adds up to the run's own totals.
-  if (autoStore && audit) {
-    backfillUsage(autoStore, (since) => audit.since(since), (model, i, o) => estimateText(model, i, o).usd)
-      .then((n) => n && console.log(`auto: rebuilt the TEXT / IMAGES split of ${n} past run(s) from the audit trail`))
-      .catch((err) => console.error('auto: could not rebuild the usage of past runs:', (err as Error).message));
-  }
 
   // PDF: no AI, no cost — cover, index, article and the latest diagram.
   router.post('/p/:project/api/pdf', async (req, res) => {
@@ -1169,468 +1027,8 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     res.redirect(303, `${basePath}/`);
   });
 
-  // =========================================================================
-  // ADMIN AREA — everything under `/admin/*`: its own sign-in (built-in local account and
-  // GitLab instance administrators), its own session cookie, its own API. Self-contained on purpose.
-  // =========================================================================
-  const adminBase = `${basePath}/admin`;
-  const adminCookiePath = adminBase;
-  const adminSession = (req: Request) => sessionFrom(req, ADMIN_COOKIE);
+  // The admin (sign-in, LLM, SSO, Audit, Auto, License) is a separate program in front of this server; this server has no admin at all.
+  router.use('/admin', (_req, res) => void res.status(404).type('text/plain').send('The admin is not part of this server.'));
 
-  const adminLogin = async (req: Request, res: Response, error?: string) => {
-    const eff = keys ? await effective() : null;
-    pageHeaders(res);
-    res.send(
-      loginPage({
-        basePath,
-        configured,
-        admin: true,
-        local: Boolean(eff?.localActive),
-        sso: Boolean(eff?.sso),
-        error: error ?? (typeof req.query.error === 'string' ? req.query.error : undefined),
-      }),
-    );
-  };
-
-  router.post('/admin/auth/local', urlencoded({ extended: false, limit: '4kb' }), async (req, res) => {
-    noStore(res);
-    const attempted = typeof req.body?.username === 'string' ? req.body.username.trim().slice(0, 100) : '';
-    const back = (error: string, why: string) => {
-      void rec(req, { event: 'login_failed', entityType: 'admin_local', user: attempted || 'anonymous', description: why });
-      res.redirect(`${adminBase}/?error=${error}`);
-    };
-    if (!keys || !localEnabled || !originOk(req) || !(await effective()).localActive) {
-      back('local', 'Local admin sign-in refused (disabled, or request from another origin)');
-      return;
-    }
-    const ip = clientIp(req);
-    const now = Date.now();
-    const m = misses.get(ip);
-    if (m && m.n >= 5 && m.until > now) {
-      back('throttled', 'Locked out: too many wrong passwords from this address');
-      return;
-    }
-    const user = attempted;
-    const password = typeof req.body?.password === 'string' ? req.body.password.slice(0, 200) : '';
-    // Always run the hash check so a wrong user name costs the same as a wrong password.
-    const passwordOk = verifyPassword(password, localHash);
-    if (!(passwordOk && user.toLowerCase() === localUser.toLowerCase())) {
-      misses.set(ip, { n: (m && m.until > now ? m.n : 0) + 1, until: now + 60_000 });
-      back('local', 'Wrong user name or password');
-      return;
-    }
-    misses.delete(ip);
-    void rec(req, { event: 'login', entityType: 'admin_local', entityName: 'Local administrator', user: localUser, description: 'Signed in with the built-in local admin account' });
-    setCookie(
-      res,
-      ADMIN_COOKIE,
-      signToken(keys.sign, {
-        u: localUser,
-        n: 'Local administrator',
-        e: '',
-        l: true,
-        exp: Math.floor(Date.now() / 1000) + SESSION_TTL_S,
-      } satisfies Session),
-      SESSION_TTL_S,
-      adminCookiePath,
-    );
-    res.redirect(303, `${adminBase}/`);
-  });
-
-  mountSso({
-    prefix: '/admin',
-    label: 'admin',
-    scope: 'read_user',
-    oauthCookie: ADMIN_OAUTH_COOKIE,
-    sessionCookie: ADMIN_COOKIE,
-    sessionPath: adminCookiePath,
-    failTo: `${adminBase}/`,
-    admit: async (user, eff) => {
-      // Admin rights come from GitLab itself: only a GitLab instance administrator gets in.
-      if (!user.admin) return { error: 'noadmin' };
-      // First successful GitLab admin sign-in proves SSO works: starts the 24h life of the local account.
-      if (!eff.ssoLiveAt) {
-        await settings!.update((st) => {
-          st.ssoLiveAt ??= Math.floor(Date.now() / 1000);
-        });
-      }
-      return { to: `${adminBase}/` };
-    },
-  });
-
-  router.post('/admin/auth/logout', (req, res) => {
-    const who = adminSession(req);
-    if (who) void rec(req, { event: 'logout', entityType: 'admin_session', user: who.u, description: 'Signed out of admin' });
-    clearCookie(res, ADMIN_COOKIE, adminCookiePath);
-    noStore(res);
-    res.redirect(303, `${adminBase}/`);
-  });
-
-  const requireAdminPage = async (req: Request, res: Response, next: NextFunction) => {
-    const s = adminSession(req);
-    if (!s || (s.l && !(await effective()).localActive)) {
-      await adminLogin(req, res);
-      return;
-    }
-    next();
-  };
-
-  const requireAdminApi = async (req: Request, res: Response, next: NextFunction) => {
-    noStore(res);
-    const s = adminSession(req);
-    if (!s || (s.l && !(await effective()).localActive)) {
-      res.status(401).json({ error: 'not signed in' });
-      return;
-    }
-    // State-changing calls must come from our own page: SameSite=Lax already blocks
-    // cross-site cookies; the custom header and Origin check are defence in depth.
-    if (req.method !== 'GET' && (req.header('x-requested-with') !== 'mnemosyne-admin' || !originOk(req))) {
-      void rec(req, { event: 'denied', entityType: 'admin_api', user: s.u, description: `Cross-site request refused: ${req.method} ${req.path}` });
-      res.status(403).json({ error: 'cross-site request refused' });
-      return;
-    }
-    next();
-  };
-
-  router.get('/admin', requireAdminPage, (req, res) => {
-    const s = adminSession(req)!;
-    const nonce = randomBytes(16).toString('base64');
-    pageHeaders(res, nonce);
-    res.send(
-      adminPage({
-        basePath,
-        nonce,
-        user: { name: s.n, username: s.u, local: s.l === true },
-        redirectUris: [here('/auth/callback'), here('/admin/auth/callback')],
-      }),
-    );
-  });
-
-  const api = Router();
-  api.use(requireAdminApi);
-  router.use('/admin/api', api);
-
-  const handle =
-    (fn: (req: Request, res: Response) => Promise<unknown>) => async (req: Request, res: Response) => {
-      try {
-        res.json(await fn(req, res));
-      } catch (err) {
-        if (err instanceof AdminHttpError) res.status(err.status).json({ error: err.message });
-        else if (err instanceof ProviderValidationError || err instanceof SettingsValidationError || err instanceof AutoValidationError) res.status(400).json({ error: err.message });
-        else res.status(500).json({ error: 'internal error' });
-      }
-    };
-
-  const who = (req: Request) => adminSession(req)?.u ?? 'unknown';
-
-  api.get('/providers', handle(() => providers!.list()));
-
-  // Step 4: every job (text / images / pdf) as one block - model, limits, sampling values and the prompts, all editable.
-  const jobView = async () => {
-    const list = await providers!.list();
-    return Object.fromEntries(
-      ROLES.map((role) => [role, { def: JOB_DEFS[role], settings: list.jobs[role] ?? {}, effective: effectiveJob(role, list.jobs[role]), assignment: list.assignments[role] ?? null }]),
-    );
-  };
-  api.get('/llm/jobs', handle(async () => ({ jobs: await jobView() })));
-  api.put(
-    '/llm/jobs/:role',
-    handle(async (req) => {
-      const role = String(req.params.role) as Role;
-      if (!ROLES.includes(role)) throw new ProviderValidationError('unknown job');
-      const body = (req.body ?? {}) as Record<string, unknown>;
-      const settings = validateJobSettings(role, body);
-      const names = new Map((await providers!.list()).providers.map((p) => [p.id, p.label]));
-      const flat = (a: { providerId: string; model: string } | undefined | null, st: JobSettings): Record<string, unknown> => {
-        const e = effectiveJob(role, st);
-        const chars = (t: string, d: string) => (t === d ? 'built-in default' : `${t.length} characters: ${JSON.stringify(t.slice(0, 70))}…`);
-        return {
-          model: a ? `${names.get(a.providerId) ?? a.providerId} / ${a.model}` : undefined,
-          maxTokens: e.maxTokens,
-          temperature: e.temperature ?? 'provider default',
-          topP: e.topP ?? 'provider default',
-          reasoningEffort: e.reasoningEffort ?? 'provider default',
-          timeoutMinutes: e.timeoutMinutes,
-          systemPrompt: chars(e.systemPrompt, JOB_DEFS[role].defaults.systemPrompt),
-          userPrompt: chars(e.userPrompt, JOB_DEFS[role].defaults.userPrompt),
-        };
-      };
-      const before = await providers!.list();
-      const saved = await providers!.setJob(role, (body.model ?? null) as { providerId?: unknown; model?: unknown } | null, settings);
-      void rec(req, {
-        event: 'update',
-        entityType: 'llm_job',
-        entityId: role,
-        entityName: JOB_DEFS[role].title,
-        user: who(req),
-        changes: diffLines(flat(before.assignments[role], before.jobs[role] ?? {}), flat(saved.assignment, saved.settings)),
-        description: `AI job “${JOB_DEFS[role].title}”: model, limits and prompts saved`,
-      });
-      return { jobs: await jobView() };
-    }),
-  );
-  // Step 2: host names pinned to an IP address, for when the provider's DNS is unstable. Nothing here makes an AI call.
-  const hostsView = async () => {
-    // the host names of the connected providers are offered as suggestions
-    const names = new Set<string>();
-    for (const p of (await providers!.list()).providers) {
-      try {
-        names.add(new URL(p.baseUrl).hostname);
-      } catch {
-        /* a stored URL that no longer parses has no host to suggest */
-      }
-    }
-    return { hosts: await providers!.getHosts(), providerHosts: [...names] };
-  };
-  api.get('/llm/hosts', handle(hostsView));
-  api.put(
-    '/llm/hosts',
-    handle(async (req) => {
-      const next = validatePins((req.body as { hosts?: unknown } | undefined)?.hosts);
-      const asMap = (l: HostPin[]) => Object.fromEntries(l.map((p) => [p.host, p.ip]));
-      const before = await providers!.getHosts();
-      await providers!.setHosts(next);
-      setHostPins(next); // in force at once, for the next connection
-      void rec(req, {
-        event: 'update',
-        entityType: 'llm_hosts',
-        entityName: 'Fixed addresses',
-        user: who(req),
-        changes: diffLines(asMap(before), asMap(next)),
-        description: next.length ? `Fixed addresses saved: ${next.map((p) => `${p.host} → ${p.ip}`).join(', ')}` : 'Fixed addresses removed: DNS is asked as usual',
-      });
-      return hostsView();
-    }),
-  );
-  // Opens a TLS connection to the address as that host name and checks the certificate; sends no request, costs nothing.
-  api.post(
-    '/llm/hosts/check',
-    handle(async (req) => {
-      const [pin] = validatePins([req.body ?? {}]);
-      const r = await checkPin(pin!.host, pin!.ip);
-      void rec(req, { event: 'check', entityType: 'llm_hosts', entityName: pin!.host, user: who(req), description: `${pin!.host} → ${pin!.ip}: ${r.ok ? 'OK' : 'failed'} (${r.detail})` });
-      return r;
-    }),
-  );
-  api.post(
-    '/providers',
-    handle(async (req) => {
-      const body = (req.body ?? {}) as Record<string, unknown>;
-      const before = typeof body.id === 'string' ? await providers!.getFull(body.id).catch(() => null) : null;
-      const saved = await providers!.upsert(body);
-      const now = { label: saved.label, kind: saved.kind, baseUrl: saved.baseUrl };
-      const keyChanged = typeof body.apiKey === 'string' && body.apiKey.trim() !== '';
-      const changes = [diffLines(before ? { label: before.label, kind: before.kind, baseUrl: before.baseUrl } : {}, now), keyChanged ? '+ apiKey: "••••" (new key stored)' : null]
-        .filter(Boolean)
-        .join('\n');
-      void rec(req, {
-        event: before ? 'update' : 'create',
-        entityType: 'llm_provider',
-        entityId: saved.id,
-        entityName: saved.label,
-        user: who(req),
-        changes: changes || null,
-        description: before ? 'LLM provider changed' : 'LLM provider connected',
-      });
-      return saved;
-    }),
-  );
-  // Step 3 of the LLM flow: ask the provider which models this API key may use (list call only, no inference).
-  api.post(
-    '/providers/:id/models',
-    handle(async (req) => {
-      const id = String(req.params.id);
-      const provider = await providers!.getFull(id);
-      try {
-        const saved = await providers!.setModels(id, await fetchModels(provider));
-        void rec(req, { event: 'fetch', entityType: 'llm_provider', entityId: id, entityName: provider.label, user: who(req), description: `Fetched ${saved.models.length} models from the provider` });
-        return saved;
-      } catch (err) {
-        void rec(req, { event: 'fetch_failed', entityType: 'llm_provider', entityId: id, entityName: provider.label, user: who(req), description: (err as Error).message });
-        throw err;
-      }
-    }),
-  );
-  // Step 4: one model per job (text / image / pdf), chosen from the fetched lists.
-  api.put(
-    '/llm/assignments',
-    handle(async (req) => {
-      const flat = async (a: Record<string, { providerId: string; model: string } | undefined>) => {
-        const names = new Map((await providers!.list()).providers.map((p) => [p.id, p.label]));
-        return Object.fromEntries(Object.entries(a).map(([k, v]) => [k, v ? `${names.get(v.providerId) ?? v.providerId} / ${v.model}` : undefined]));
-      };
-      const before = await flat((await providers!.list()).assignments);
-      const next = await providers!.setAssignments(req.body ?? {});
-      void rec(req, {
-        event: 'update',
-        entityType: 'llm_assignment',
-        entityName: 'Models per job',
-        user: who(req),
-        changes: diffLines(before, await flat(next)),
-        description: 'Model choices for text / images / PDF saved',
-      });
-      return next;
-    }),
-  );
-  api.delete(
-    '/providers/:id',
-    handle(async (req) => {
-      const id = String(req.params.id);
-      const label = (await providers!.getFull(id).catch(() => null))?.label ?? id;
-      await providers!.remove(id);
-      void rec(req, { event: 'delete', entityType: 'llm_provider', entityId: id, entityName: label, user: who(req), description: 'LLM provider and its stored key removed' });
-      return { ok: true };
-    }),
-  );
-
-  api.get(
-    '/settings',
-    handle(async () => {
-      const eff = await effective();
-      const secret = eff.gitlab.clientSecret ?? '';
-      return {
-        gitlabUrl: eff.gitlab.url ?? '',
-        clientId: eff.gitlab.clientId ?? '',
-        hasSecret: secret.length > 0,
-        secretHint: secret.length >= 12 ? `••••${secret.slice(-4)}` : secret ? '••••' : '',
-        ssoActive: eff.sso,
-        redirectUris: [here('/auth/callback'), here('/admin/auth/callback')],
-        localUser: eff.localActive ? localUser : null,
-      };
-    }),
-  );
-  api.put(
-    '/settings',
-    handle(async (req) => {
-      const before = await effective();
-      await settings!.update((st) => applyPortalInput(st, req.body ?? {}));
-      const after = await effective();
-      const secretChanged = typeof req.body?.clientSecret === 'string' && req.body.clientSecret.trim() !== '';
-      const changes = [
-        diffLines({ gitlabUrl: before.gitlab.url, clientId: before.gitlab.clientId }, { gitlabUrl: after.gitlab.url, clientId: after.gitlab.clientId }),
-        secretChanged ? '+ clientSecret: "••••" (new secret stored)' : null,
-      ]
-        .filter(Boolean)
-        .join('\n');
-      void rec(req, { event: 'update', entityType: 'sso', entityName: 'GitLab SSO', user: who(req), changes: changes || null, description: after.sso ? 'GitLab SSO settings saved (active)' : 'GitLab SSO settings saved (not complete yet)' });
-      return { ok: true };
-    }),
-  );
-
-  // Audit trail, newest first (same columns as the CenTest / load-balancer audit view).
-  api.get(
-    '/audit',
-    handle((req) => audit!.list({ q: typeof req.query.q === 'string' ? req.query.q : '', offset: Number(req.query.offset) || 0, limit: Number(req.query.limit) || undefined })),
-  );
-
-  // --- Auto: schedule, project selection, agreement, run list ---
-  const runStatus = async () => {
-    const st = await autoStore!.get();
-    return { enabled: st.config?.enabled ?? false, nextRunAt: st.nextRunAt ?? null, pausedReason: st.pausedReason ?? null, run: st.run ?? null, runs: st.runs };
-  };
-
-  /** Everything the Auto tab shows: the saved setup, the state of every project with notes, the estimates, the runs. */
-  const autoPayload = async () => {
-    const st = await autoStore!.get();
-    const model = await autoModel();
-    const gl = knownGitLab();
-    const projects = await Promise.all(
-      (await nodeIndex!.projects()).map(async (p) => {
-        const f = model ? await autoFacts(p.project, model) : { state: (await autoState(p.project)).state, est: null };
-        const g = matchProject(p.project, gl);
-        return { glPath: g?.fullPath ?? null, ...f.state, est: f.est };
-      }),
-    );
-    return {
-      ...(await runStatus()),
-      config: st.config ?? null,
-      agreementOk: st.config ? await autoRunner!.agreementOk(st.config) : false,
-      model: model ? { label: model.label, priced: model.priced } : null,
-      projects,
-      serverTime: new Date().toISOString(),
-    };
-  };
-
-  /** Checks the submitted setup and works out what it would cost; throws a plain message when it cannot be saved. */
-  const autoPlan = async (body: unknown) => {
-    const model = await autoModel();
-    if (!model) throw new ProviderValidationError('Choose a model for Text in Admin → LLM first.');
-    if (!model.priced) throw new ProviderValidationError(`No list price is known for ${model.text.model}, so a dollar limit cannot be enforced. Choose a priced model for Text in LLM.`);
-    const known = (await nodeIndex!.projects()).map((p) => p.project);
-    const c = parseAutoInput((body as { config?: unknown } | null)?.config, known, new Date());
-    const rows = await Promise.all(c.projects.map((project) => autoFacts(project, model)));
-    return { c, model, summary: summarize(c, rows, model.label), key: agreementKey(c, model.key) };
-  };
-
-  const flatAuto = (c: AutoConfig | undefined): Record<string, unknown> =>
-    c ? { enabled: c.enabled, schedule: describeSchedule(c.schedule), projects: c.projects.join(', '), creates: [c.text ? 'TEXT' : '', c.charts ? 'AI flow charts' : ''].filter(Boolean).join(' + '), limitUsd: c.limitUsd } : {};
-
-  api.get('/auto', handle(autoPayload));
-  api.get('/auto/status', handle(runStatus));
-
-  // Step 4 of the tab: what the setup would cost (free: reads notes only) and the one-time agreement token for saving it.
-  api.post(
-    '/auto/estimate',
-    handle(async (req) => {
-      const p = await autoPlan(req.body);
-      const token = signToken(keys!.sign, { p: 'auto', m: p.key, u: who(req), n: randomBytes(12).toString('base64url'), exp: Math.floor(Date.now() / 1000) + CONSENT_TTL_S });
-      return { live: p.summary.live, agree: p.summary.agree, token };
-    }),
-  );
-
-  // Save the setup. Only with the agreement token of exactly this setup; saving agrees to it and switches the schedule on.
-  api.put(
-    '/auto',
-    handle(async (req) => {
-      const p = await autoPlan(req.body);
-      const c = verifyToken<{ p: string; m: string; u: string; n: string; exp: number }>(keys!.sign, typeof req.body?.token === 'string' ? req.body.token : undefined);
-      if (!c || c.p !== 'auto' || c.m !== p.key || c.u !== who(req) || usedConsents.has(c.n)) {
-        void rec(req, { event: 'denied', entityType: 'auto', entityName: 'Automatic update', user: who(req), description: 'Automatic update refused: no valid agreement (token missing, expired, reused or for a different setup)' });
-        throw new AdminHttpError(403, 'The agreement has expired or does not match this setup. Press “Save schedule…” again and agree.');
-      }
-      if (autoRunner!.active) throw new AdminHttpError(409, 'An automatic run is going. Wait until it has finished before changing the schedule.');
-      usedConsents.set(c.n, c.exp);
-      const before = (await autoStore!.get()).config;
-      const user = who(req);
-      const now = new Date();
-      const saved = await autoStore!.update((s) => {
-        s.config = { ...p.c, enabled: true, agreement: { by: user, at: now.toISOString(), key: p.key } };
-        s.nextRunAt = nextRun(p.c.schedule, now)?.toISOString() ?? null;
-        s.pausedReason = null;
-      });
-      void rec(req, {
-        event: 'auto_agree',
-        entityType: 'auto',
-        entityName: 'Automatic update',
-        user,
-        changes: diffLines(flatAuto(before), flatAuto(saved.config)),
-        description: `Agreed to automatic AI use (${p.summary.agree.map((f) => `${f[0]}: ${f[1]}`).join('; ')})`,
-      });
-      return autoPayload();
-    }),
-  );
-
-  // The kill switch. Off needs nothing; on only when the saved agreement still matches the setup, the model and its limits.
-  api.put(
-    '/auto/switch',
-    handle(async (req) => {
-      const on = req.body?.enabled === true;
-      const st = await autoStore!.get();
-      if (!st.config) throw new AdminHttpError(409, 'Set up the schedule first.');
-      const next = on ? nextRun(st.config.schedule, new Date()) : null;
-      if (on) {
-        if (!(await autoRunner!.agreementOk(st.config))) throw new AdminHttpError(409, 'The agreement does not match the current setup (or no priced model is chosen). Press “Save schedule…” and agree again.');
-        if (!next) throw new AdminHttpError(409, 'The one-time moment is already in the past. Choose a new date and press “Save schedule…”.');
-      }
-      await autoStore!.update((s) => {
-        s.config!.enabled = on;
-        s.nextRunAt = next?.toISOString() ?? null;
-        s.pausedReason = null;
-      });
-      void rec(req, { event: 'update', entityType: 'auto', entityName: 'Automatic update', user: who(req), changes: diffLines({ enabled: st.config.enabled }, { enabled: on }), description: `Automatic update switched ${on ? 'ON' : 'OFF'}` });
-      return autoPayload();
-    }),
-  );
-
-  return { router, providers, auto: autoRunner, tokens };
+  return { router, providers, tokens };
 }

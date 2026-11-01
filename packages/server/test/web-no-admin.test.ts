@@ -8,19 +8,18 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { createWebPortal } from '../src/web.js';
 
-describe('the admin served by a separate program in front of this server', () => {
+
+describe('this server has no admin (the admin is a separate program in front of it)', () => {
   let tmp: string;
   let srv: Server;
   let base = '';
-  let auto: unknown = 'unset';
 
   beforeAll(async () => {
     tmp = await mkdtemp(join(tmpdir(), 'mnemosyne-external-'));
     const app = express();
     app.use(express.json());
-    const cfg = loadConfig({ MNEMOSYNE_REPO: tmp, MNEMOSYNE_SECRET: 'a-test-secret-with-enough-length', MNEMOSYNE_PUBLIC_URL: 'http://127.0.0.1:1', MNEMOSYNE_ADMIN_EXTERNAL: '1' });
+    const cfg = loadConfig({ MNEMOSYNE_REPO: tmp, MNEMOSYNE_SECRET: 'a-test-secret-with-enough-length', MNEMOSYNE_PUBLIC_URL: 'http://127.0.0.1:1' });
     const built = createWebPortal(cfg);
-    auto = built.auto;
     app.use(cfg.http.basePath, built.router);
     await new Promise<void>((r) => (srv = app.listen(0, '127.0.0.1', r)));
     base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}${cfg.http.basePath}`;
@@ -30,12 +29,11 @@ describe('the admin served by a separate program in front of this server', () =>
     await rm(tmp, { recursive: true, force: true });
   });
 
-  it('does not know /admin or its API, and starts no Auto scheduler of its own (two schedulers on one file would run everything twice)', async () => {
-    expect(auto).toBeNull();
+  it('does not know /admin or its API; it starts no Auto scheduler and has no local admin account', async () => {
     for (const path of ['/admin', '/admin/', '/admin/api/providers', '/admin/api/auto', '/admin/auth/login']) {
       const res = await fetch(`${base}${path}`, { redirect: 'manual' });
       expect(res.status, path).toBe(404);
-      expect(await res.text()).toBe('The admin is served elsewhere.');
+      expect(await res.text()).toBe('The admin is not part of this server.');
     }
     // the public side is untouched
     const home = await fetch(`${base}/`);

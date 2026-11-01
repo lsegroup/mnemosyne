@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
-import { Script, createContext } from 'node:vm';
+import { Script } from 'node:vm';
 import { join } from 'node:path';
 import express from 'express';
 import { simpleGit } from 'simple-git';
@@ -13,12 +13,8 @@ import { createHttpApp } from '../src/http.js';
 import { ProviderStore, ProviderUnreachableError, ProviderValidationError } from '../src/provider-store.js';
 import { modelsUrl, parseModelIds } from '../src/llm-models.js';
 import { MnemosyneService } from '../src/service.js';
-import { deriveKeys, hashPassword, open, seal, signToken, verifyPassword, verifyToken } from '../src/secrets.js';
-import { SettingsStore } from '../src/settings-store.js';
-import { AutoStore } from '../src/auto.js';
-import { DocStore } from '../src/docgen.js';
+import { deriveKeys, open, seal, signToken, verifyToken } from '../src/secrets.js';
 import { createWebPortal } from '../src/web.js';
-import { adminPage } from '../src/web-pages.js';
 import { renderMarkdown } from '../src/markdown.js';
 import { matchProject, redact } from '../src/docs.js';
 
@@ -229,7 +225,6 @@ describe('web portal', () => {
     portalApp = express();
     portalApp.use(express.json());
     const built = createWebPortal(cfg);
-    autoRunner = built.auto;
     portalApp.use(cfg.http.basePath, built.router);
     base = `${origin}${cfg.http.basePath}`;
   });
@@ -241,7 +236,6 @@ describe('web portal', () => {
   });
 
   let webCfg: ReturnType<typeof loadConfig>;
-  let autoRunner: ReturnType<typeof createWebPortal>['auto'];
 
   const cookiesOf = (res: Response) =>
     res.headers.getSetCookie().map((c) => c.split(';')[0]!).filter((c) => !c.endsWith('=')).join('; ');
@@ -288,112 +282,11 @@ describe('web portal', () => {
     expect(bytes.subarray(8, 12).toString()).toBe('WEBP');
   });
 
-  it('keeps /admin and its API closed to anonymous visitors', async () => {
-    const page = await fetch(`${base}/admin/`, { redirect: 'manual' });
-    expect(page.status).toBe(200); // the admin has its own sign-in page, no redirect to the public one
-    const html = await page.text();
-    expect(html).toContain('Administration');
-    expect(html).not.toContain('id="tab-llm"');
-    expect((await fetch(`${base}/admin/api/providers`)).status).toBe(401);
-  });
-
-  it('admin page GitLab link starts the ADMIN flow (own login route and callback)', async () => {
-    const html = await (await fetch(`${base}/admin/`)).text();
-    const href = /<a class="btn[^"]*" href="([^"]+)">Sign in with GitLab/.exec(html)?.[1];
-    expect(href).toBe(`${new URL(base).pathname}/admin/auth/login`);
-    const res = await fetch(new URL(href!, base), { redirect: 'manual' });
-    expect(res.status).toBe(302);
-    expect(new URL(res.headers.get('location')!).searchParams.get('redirect_uri')).toBe(`${base}/admin/auth/callback`);
-  });
-
   it('rejects a callback with a bad or missing state', async () => {
     const res = await fetch(`${base}/auth/callback?code=admin-code&state=forged`, { redirect: 'manual' });
     expect(res.status).toBe(302);
     expect(res.headers.get('location')).toContain('error=state');
     expect(res.headers.getSetCookie().some((c) => c.startsWith('mnemosyne_session=') && !c.startsWith('mnemosyne_session=;'))).toBe(false);
-  });
-
-  it('lets a listed GitLab user into admin: menu, connect a provider, fetch its real models, choose per job', async () => {
-    const cb = await signIn('admin-code', '/admin');
-    expect(cb.status).toBe(302);
-    expect(cb.headers.get('location')).toBe(`${new URL(base).pathname}/admin/`);
-    const cookie = cookiesOf(cb);
-    expect(cb.headers.getSetCookie().join(';')).toMatch(/mnemosyne_admin=.*HttpOnly.*Path=\/mnemosyne\/admin/);
-
-    const page = await fetch(`${base}/admin/`, { headers: { cookie } });
-    expect(page.status).toBe(200);
-    const html = await page.text();
-    expect(html).toContain('id="tab-llm"');
-    expect(html).toContain('data-tab="llm"'); // left menu: LLM
-    expect(html).toContain('data-tab="sso"'); // left menu: SSO
-    expect(html).toContain('Choose the model and settings for each job');
-    expect(html).toContain('--title:#8473de'); // login palette: purple main titles
-    expect(html).toContain('--teal:#3cc4cc'); // turquoise second-level titles
-    expect(html).toContain('Store Admin');
-    const nonce = /<script nonce="([^"]+)"/.exec(html)?.[1];
-    expect(nonce).toBeTruthy();
-    expect(page.headers.get('content-security-policy')).toContain(`'nonce-${nonce}'`);
-
-    // a fake provider whose model list depends on the key
-    const llm = createServer((req, res) => {
-      const ok = req.headers.authorization === 'Bearer good-key-1234567890';
-      res.writeHead(ok ? 200 : 401, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(ok ? { data: [{ id: 'muse-spark-1.3' }, { id: 'muse-image-1.0' }, { id: 'muse-wonder-1.0' }] } : { error: 'no' }));
-    });
-    await new Promise<void>((r) => llm.listen(0, '127.0.0.1', r));
-    try {
-      const llmBase = `http://127.0.0.1:${(llm.address() as AddressInfo).port}/v1`;
-      const headers = { cookie, 'content-type': 'application/json', 'x-requested-with': 'mnemosyne-admin' };
-      const post = (path: string, body: object, method = 'POST') => fetch(`${base}/admin/api${path}`, { method, headers, body: JSON.stringify(body) });
-
-      // step 1: connect (key stored, never shown again)
-      const created = await (await post('/providers', { label: 'Meta', kind: 'openai-compatible', baseUrl: llmBase, apiKey: 'good-key-1234567890' })).json();
-      expect(created.models).toEqual([]);
-      const listed = await (await fetch(`${base}/admin/api/providers`, { headers: { cookie } })).text();
-      expect(listed).toContain('Meta');
-      expect(listed).not.toContain('good-key-1234567890');
-
-      // step 4 before step 3 is refused: nothing has been fetched yet
-      expect((await post('/llm/assignments', { text: { providerId: created.id, model: 'muse-spark-1.3' } }, 'PUT')).status).toBe(400);
-
-      // step 3: fetch what the key can really use
-      const pulled = await (await post(`/providers/${created.id}/models`, {})).json();
-      expect(pulled.models).toEqual(['muse-image-1.0', 'muse-spark-1.3', 'muse-wonder-1.0']);
-      expect(JSON.stringify(pulled)).not.toContain('good-key');
-
-      // step 4: one model per job; a model the provider did not report is refused
-      const ok = await post('/llm/assignments', { text: { providerId: created.id, model: 'muse-spark-1.3' }, image: { providerId: created.id, model: 'muse-image-1.0' }, pdf: { providerId: created.id, model: 'muse-wonder-1.0' } }, 'PUT');
-      expect(ok.status).toBe(200);
-      expect((await post('/llm/assignments', { text: { providerId: created.id, model: 'made-up' } }, 'PUT')).status).toBe(400);
-      const after = await (await fetch(`${base}/admin/api/providers`, { headers: { cookie } })).json();
-      expect(after.assignments.image).toEqual({ providerId: created.id, model: 'muse-image-1.0' });
-
-      // a provider that rejects the key is reported without leaking it
-      const bad = await (await post('/providers', { label: 'Bad', kind: 'openai-compatible', baseUrl: llmBase, apiKey: 'wrong-key-0987654321' })).json();
-      const rejected = await post(`/providers/${bad.id}/models`, {});
-      expect(rejected.status).toBe(400);
-      const err = await rejected.text();
-      expect(err).toContain('rejected the API key');
-      expect(err).not.toContain('wrong-key');
-
-      const missing = await post('/providers', { label: '' });
-      expect(missing.status).toBe(400);
-    } finally {
-      llm.close();
-    }
-  });
-
-  it('refuses state-changing admin calls that lack the same-origin marker', async () => {
-    const cookie = cookiesOf(await signIn('admin-code', '/admin'));
-    const body = JSON.stringify({ label: 'x', kind: 'openai-compatible', baseUrl: 'https://x.example', model: 'm' });
-    const noHeader = await fetch(`${base}/admin/api/providers`, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body });
-    expect(noHeader.status).toBe(403);
-    const foreignOrigin = await fetch(`${base}/admin/api/providers`, {
-      method: 'POST',
-      headers: { cookie, 'content-type': 'application/json', 'x-requested-with': 'mnemosyne-admin', origin: 'https://evil.example' },
-      body,
-    });
-    expect(foreignOrigin.status).toBe(403);
   });
 
   it('shows a member only the projects they belong to in GitLab, and refuses the rest', async () => {
@@ -426,7 +319,7 @@ describe('web portal', () => {
     expect((await fetch(`${base}/p/alpha`, { redirect: 'manual' })).status).toBe(302);
   });
 
-  it('shows the signed-in person as a card with a link to their profile, on every page and in the admin area', async () => {
+  it('shows the signed-in person as a card with a link to their profile, on every page', async () => {
     const dev = cookiesOf(await signIn('dev-code'));
     const home = await (await fetch(`${base}/`, { headers: { cookie: dev } })).text();
     expect(home).toContain('<details class="usermenu">'); // a click on the name opens the card, no script needed
@@ -438,15 +331,6 @@ describe('web portal', () => {
 
     const admin = cookiesOf(await signIn('admin-code'));
     expect(await (await fetch(`${base}/`, { headers: { cookie: admin } })).text()).toContain('<span class="upill">GitLab administrator</span>');
-    const area = await (await fetch(`${base}/admin/`, { headers: { cookie: cookiesOf(await signIn('admin-code', '/admin')) } })).text();
-    expect(area).toContain('class="usermenu"');
-    expect(area).toContain('/profile">Profile</a>');
-
-    // the built-in admin account is no GitLab account, so it has no profile and cannot hold a token
-    const local = adminPage({ basePath: '/mnemosyne', nonce: 'n', user: { name: 'Admin', username: 'admin', local: true }, redirectUris: [] });
-    expect(local).toContain('Built-in admin account');
-    expect(local).not.toContain('/profile');
-    expect(local).toContain('cannot hold an MCP token');
   });
 
   it('has a profile page for the signed-in person only, with their details and nothing of anybody else', async () => {
@@ -944,30 +828,7 @@ describe('web portal', () => {
       expect(facts['Estimated cost']).toBeTruthy(); // the fake model has no list price, so it says so; priced models add 'at most $X'
     });
 
-    it('pages the audit trail: 10 events per page, newest first, pages do not overlap', async () => {
-      const admin = cookiesOf(await signIn('admin-code'));
-      for (let i = 0; i < 12; i++) await fetch(`${base}/p/alpha`, { headers: { cookie: admin } }); // each visit is an audit event
-      await new Promise((r) => setTimeout(r, 300));
-      const h = { cookie: cookiesOf(await signIn('admin-code', '/admin')) };
-      const page = async (n: number) => (await (await fetch(`${base}/admin/api/audit?limit=10&offset=${n * 10}`, { headers: h })).json()) as { events: { time: string; description: string; entityName: string }[]; total: number };
-      const p1 = await page(0);
-      const p2 = await page(1);
-      expect(p1.events).toHaveLength(10);
-      expect(p2.events.length).toBeGreaterThan(0);
-      expect(p1.total).toBe(p2.total);
-      expect(p1.total).toBeGreaterThanOrEqual(12);
-      expect(p1.events[0]!.time >= p1.events[9]!.time).toBe(true); // newest first
-      expect(p1.events[9]!.time >= p2.events[0]!.time).toBe(true); // page 2 continues where page 1 ends
-      const key = (e: { time: string; description: string; entityName: string }) => `${e.time}|${e.entityName}|${e.description}`;
-      const seen = new Set(p1.events.map(key));
-      expect(p2.events.some((e) => seen.has(key(e)) && p1.events.filter((x) => key(x) === key(e)).length === 1)).toBe(false);
-      // the last page is partial, an offset past the end is empty but still reports the total
-      const lastPage = Math.floor((p1.total - 1) / 10);
-      expect((await page(lastPage)).events.length).toBe(p1.total - lastPage * 10);
-      expect((await page(lastPage + 1)).events).toHaveLength(0);
-    });
-
-    it('administrators get an Admin button in the user area, the admin area has a way back, members see no Admin button', async () => {
+    it('administrators get an Admin button in the user area that opens the admin, members see no Admin button', async () => {
       const admin = cookiesOf(await signIn('admin-code'));
       const dev = cookiesOf(await signIn('dev-code'));
       const adminPaths = ['/', '/p/alpha', '/p/alpha/notes'];
@@ -980,9 +841,6 @@ describe('web portal', () => {
         expect(html, path).not.toContain('class="topbtn"');
         expect(html).not.toContain('Open the admin area');
       }
-      // the admin area links back to the projects (its own sign-in stays separate)
-      const adminHtml = await (await fetch(`${base}/admin/`, { headers: { cookie: cookiesOf(await signIn('admin-code', '/admin')) } })).text();
-      expect(adminHtml).toMatch(/<a class="topbtn" href="[^"]*\/" title="Back to the projects and their documentation"><svg[\s\S]*?<span>Projects<\/span><\/a>/);
     });
 
     it('compresses large pages with gzip when the browser accepts it', async () => {
@@ -1043,92 +901,12 @@ describe('web portal', () => {
       expect(page).toContain('Workflow diagram');
     });
 
-    it('every AI value is editable in the admin (limits, sampling, prompts): validated, saved per job, and it invalidates an old agreement', async () => {
-      const admin = cookiesOf(await signIn('admin-code'));
-      const adminArea = cookiesOf(await signIn('admin-code', '/admin'));
-      const h = { cookie: adminArea, 'content-type': 'application/json', 'x-requested-with': 'mnemosyne-admin' };
-      const get = async () => (await (await fetch(`${base}/admin/api/llm/jobs`, { headers: h })).json()).jobs;
-      const put = (role: string, body: object) => fetch(`${base}/admin/api/llm/jobs/${role}`, { method: 'PUT', headers: h, body: JSON.stringify(body) });
-
-      let jobs = await get();
-      expect(Object.keys(jobs)).toEqual(['text', 'image', 'pdf']);
-      expect(jobs.text.effective.maxTokens).toBe(50_000);
-      expect(jobs.text.effective.systemPrompt).toContain('technical writer');
-      expect(jobs.text.effective.userPrompt).toContain('{{notes}}');
-      expect(jobs.text.def.placeholders.map((p: { name: string }) => p.name)).toEqual(['project', 'notes_count', 'notes']);
-      expect(jobs.image.def.placeholders.map((p: { name: string }) => p.name)).toEqual(['project', 'article']);
-      expect(jobs.pdf.def.usesAi).toBe(false);
-      // the PDF block has the very same fields as the other two, empty because nothing uses them yet
-      const pageHtml = await (await fetch(`${base}/admin/`, { headers: h })).text();
-      for (const role of ['text', 'image', 'pdf']) for (const f of ['maxTokens', 'temperature', 'topP', 'reasoningEffort', 'timeoutMinutes']) expect(pageHtml, `${f}-${role}`).toContain(`id="${f}-${role}"`);
-      for (const id of ['sys-pdf', 'usr-pdf']) expect(pageHtml).toContain(`id="${id}"`);
-      expect(jobs.pdf.effective.systemPrompt).toBe('');
-      expect(jobs.pdf.effective.userPrompt).toBe('');
-      const pdfSaved = await put('pdf', { model: jobs.pdf.assignment, maxTokens: '8000', temperature: '0.3', systemPrompt: 'PDF-SYSTEM', userPrompt: 'Handbook for {{project}}: {{article}}' });
-      expect(pdfSaved.status).toBe(200);
-      expect((await get()).pdf.settings).toMatchObject({ maxTokens: 8000, temperature: 0.3, systemPrompt: 'PDF-SYSTEM' });
-      expect((await put('pdf', { model: jobs.pdf.assignment, userPrompt: 'bad {{bogus}}' })).status).toBe(400);
-      await put('pdf', { model: jobs.pdf.assignment }); // back to empty
-      expect((await put('image', { model: jobs.image.assignment, maxTokens: 1_000_000 })).status).toBe(200); // Meta allows up to 1 million output tokens per call
-      expect((await get()).image.settings.maxTokens).toBe(1_000_000);
-      await put('image', { model: jobs.image.assignment }); // back to the defaults
-      const model = jobs.text.assignment;
-      expect(model.model).toBe('text-model');
-
-      // refused: out-of-range numbers, text, a missing or unknown placeholder, an unknown job
-      for (const bad of [{ maxTokens: 10 }, { maxTokens: 'abc' }, { maxTokens: 1_000_001 }, { temperature: 5 }, { topP: 0 }, { reasoningEffort: 'ludicrous' }, { timeoutMinutes: 999 }, { userPrompt: 'no placeholder here' }, { userPrompt: 'x {{notes}} {{bogus}}' }]) {
-        expect((await put('text', { model, ...bad })).status, JSON.stringify(bad)).toBe(400);
-      }
-      expect((await put('nope', {})).status).toBe(400);
-      expect((await put('image', { model: jobs.image.assignment, userPrompt: 'no article placeholder' })).status).toBe(400);
-
-      // an agreement given for the old settings
-      const oldEst = await (await api(admin, '/estimate?kind=wiki')).json();
-      expect(oldEst.facts.find((f: string[]) => f[0] === 'Size')[1]).toContain('up to 50,000 out');
-
-      const saved = await put('text', { model, maxTokens: '20000', temperature: '0.2', topP: '0.9', reasoningEffort: 'low', timeoutMinutes: '5', systemPrompt: 'CUSTOM-SYSTEM write short.', userPrompt: 'Project {{project}} CUSTOM-USER\n{{notes}}' });
-      expect(saved.status).toBe(200);
-      jobs = await get();
-      expect(jobs.text.settings).toMatchObject({ maxTokens: 20_000, temperature: 0.2, topP: 0.9, reasoningEffort: 'low', timeoutMinutes: 5 });
-      expect(jobs.text.effective.systemPrompt).toBe('CUSTOM-SYSTEM write short.');
-      expect(jobs.image.assignment).toBeTruthy(); // saving one job leaves the others alone
-      expect(jobs.image.settings).toEqual({});
-
-      // the agreement popup shows the new limit, and the old agreement no longer fits
-      const est = await (await api(admin, '/estimate?kind=wiki')).json();
-      expect(est.facts.find((f: string[]) => f[0] === 'Size')[1]).toContain('up to 20,000 out');
-      const stale = await api(admin, '/generate', 'POST', { kind: 'wiki', token: oldEst.token });
-      expect(stale.status).toBe(403);
-
-      // unchanged defaults are not stored (later improvements of the defaults still apply)
-      const same = await put('image', { model: jobs.image.assignment, maxTokens: '50000', systemPrompt: jobs.image.effective.systemPrompt, userPrompt: jobs.image.effective.userPrompt });
-      expect(same.status).toBe(200);
-      expect((await get()).image.settings).toEqual({});
-
-      // the change is in the audit trail without secrets
-      await new Promise((r) => setTimeout(r, 250));
-      const audit = (await readFile(join(tmp, '.mnemosyne', 'audit.jsonl'), 'utf8')).split('\n').filter(Boolean).map((l) => JSON.parse(l));
-      const ev = audit.filter((e) => e.event === 'update' && e.entityType === 'llm_job' && e.entityId === 'text').pop();
-      expect(ev.changes).toContain('+ maxTokens: 20000');
-      expect(ev.changes).toContain('+ temperature: 0.2');
-      expect(ev.changes).toContain('+ reasoningEffort: "low"');
-    });
-
     it('stops at the daily limit and records every agreement in the audit trail', async () => {
       const admin = cookiesOf(await signIn('admin-code'));
       // two runs so far (wiki + diagram); the limit is 3
       const e3 = await (await api(admin, '/estimate?kind=wiki')).json();
       expect((await api(admin, '/generate', 'POST', { kind: 'wiki', token: e3.token })).status).toBe(202);
       await waitIdle(admin);
-      // that run used the values set in the admin: limit, sampling and both prompts
-      const sent = calls.lastChat!;
-      expect(sent.max_tokens ?? sent.max_completion_tokens).toBe(20_000);
-      expect(sent.temperature).toBe(0.2);
-      expect(sent.top_p).toBe(0.9);
-      expect(sent.reasoning_effort).toBe('low'); // sent because an administrator set it
-      expect(sent.messages[0]!.content).toBe('CUSTOM-SYSTEM write short.');
-      expect(sent.messages[1]!.content).toContain('CUSTOM-USER');
-      expect(sent.messages[1]!.content).toContain('Alpha first note'); // {{notes}} was replaced by the project's notes
       const e4 = await (await api(admin, '/estimate?kind=wiki')).json();
       const blocked = await api(admin, '/generate', 'POST', { kind: 'wiki', token: e4.token });
       expect(blocked.status).toBe(429);
@@ -1146,208 +924,17 @@ describe('web portal', () => {
       expect(audit.some((e) => e.event === 'denied' && /no valid agreement/.test(e.description))).toBe(true);
     });
 
-    it('Fixed addresses (LLM step 2, between connecting a provider and fetching its models): closed to visitors, validated, sealed in the store, in force at once and audited', async () => {
-      const adminArea = cookiesOf(await signIn('admin-code', '/admin'));
-      const h = { cookie: adminArea, 'content-type': 'application/json', 'x-requested-with': 'mnemosyne-admin' };
-      const get = (path: string) => fetch(`${base}/admin/api${path}`, { headers: h });
-      const send = (method: string, path: string, body: object) => fetch(`${base}/admin/api${path}`, { method, headers: h, body: JSON.stringify(body) });
-      const { pinnedLookup } = await import('../src/host-pins.js');
-      const pinned = () => new Promise<unknown>((r) => pinnedLookup('api.meta.ai', { all: true, family: 0 }, (_e, a) => r(a)));
-      try {
-        const page = await (await fetch(`${base}/admin/`, { headers: h })).text();
-        expect(page).toContain('id="step2"');
-        expect(page).toContain('id="hostRows"');
-        expect((await fetch(`${base}/admin/api/llm/hosts`)).status).toBe(401);
-        expect((await fetch(`${base}/admin/api/llm/hosts`, { method: 'PUT', headers: { cookie: adminArea, 'content-type': 'application/json' }, body: '{"hosts":[]}' })).status).toBe(403); // not from another site
-        expect((await (await get('/llm/hosts')).json()).hosts).toEqual([]);
-
-        for (const hosts of [[{ host: 'api.meta.ai', ip: 'not-an-ip' }], [{ host: 'https://api.meta.ai', ip: '57.144.64.141' }], 'api.meta.ai']) {
-          const bad = await send('PUT', '/llm/hosts', { hosts });
-          expect(bad.status).toBe(400);
-          expect((await bad.json()).error).toBeTruthy();
-        }
-        expect((await send('POST', '/llm/hosts/check', { host: 'api.meta.ai', ip: 'nope' })).status).toBe(400);
-
-        const saved = await send('PUT', '/llm/hosts', { hosts: [{ host: 'API.Meta.AI.', ip: '57.144.64.141' }] });
-        expect(saved.status).toBe(200);
-        const view = await saved.json();
-        expect(view.hosts).toEqual([{ host: 'api.meta.ai', ip: '57.144.64.141' }]);
-        expect(view.providerHosts).toContain('127.0.0.1'); // the connected provider's host is offered as a suggestion
-        expect(await new ProviderStore(join(tmp, '.mnemosyne', 'providers.enc'), deriveKeys(SECRET).enc).getHosts()).toEqual(view.hosts); // persisted
-        expect((await readFile(join(tmp, '.mnemosyne', 'providers.enc'), 'utf8')).includes('57.144.64.141')).toBe(false); // sealed, not readable in the file
-        expect(await pinned()).toEqual([{ address: '57.144.64.141', family: 4 }]); // in force without a restart
-
-        let audit = '';
-        for (let i = 0; i < 20 && !audit.includes('Fixed addresses saved'); i++) {
-          audit = JSON.stringify(await (await get('/audit?limit=20')).json());
-          if (!audit.includes('Fixed addresses saved')) await new Promise((r) => setTimeout(r, 50));
-        }
-        expect(audit).toContain('Fixed addresses saved: api.meta.ai → 57.144.64.141');
-
-        expect((await send('PUT', '/llm/hosts', { hosts: [] })).status).toBe(200); // take it away again
-        expect((await (await get('/llm/hosts')).json()).hosts).toEqual([]);
-      } finally {
-        await send('PUT', '/llm/hosts', { hosts: [] }); // the pin is process-wide state: leave nothing behind for the other tests
-      }
-    });
-
-    it('Auto: new tabs; no schedule without the agreement; it updates only what changed, within its own dollar limit, beside the daily cap', async () => {
-      const adminArea = cookiesOf(await signIn('admin-code', '/admin'));
-      const h = { cookie: adminArea, 'content-type': 'application/json', 'x-requested-with': 'mnemosyne-admin' };
-      const get = (path: string) => fetch(`${base}/admin/api${path}`, { headers: h });
-      const send = (method: string, path: string, body: object) => fetch(`${base}/admin/api${path}`, { method, headers: h, body: JSON.stringify(body) });
-      const store = new ProviderStore(join(tmp, '.mnemosyne', 'providers.enc'), deriveKeys(SECRET).enc);
-
-      // the menu: LLM, Auto, SSO, Audit, License; License is a blank page (its heading only)
-      const page = await (await fetch(`${base}/admin/`, { headers: h })).text();
-      const order = ['llm', 'auto', 'sso', 'audit', 'license'].map((t) => page.indexOf(`data-tab="${t}"`));
-      expect(order.every((i) => i > 0)).toBe(true);
-      expect([...order].sort((a, b) => a - b)).toEqual(order);
-      expect(page).toMatch(/<section id="tab-license" class="tab" hidden>\s*<h2>License<\/h2>/);
-    expect(page).toContain('id="licForm"'); // the key is entered here; the licence itself is handled by the program in front of this server
-    expect(page).toContain('id="licFacts"');
-      expect(page).toContain('id="tab-auto"');
-
-      // closed to anonymous visitors and to calls from other sites
-      expect((await fetch(`${base}/admin/api/auto`)).status).toBe(401);
-      expect((await fetch(`${base}/admin/api/auto/switch`, { method: 'PUT', headers: { cookie: adminArea, 'content-type': 'application/json' }, body: '{}' })).status).toBe(403);
-
-      const config = { schedule: { mode: 'weekly', days: [6], time: '02:00', tz: 'UTC' }, projects: ['alpha'], text: false, charts: true, limitUsd: '5' };
-      // a model without a list price: the dollar limit could not be enforced, so nothing can be agreed
-      const unpriced = await send('POST', '/auto/estimate', { config });
-      expect(unpriced.status).toBe(400);
-      expect((await unpriced.json()).error).toContain('list price');
-      // bad input is explained
-      expect((await send('POST', '/auto/estimate', { config: { ...config, projects: [] } })).status).toBe(400);
-
-      // a priced model for Text
-      const text = (await store.list()).assignments.text!;
-      await store.setModels(text.providerId, ['text-model', 'image-model', 'muse-spark-1.3', 'muse-spark-1.2']);
-      const assign = (model: string) => store.setAssignments({ text: { providerId: text.providerId, model }, image: { providerId: text.providerId, model: 'image-model' } });
-      await assign('muse-spark-1.3');
-
-      const est = await (await send('POST', '/auto/estimate', { config })).json();
-      const agree = Object.fromEntries(est.agree as string[][]);
-      expect(agree['Provider / model']).toBe('Fake AI / muse-spark-1.3');
-      expect(agree.Creates).toBe('AI flow charts, only for projects whose notes changed');
-      expect(agree['Your spending limit']).toBe('a run stops at $5.00 → at most $25.00 a month (5 runs)');
-      expect(Object.fromEntries(est.live as string[][])['Worst case of one run']).toMatch(/^at most \$/);
-
-      // the server only saves a setup together with the agreement to exactly that setup
-      for (const token of [undefined, 'garbage']) expect((await send('PUT', '/auto', { config, token })).status).toBe(403);
-      expect((await send('PUT', '/auto', { config: { ...config, limitUsd: '500' }, token: est.token })).status).toBe(403); // the agreement was for another limit
-      expect((await (await get('/auto')).json()).config).toBeNull();
-
-      const saved = await send('PUT', '/auto', { config, token: est.token });
-      expect(saved.status).toBe(200);
-      const view = await saved.json();
-      expect(view.config).toMatchObject({ enabled: true, projects: ['alpha'], text: false, charts: true, limitUsd: 5, agreement: { by: 'store' } });
-      expect(view.agreementOk).toBe(true);
-      expect(new Date(view.nextRunAt).getUTCDay()).toBe(6); // a Saturday, 02:00 UTC
-      expect(view.nextRunAt).toMatch(/T02:00:00\.000Z$/);
-      expect((await send('PUT', '/auto', { config, token: est.token })).status).toBe(403); // an agreement is used once
-      // what the list shows: alpha's article is current but its charts are older; the others have no article
-      type Row = { project: string; hasArticle: boolean; textDue: boolean; chartsDue: boolean; detail: string; est: { textTypical: number; textWorst: number } };
-      const by = Object.fromEntries((view.projects as Row[]).map((p) => [p.project, p])) as Record<string, Row>;
-      expect(by.alpha).toMatchObject({ hasArticle: true, textDue: false, chartsDue: true, detail: 'charts older than the article' });
-      expect(by.beta).toMatchObject({ hasArticle: false, textDue: true, detail: 'no article yet' });
-      expect(by.alpha.est.textWorst).toBeGreaterThan(by.alpha.est.textTypical);
-
-      // the time comes: only the charts of alpha (the article is current, text is not ticked), and the daily cap of people does not stop it
-      const auto = new AutoStore(webCfg.web.autoFile);
-      const due = () => auto.update((s) => void (s.nextRunAt = new Date(Date.now() - 60_000).toISOString()));
-      const before = calls.chat;
-      await due();
-      await autoRunner!.tick();
-      expect(calls.chat - before).toBe(1);
-      const st1 = await (await get('/auto/status')).json();
-      expect(st1.run).toBeNull();
-      expect(st1.runs[0]).toMatchObject({ status: 'completed', updated: ['alpha'], failed: [], notReached: [] });
-      expect(st1.runs[0].usd).toBeGreaterThan(0);
-      expect(st1.runs[0].inputTokens).toBe(1200);
-      const docs = new DocStore(webCfg.web.docsDir);
-      const [diagram, article] = [await docs.latest('alpha', 'diagram'), await docs.latest('alpha', 'wiki')];
-      expect(diagram!.basedOn).toBe(article!.id);
-      expect(diagram!.by).toBe('auto (agreed by store)');
-      expect(new Date(st1.nextRunAt).getUTCDay()).toBe(6);
-
-      // nothing is due now: alpha is up to date, so the next run finds nothing to do and calls no model
-      await due();
-      await autoRunner!.tick();
-      expect(calls.chat - before).toBe(1);
-      expect((await (await get('/auto/status')).json()).runs[0]).toMatchObject({ status: 'nothing', unchanged: ['alpha'] });
-
-      // the audit trail: the agreement, every automatic call as its own event; the people's daily count is untouched
-      await new Promise((r) => setTimeout(r, 250));
-      const audit = (await readFile(join(tmp, '.mnemosyne', 'audit.jsonl'), 'utf8')).split('\n').filter(Boolean).map((l) => JSON.parse(l));
-      expect(audit.filter((e) => e.event === 'ai_start')).toHaveLength(3);
-      expect(audit.filter((e) => e.event === 'auto_start')).toHaveLength(1);
-      expect(audit.find((e) => e.event === 'auto_agree').description).toContain('Agreed to automatic AI use');
-      expect(audit.some((e) => e.event === 'denied' && e.entityType === 'auto')).toBe(true);
-      expect(audit.filter((e) => e.event === 'auto_run').length).toBeGreaterThanOrEqual(4);
-
-      // the model changes after the agreement: the schedule pauses, makes no call, and cannot be switched on until it is agreed again
-      await assign('muse-spark-1.2');
-      await due();
-      await autoRunner!.tick();
-      expect(calls.chat - before).toBe(1);
-      const paused = await (await get('/auto/status')).json();
-      expect(paused.pausedReason).toContain('no longer matches');
-      const refused = await send('PUT', '/auto/switch', { enabled: true });
-      expect(refused.status).toBe(409);
-      expect((await refused.json()).error).toContain('agree again');
-
-      // the kill switch: off needs nothing; on again once the setup fits the agreement
-      const off = await (await send('PUT', '/auto/switch', { enabled: false })).json();
-      expect(off.config.enabled).toBe(false);
-      expect(off.nextRunAt).toBeNull();
-      await due();
-      await autoRunner!.tick();
-      expect(calls.chat - before).toBe(1);
-      await assign('muse-spark-1.3');
-      const on = await (await send('PUT', '/auto/switch', { enabled: true })).json();
-      expect(on.config.enabled).toBe(true);
-      expect(on.agreementOk).toBe(true);
-      expect(new Date(on.nextRunAt).getTime()).toBeGreaterThan(Date.now());
-    });
-  });
-
-  it('keeps the two sign-in systems apart: a public GitLab session never opens admin', async () => {
-    const cb = await signIn('dev-code');
-    expect(cb.headers.get('location')).toBe(`${new URL(base).pathname}/`);
-    const cookie = cookiesOf(cb);
-    const home = await (await fetch(`${base}/`, { headers: { cookie } })).text();
-    expect(home).toContain('Some Dev');
-    expect(home).not.toContain('Open admin');
-    const adminPageHtml = await (await fetch(`${base}/admin/`, { headers: { cookie } })).text();
-    expect(adminPageHtml).toContain('Administration');
-    expect(adminPageHtml).not.toContain('id="tab-llm"');
-    expect((await fetch(`${base}/admin/api/providers`, { headers: { cookie } })).status).toBe(401);
-  });
-
-  it('refuses admin sign-in for a GitLab user who is not an admin and sets no admin cookie', async () => {
-    const cb = await signIn('dev-code', '/admin');
-    expect(cb.headers.get('location')).toBe(`${new URL(base).pathname}/admin/?error=noadmin`);
-    expect(cb.headers.getSetCookie().some((c) => c.startsWith('mnemosyne_admin=') && !c.startsWith('mnemosyne_admin=;'))).toBe(false);
-  });
-
-  it('ignores a forged session cookie', async () => {
-    const forged = `mnemosyne_admin=${encodeURIComponent(Buffer.from(JSON.stringify({ u: 'x', n: 'x', e: '', a: true, exp: 9999999999 })).toString('base64url') + '.AAAA')}`;
-    expect((await fetch(`${base}/admin/api/providers`, { headers: { cookie: forged } })).status).toBe(401);
   });
 
   it('signs out', async () => {
     const out = await fetch(`${base}/auth/logout`, { method: 'POST', redirect: 'manual' });
     expect(out.status).toBe(303);
     expect(out.headers.getSetCookie().join(';')).toContain('mnemosyne_session=;');
-    const adminOut = await fetch(`${base}/admin/auth/logout`, { method: 'POST', redirect: 'manual' });
-    expect(adminOut.status).toBe(303);
-    expect(adminOut.headers.getSetCookie().join(';')).toContain('mnemosyne_admin=;');
   });
 });
 
 describe('web portal when not configured', () => {
-  it('says so on the login screen and keeps admin closed', async () => {
+  it('says so on the login screen', async () => {
     const cfg = loadConfig({ MNEMOSYNE_REPO: tmpdir() });
     const app = express();
     app.use(cfg.http.basePath, createWebPortal(cfg).router);
@@ -1359,10 +946,7 @@ describe('web portal when not configured', () => {
       const html = await (await fetch(`${base}/`)).text();
       expect(html).toContain('not configured');
       expect(html).not.toContain('Sign in with GitLab');
-      const adminHtml = await (await fetch(`${base}/admin/`)).text();
-      expect(adminHtml).toContain('not configured');
-      expect(adminHtml).not.toContain('id="tab-llm"');
-      expect((await fetch(`${base}/admin/api/providers`)).status).toBe(401);
+      expect((await fetch(`${base}/admin/`)).status).toBe(404); // the admin is a separate program
     } finally {
       srv.close();
     }
@@ -1407,379 +991,6 @@ describe('MCP/REST stay gated exactly as before', () => {
 });
 
 // --- built-in admin account + settings UI ------------------------------------
-
-describe('local admin account and GitLab SSO settings', () => {
-  let tmp: string;
-  const servers: Server[] = [];
-  beforeAll(async () => {
-    tmp = await mkdtemp(join(tmpdir(), 'mnemosyne-local-'));
-  });
-  afterAll(async () => {
-    servers.forEach((x) => x.close());
-    await rm(tmp, { recursive: true, force: true });
-  });
-
-  /** A portal with no GitLab at all, only the built-in account, over a shared data dir. */
-  async function start(env: Record<string, string> = {}) {
-    const app = express();
-    const srv = createServer((q, r) => app(q, r));
-    await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
-    servers.push(srv);
-    const origin = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
-    const cfg = loadConfig({
-      MNEMOSYNE_REPO: tmp,
-      MNEMOSYNE_SECRET: SECRET,
-      MNEMOSYNE_PUBLIC_URL: origin,
-      MNEMOSYNE_LOCAL_ADMIN_PASSWORD: 'mnemosyne',
-      ...env,
-    });
-    app.use(express.json());
-    app.use(cfg.http.basePath, createWebPortal(cfg).router);
-    return { base: `${origin}${cfg.http.basePath}`, origin, cfg };
-  }
-
-  const login = (base: string, username: string, password: string) =>
-    fetch(`${base}/admin/auth/local`, {
-      method: 'POST',
-      redirect: 'manual',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ username, password }),
-    });
-  const cookieOf = (res: Response) => (res.headers.get('set-cookie') ?? '').split(';')[0]!;
-
-  it('hashes passwords with scrypt and verifies them in constant time', () => {
-    const h = hashPassword('mnemosyne');
-    expect(h.startsWith('scrypt$')).toBe(true);
-    expect(h).not.toContain('mnemosyne');
-    expect(verifyPassword('mnemosyne', h)).toBe(true);
-    expect(verifyPassword('Mnemosyne', h)).toBe(false);
-    expect(verifyPassword('x', undefined)).toBe(false);
-    expect(verifyPassword('x', 'garbage')).toBe(false);
-  });
-
-  it('has no default account unless the operator sets a password', async () => {
-    const { base } = await start({ MNEMOSYNE_LOCAL_ADMIN_PASSWORD: '' });
-    expect(await (await fetch(`${base}/`)).text()).toContain('not configured');
-    expect((await login(base, 'admin', '')).headers.get('location')).toContain('error=local');
-  });
-
-  it('signs the local admin in and rejects wrong credentials', async () => {
-    const { base } = await start();
-    const page = await (await fetch(`${base}/admin/`)).text();
-    expect(page).toContain('name="password"');
-    expect(page).not.toContain('Sign in with GitLab'); // SSO not configured yet
-    expect(await (await fetch(`${base}/`)).text()).not.toContain('name="password"'); // never on the public page
-
-    const bad = await login(base, 'admin', 'nope');
-    expect(bad.headers.get('location')).toContain('error=local');
-    expect(bad.headers.get('set-cookie') ?? '').not.toContain('mnemosyne_session=ey');
-    expect((await login(base, 'mnemosyne', 'mnemosyne')).headers.get('location')).toContain('error=local');
-
-    const ok = await login(base, 'admin', 'mnemosyne');
-    expect(ok.status).toBe(303);
-    expect(ok.headers.get('location')).toBe('/mnemosyne/admin/');
-    const cookie = cookieOf(ok);
-    expect((await fetch(`${base}/admin`, { headers: { cookie } })).status).toBe(200);
-    expect(await (await fetch(`${base}/admin`)).text()).not.toContain('id="tab-llm"');
-  });
-
-  it('submits the admin form exactly as the page defines it (action URL must be a live route)', async () => {
-    const { base } = await start();
-    const html = await (await fetch(`${base}/admin/`)).text();
-    const action = /<form class="local" method="post" action="([^"]+)"/.exec(html)?.[1];
-    expect(action).toBe(`${new URL(base).pathname}/admin/auth/local`);
-    const res = await fetch(new URL(action!, base), {
-      method: 'POST',
-      redirect: 'manual',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ username: 'admin', password: 'mnemosyne' }),
-    });
-    expect(res.status).toBe(303);
-    expect(res.headers.get('location')).toBe(`${new URL(base).pathname}/admin/`);
-  });
-
-  it('locks a client out after five misses, even with the right password', async () => {
-    const { base } = await start();
-    for (let i = 0; i < 5; i++) await login(base, 'admin', `wrong${i}`);
-    expect((await login(base, 'admin', 'mnemosyne')).headers.get('location')).toContain('error=throttled');
-  });
-
-  it('configures GitLab SSO from the admin page and never returns the secret', async () => {
-    const { base, origin, cfg } = await start();
-    const cookie = cookieOf(await login(base, 'admin', 'mnemosyne'));
-    const hdr = { cookie, 'Content-Type': 'application/json', 'X-Requested-With': 'mnemosyne-admin', origin };
-
-    const put = await fetch(`${base}/admin/api/settings`, {
-      method: 'PUT',
-      headers: hdr,
-      body: JSON.stringify({ gitlabUrl: 'https://gitlab.example.com/', clientId: 'app-id', clientSecret: 'super-secret-value' }),
-    });
-    expect(put.status).toBe(200);
-    const got = await (await fetch(`${base}/admin/api/settings`, { headers: { cookie } })).json();
-    expect(got.redirectUris).toHaveLength(2);
-    expect(got).toMatchObject({ gitlabUrl: 'https://gitlab.example.com', clientId: 'app-id', hasSecret: true, ssoActive: true });
-    expect(got).not.toHaveProperty('adminUsers'); // admin rights come from GitLab, not from a list
-    expect(JSON.stringify(got)).not.toContain('super-secret-value');
-    expect(await readFile(cfg.web.settingsFile, 'utf8')).not.toContain('super-secret-value');
-
-    // an empty secret keeps the stored one; the login page now offers GitLab too
-    await fetch(`${base}/admin/api/settings`, { method: 'PUT', headers: hdr, body: JSON.stringify({ gitlabUrl: 'https://gitlab.example.com', clientId: 'app-id', clientSecret: '' }) });
-    expect((await (await fetch(`${base}/admin/api/settings`, { headers: { cookie } })).json()).hasSecret).toBe(true);
-    expect(await (await fetch(`${base}/`)).text()).toContain('Sign in with GitLab');
-
-    // cross-site writes are refused
-    const csrf = await fetch(`${base}/admin/api/settings`, { method: 'PUT', headers: { ...hdr, origin: 'https://evil.example' }, body: '{}' });
-    expect(csrf.status).toBe(403);
-  });
-
-  it('switches the local account off 24h after GitLab SSO went live, including open sessions', async () => {
-    const { base, cfg } = await start();
-    const store = new SettingsStore(cfg.web.settingsFile, deriveKeys(SECRET).enc);
-    const now = Math.floor(Date.now() / 1000);
-
-    await store.update((st) => void (st.ssoLiveAt = now - 3600)); // live for 1h: still allowed
-    const cookie = cookieOf(await login(base, 'admin', 'mnemosyne'));
-    expect((await fetch(`${base}/admin`, { headers: { cookie } })).status).toBe(200);
-
-    await store.update((st) => void (st.ssoLiveAt = now - 25 * 3600)); // live for 25h: off
-    expect((await login(base, 'admin', 'mnemosyne')).headers.get('location')).toContain('error=local');
-    expect(await (await fetch(`${base}/admin/`)).text()).not.toContain('name="password"');
-    expect((await fetch(`${base}/admin/api/settings`, { headers: { cookie } })).status).toBe(401);
-    expect(await (await fetch(`${base}/admin`, { headers: { cookie } })).text()).not.toContain('id="tab-llm"');
-
-    // recovery switch for operators
-    process.env.MNEMOSYNE_LOCAL_ADMIN_FORCE = '1';
-    try {
-      expect((await login(base, 'admin', 'mnemosyne')).status).toBe(303);
-    } finally {
-      delete process.env.MNEMOSYNE_LOCAL_ADMIN_FORCE;
-    }
-  });
-  const isolated = () => ({ MNEMOSYNE_SETTINGS_FILE: join(tmp, `s-${Math.random()}.enc`), MNEMOSYNE_AUDIT_FILE: join(tmp, `a-${Math.random()}.jsonl`) });
-
-  it('writes an audit trail: sign-ins, failures with the client address, and changes without secrets', async () => {
-    const { base, origin, cfg } = await start(isolated());
-    // rightmost X-Forwarded-For entry (added by our own :40000 front) is the client; anything before it is client-supplied
-    const post = (u: string, p: string) =>
-      fetch(`${base}/admin/auth/local`, {
-        method: 'POST',
-        redirect: 'manual',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Forwarded-For': '9.9.9.9, 203.0.113.7' },
-        body: new URLSearchParams({ username: u, password: p }),
-      });
-    await post('admin', 'wrong-password');
-    const ok = await post('admin', 'mnemosyne');
-    const cookie = cookieOf(ok);
-    const hdr = { cookie, 'Content-Type': 'application/json', 'X-Requested-With': 'mnemosyne-admin', origin };
-    await fetch(`${base}/admin/api/settings`, { method: 'PUT', headers: hdr, body: JSON.stringify({ gitlabUrl: 'https://gl.example.com', clientId: 'cid-1', clientSecret: 'top-secret-value-xyz' }) });
-    await fetch(`${base}/admin/api/providers`, { method: 'POST', headers: hdr, body: JSON.stringify({ label: 'Meta', kind: 'openai-compatible', baseUrl: 'https://api.meta.ai/v1', apiKey: 'meta-key-aaaaaaaa1234' }) });
-    await new Promise((r) => setTimeout(r, 100));
-
-    const got = await (await fetch(`${base}/admin/api/audit`, { headers: { cookie } })).json();
-    const events = got.events as { event: string; entityType: string; user: string; ip: string; changes: string | null; description: string }[];
-    expect(got.total).toBe(events.length);
-    const failed = events.find((e) => e.event === 'login_failed');
-    expect(failed).toMatchObject({ entityType: 'admin_local', user: 'admin', ip: '203.0.113.7' });
-    expect(events.find((e) => e.event === 'login')).toMatchObject({ entityType: 'admin_local', user: 'admin', ip: '203.0.113.7' });
-    const sso = events.find((e) => e.entityType === 'sso')!;
-    expect(sso.event).toBe('update');
-    expect(sso.changes).toContain('+ gitlabUrl: "https://gl.example.com"');
-    expect(sso.changes).toContain('clientSecret');
-    const prov = events.find((e) => e.entityType === 'llm_provider')!;
-    expect(prov.event).toBe('create');
-    expect(events[0]!.event).toBe('create'); // newest first
-
-    // nothing secret ever reaches the file
-    const file = await readFile(cfg.web.auditFile, 'utf8');
-    expect(file).not.toContain('top-secret-value-xyz');
-    expect(file).not.toContain('meta-key-aaaaaaaa1234');
-    expect(file).not.toContain('mnemosyne"'); // no password material either
-
-    // search + paging
-    const q = await (await fetch(`${base}/admin/api/audit?q=gitlab`, { headers: { cookie } })).json();
-    expect(q.events.length).toBeGreaterThan(0);
-    expect(q.events.every((e: { entityType: string; description: string; changes: string | null }) => `${e.entityType} ${e.description} ${e.changes}`.toLowerCase().includes('gitlab'))).toBe(true);
-    const paged = await (await fetch(`${base}/admin/api/audit?offset=1`, { headers: { cookie } })).json();
-    expect(paged.events.length).toBe(got.total - 1);
-
-    // admin only
-    expect((await fetch(`${base}/admin/api/audit`)).status).toBe(401);
-    // sign-out is recorded too
-    await fetch(`${base}/admin/auth/logout`, { method: 'POST', headers: { cookie }, redirect: 'manual' });
-    const after = await (await new Promise<Response>((r) => setTimeout(r, 100)).then(() => fetch(`${base}/admin/auth/local`, { method: 'POST', redirect: 'manual', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: 'admin', password: 'mnemosyne' }) }))).headers.get('set-cookie');
-    const again = await (await fetch(`${base}/admin/api/audit`, { headers: { cookie: (after ?? '').split(';')[0]! } })).json();
-    expect(again.events.some((e: { event: string }) => e.event === 'logout')).toBe(true);
-  });
-
-  it('keeps the audit table styles on the ADMIN page (not on the login page)', async () => {
-    const { base } = await start(isolated());
-    const cookie = cookieOf(await login(base, 'admin', 'mnemosyne'));
-    const admin = await (await fetch(`${base}/admin/`, { headers: { cookie } })).text();
-    for (const rule of ['.tablewrap{overflow-x:auto', 'table.audit{', 'pre.chg{', '.ev.login_failed']) expect(admin).toContain(rule);
-    const loginHtml = await (await fetch(`${base}/admin/`)).text();
-    expect(loginHtml).not.toContain('table.audit');
-  });
-
-  it('shows an Audit tab with the CenTest-style columns and has no typed admin list', async () => {
-    const { base } = await start(isolated());
-    const cookie = cookieOf(await login(base, 'admin', 'mnemosyne'));
-    const html = await (await fetch(`${base}/admin/`, { headers: { cookie } })).text();
-    expect(html).toContain('data-tab="audit"');
-    for (const col of ['Date / Time', 'Event', 'Entity Type', 'Name / ID', 'User', 'IP Address', 'Changes', 'Description']) expect(html).toContain(`<th>${col}</th>`);
-    expect(html).not.toContain('GitLab admins');
-    expect(html).not.toContain('id="adminUsers"');
-    expect(html).toContain('only a GitLab administrator');
-  });
-});
-
-describe('admin page script', () => {
-  // The page's inline script is generated from a template literal; an escape mistake there is a
-  // SyntaxError in the browser and the whole page goes dead. Compile it and run it against a stub page.
-  it('compiles, runs, and wires every form and tab handler', async () => {
-    const html = adminPage({ basePath: '/mnemosyne', nonce: 'n', user: { name: 'A', username: 'a' }, redirectUris: ['u1', 'u2'] });
-    const js = /<script nonce="n">([\s\S]*?)<\/script>/.exec(html)![1]!;
-    const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]!);
-    const make = (id: string) => {
-      const el: Record<string, unknown> & { handlers: Record<string, unknown> } = {
-        id, handlers: {}, style: {}, hidden: false, className: '', textContent: '', value: '', disabled: false, placeholder: '', children: [] as unknown[],
-        appendChild(c: unknown) { (el.children as unknown[]).push(c); return c; },
-        addEventListener(type: string, fn: unknown) { el.handlers[type] = fn; },
-        scrollIntoView() {}, getAttribute: () => 'llm', reset() {},
-      };
-      return el;
-    };
-    const els = new Map(ids.map((id) => [id, make(id)]));
-    const missing: string[] = [];
-    const ok = { status: 200, ok: true, json: async () => ({ providers: [], assignments: {}, events: [], total: 0, gitlabUrl: '', clientId: '', hasSecret: false }) };
-    const sandbox = {
-      document: { getElementById: (id: string) => els.get(id) ?? (missing.push(id), null), createElement: () => make('new'), querySelectorAll: () => [make('a')], querySelector: () => make('r') },
-      window: { addEventListener() {} },
-      location: { hash: '#audit', href: '' },
-      fetch: async () => ok,
-      confirm: () => true,
-      Intl,
-      Date,
-      setInterval: () => 0,
-      setTimeout,
-      clearTimeout,
-      encodeURIComponent,
-    };
-    new Script(js).runInContext(createContext(sandbox)); // throws on a SyntaxError or a top-level error
-    await new Promise((r) => setTimeout(r, 50));
-    expect(missing).toEqual([]);
-    for (const form of ['form', 'job-text', 'job-image', 'job-pdf', 'ssoForm']) expect(typeof els.get(form)!.handlers.submit).toBe('function');
-    for (const btn of ['auditRefresh', 'cancel', 'autoSave', 'autoGo', 'autoCancel', 'autoAll', 'autoNone', 'autoChanged']) expect(typeof els.get(btn)!.handlers.click).toBe('function');
-    expect(typeof els.get('autoOn')!.handlers.change).toBe('function'); // the kill switch
-    expect(els.get('tab-auto')!.hidden).toBe(true); // the Auto and License tabs exist and stay closed until chosen
-    expect(els.get('tab-license')!.hidden).toBe(true);
-    expect(els.has('auditPager')).toBe(true); // numbered pages, 10 events each
-    expect(html).not.toContain('Load more');
-    expect(els.get('tab-audit')!.hidden).toBe(false); // #audit opens the Audit tab
-    expect(els.get('tab-llm')!.hidden).toBe(true);
-  });
-});
-
-describe('the Auto tab script', () => {
-  it('lists the projects, selects them, shows the cost, asks for the agreement and saves only after it', async () => {
-    const html = adminPage({ basePath: '/mnemosyne', nonce: 'n', user: { name: 'A', username: 'a' }, redirectUris: [] });
-    const js = /<script nonce="n">([\s\S]*?)<\/script>/.exec(html)![1]!;
-    const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]!);
-    type El = Record<string, unknown> & { handlers: Record<string, () => void>; children: { className: string }[]; textContent: string; hidden: boolean; disabled: boolean; checked: boolean };
-    const make = (id: string): El => {
-      const el = {
-        id, handlers: {}, style: {}, hidden: false, className: '', textContent: '', value: '', disabled: false, checked: false, placeholder: '', children: [],
-        appendChild(c: unknown) { el.children.push(c as never); return c; },
-        addEventListener(type: string, fn: () => void) { el.handlers[type] = fn; },
-        scrollIntoView() {}, getAttribute: () => 'auto', reset() {},
-      } as unknown as El;
-      return el;
-    };
-    const els = new Map(ids.map((id) => [id, make(id)]));
-    const missing: string[] = [];
-    const projects = [
-      { project: 'alpha', glPath: 'grp/alpha', notes: 12, lastArticle: '2026-10-29T17:00:00.000Z', hasArticle: true, textDue: true, chartsDue: true, detail: '3 notes new or changed', est: null },
-      { project: 'beta', glPath: null, notes: 4, lastArticle: null, hasArticle: false, textDue: true, chartsDue: true, detail: 'no article yet', est: null },
-      { project: 'gamma', glPath: 'grp/gamma', notes: 9, lastArticle: '2026-10-30T10:00:00.000Z', hasArticle: true, textDue: false, chartsDue: false, detail: 'up to date', est: null },
-    ];
-    const view = (config: object | null) => ({ config, projects, runs: [], run: null, nextRunAt: config ? '2026-11-07T02:00:00.000Z' : null, pausedReason: null, enabled: Boolean(config), agreementOk: Boolean(config), model: { label: 'Fake / m', priced: true } });
-    const sent: { method: string; path: string; body: Record<string, unknown> }[] = [];
-    const fetchStub = async (url: string, init?: { method?: string; body?: string }) => {
-      const path = url.replace('/mnemosyne/admin/api', '');
-      const method = init?.method ?? 'GET';
-      const body = init?.body ? (JSON.parse(init.body) as Record<string, unknown>) : {};
-      sent.push({ method, path, body });
-      let payload: object = {};
-      if (path === '/auto' && method === 'GET') payload = view(null);
-      else if (path === '/auto/estimate') payload = { live: [['Model for TEXT and charts', 'Fake / m']], agree: [['Schedule', 'every Saturday and Sunday at 02:00 UTC']], token: 'tok' };
-      else if (path === '/auto' && method === 'PUT') payload = view({ enabled: true, schedule: (body.config as { schedule: object }).schedule, projects: (body.config as { projects: string[] }).projects, known: ['alpha', 'beta', 'gamma'], text: true, charts: true, limitUsd: 10, agreement: { by: 'a', at: 'x', key: 'k' } });
-      else if (path === '/auto/switch') payload = { ...view({ enabled: (body as { enabled: boolean }).enabled, schedule: { mode: 'weekly', days: [6, 0], time: '02:00', tz: 'UTC' }, projects: [], known: ['alpha', 'beta', 'gamma'], text: true, charts: true, limitUsd: 10 }) };
-      return { status: 200, ok: true, json: async () => payload };
-    };
-    const sandbox = {
-      document: { getElementById: (id: string) => els.get(id) ?? (missing.push(id), null), createElement: () => make('new'), querySelectorAll: () => [make('a')], querySelector: () => make('r') },
-      window: { addEventListener() {} }, location: { hash: '#auto', href: '' }, fetch: fetchStub, confirm: () => true,
-      Intl, Date, setInterval: () => 0, setTimeout, clearTimeout, encodeURIComponent,
-    };
-    new Script(js).runInContext(createContext(sandbox));
-    const settle = () => new Promise((r) => setTimeout(r, 60));
-    await settle();
-    expect(missing).toEqual([]);
-    const get = (id: string) => els.get(id)!;
-
-    // opened: the saved setup is empty, so the defaults show (Saturday and Sunday, 02:00, both ticked) and the three projects are listed
-    expect(sent[0]).toMatchObject({ method: 'GET', path: '/auto' });
-    expect(get('tab-auto').hidden).toBe(false);
-    expect(get('autoRows').children).toHaveLength(3);
-    expect(get('autoDays').children.map((d) => d.className)).toEqual(['day', 'day', 'day', 'day', 'day', 'day on', 'day on']); // Mon ... Sat, Sun
-    expect(get('autoOnText').textContent).toBe('Automatic update is OFF');
-    expect(get('autoNext').textContent).toContain('Not set up yet');
-    expect(get('autoCount').textContent).toBe('0 of 3 selected · 0 have changes · 0 have no article yet');
-    expect(get('autoLimit').value).toBe('10.00');
-
-    // the selection buttons
-    get('autoChanged').handlers.click!();
-    expect(get('autoCount').textContent).toBe('2 of 3 selected · 2 have changes · 1 have no article yet'); // alpha changed, beta has no article, gamma is up to date
-    get('autoNone').handlers.click!();
-    expect(get('autoCount').textContent).toBe('0 of 3 selected · 0 have changes · 0 have no article yet');
-    get('autoAll').handlers.click!();
-    expect(get('autoCount').textContent).toBe('3 of 3 selected · 2 have changes · 1 have no article yet');
-
-    // "Save schedule…" asks the server for the estimate and shows the agreement popup; saving is impossible until it is ticked
-    get('autoSave').handlers.click!();
-    await settle();
-    const est = sent.filter((c) => c.path === '/auto/estimate').pop()!;
-    expect(est.body.config).toEqual({ schedule: { mode: 'weekly', days: [0, 6], date: '', time: '02:00', tz: 'UTC' }, projects: ['alpha', 'beta', 'gamma'], text: true, charts: true, limitUsd: '10.00' });
-    expect(get('autoModal').hidden).toBe(false);
-    expect(get('autoModalFacts').children.length).toBeGreaterThan(0);
-    expect(get('autoGo').disabled).toBe(true);
-    get('autoAgree').checked = true;
-    get('autoAgree').handlers.change!();
-    expect(get('autoGo').disabled).toBe(false);
-
-    // agreeing sends the setup together with the agreement token, and the switch shows ON
-    get('autoGo').handlers.click!();
-    await settle();
-    const put = sent.filter((c) => c.method === 'PUT' && c.path === '/auto').pop()!;
-    expect(put.body.token).toBe('tok');
-    expect(get('autoModal').hidden).toBe(true);
-    expect(get('autoMsg').textContent).toContain('Saved and agreed');
-    expect(get('autoOnText').textContent).toBe('Automatic update is ON');
-    expect(get('autoNext').children.map((c) => (c as { textContent: string }).textContent).join(' ')).toContain('Next run:');
-
-    // the kill switch
-    get('autoOn').checked = false;
-    get('autoOn').handlers.change!();
-    await settle();
-    expect(sent.filter((c) => c.path === '/auto/switch').pop()!.body).toEqual({ enabled: false });
-    expect(get('autoOnText').textContent).toBe('Automatic update is OFF');
-
-    // cancelling the popup sends nothing
-    const puts = sent.filter((c) => c.method === 'PUT').length;
-    get('autoCancel').handlers.click!();
-    expect(get('autoModal').hidden).toBe(true);
-    expect(sent.filter((c) => c.method === 'PUT').length).toBe(puts);
-  });
-});
 
 describe('documentation helpers', () => {
   it('matches a notes project to a GitLab project by name, never by guess', () => {
