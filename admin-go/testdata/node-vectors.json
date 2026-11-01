@@ -1,0 +1,39 @@
+{
+  "secret": "a-test-secret-with-enough-length",
+  "encKeyHex": "77d922f35bef036f38de30d5b74e07842f23ed8fd621763251b040f6838fd48c",
+  "signKeyHex": "7d51e19d8c38d3364dabe145f20cecc3da3d91ae62f44a757e7d2c912be916dc",
+  "sealed": [
+    {
+      "plaintext": "hello",
+      "sealed": "v1.zsoIVIsDTk76NMsx.HJ-bw38A5EnsaLxniS9EeQ.AejhYY0"
+    },
+    {
+      "plaintext": "",
+      "sealed": "v1.CUdwHU28gBpvHK9-.MuGENkbLJ42nj0ppULv01A."
+    },
+    {
+      "plaintext": "{\"dev\":{\"at\":1,\"admin\":false,\"projects\":null}}",
+      "sealed": "v1.1cF1or61vKTOHULM.8pZyiKAO_6a2jqTPrhEuTA.CvQ5DkN4k9m7WR39jNBMPEMWpmxIsCXJmAeyWPKQtWGATrlCQoRNI8b41fOcvA"
+    },
+    {
+      "plaintext": "ümlauts, emoji 🧠 and \"quotes\"",
+      "sealed": "v1.-n5nNwHePJDTm0oR.XAzXXB7DWNozByTjsDKo0w._rxij1IIEtfuf90JtO6MlnJ_-X0Gn3BJowXqqCm8FDnN"
+    }
+  ],
+  "session": {
+    "payload": {
+      "u": "store",
+      "n": "Lumanet2012",
+      "e": "store@example.com",
+      "exp": 4102444800
+    },
+    "token": "eyJ1Ijoic3RvcmUiLCJuIjoiTHVtYW5ldDIwMTIiLCJlIjoic3RvcmVAZXhhbXBsZS5jb20iLCJleHAiOjQxMDI0NDQ4MDB9.J1uatDPw2zDERzFkXmn25XRHzrNY72G6wr9gFRyAZjU"
+  },
+  "expired": "eyJ1Ijoic3RvcmUiLCJuIjoiTHVtYW5ldDIwMTIiLCJlIjoic3RvcmVAZXhhbXBsZS5jb20iLCJleHAiOjk0NjY4NDgwMH0.1SgBVIuabm1NLgaJIy74beffOR-PL2G9GNF1vAVhRMc",
+  "tamperedBody": "eyJ1IjoiYXR0YWNrZXIiLCJuIjoiTHVtYW5ldDIwMTIiLCJlIjoic3RvcmVAZXhhbXBsZS5jb20iLCJleHAiOjQxMDI0NDQ4MDB9.J1uatDPw2zDERzFkXmn25XRHzrNY72G6wr9gFRyAZjU",
+  "noExp": "eyJ1Ijoic3RvcmUifQ.DEXzm-C6zORq5hDmjdgq6DfWXA8PN1TcUC3lNDkKJck",
+  "password": {
+    "plain": "correct horse battery staple",
+    "hash": "scrypt$CywcyPzy_Ogwa0f-jPE5RA$PCQGF2gEne0wDxtKE95HJcabeeSbrq-lb-pOS7tNg_s"
+  }
+}

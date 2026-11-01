@@ -1,0 +1,23 @@
+# The Go admin is the front door of Mnemosyne: it serves /mnemosyne/admin itself, starts the Node server as its child (on 127.0.0.1:40002)
+# and passes everything else on to it. The shared gateway keeps sending /mnemosyne/ to 127.0.0.1:40001, so nothing in front changes.
+[Unit]
+Description=mnemosyne - self-hosted AI team memory (admin and front door)
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/mnemosyne.env
+Environment=MNEMOSYNE_ADMIN_LISTEN=127.0.0.1:40001
+Environment=MNEMOSYNE_UPSTREAM=http://127.0.0.1:40002
+Environment=MNEMOSYNE_NODE_DIR=__NODE_DIR__
+Environment="MNEMOSYNE_NODE_CMD=/usr/bin/node __NODE_DIR__/packages/server/dist/bin/mnemosyne.js serve --http"
+WorkingDirectory=__NODE_DIR__
+ExecStart=/usr/local/bin/mnemosyne-admin
+Restart=on-failure
+RestartSec=5
+User=__RUN_USER__
+NoNewPrivileges=true
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

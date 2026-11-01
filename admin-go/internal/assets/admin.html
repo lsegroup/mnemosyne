@@ -1,0 +1,862 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex"><title>Mnemosyne admin</title>
+<style>
+:root{color-scheme:dark;--bg:#0b0d12;--panel:#12151c;--line:#232834;--text:#e6e9ef;--muted:#8b93a7;--accent:#6c8cff;--accent-h:#8aa3ff;--danger:#ff6b6b;--ok:#4ade80}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+a{color:var(--accent)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--text);font:inherit;font-weight:600;cursor:pointer;text-decoration:none}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#0b0d12}
+.btn.primary:hover{background:var(--accent-h)}
+.btn.danger:hover{border-color:var(--danger);color:var(--danger)}
+.btn.small{padding:5px 10px;font-size:13px}
+.notice{padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:#161a23;color:var(--muted);font-size:14px}
+.notice.error{border-color:#5a2a2a;color:#ffb4b4;background:#1d1214}
+body{position:relative;min-height:100vh;padding-bottom:56px}
+.site-foot{position:absolute;left:0;right:0;bottom:0;padding:0 16px 20px;text-align:center;color:var(--muted);font-size:12.5px}
+.site-foot span{margin:0 6px;opacity:.6}
+
+:root{--bg:#0d0e13;--panel:#161922;--panel2:#12141b;--line:#262a36;--text:#e6e9ef;--muted:#8b90a0;--accent:#7a66e0;--accent-h:#9482ee;--title:#8473de;--teal:#3cc4cc}
+html,body{background:var(--bg)}
+body{background:radial-gradient(ellipse 50% 40% at 12% 0%,rgba(120,58,182,.20),transparent 100%),radial-gradient(ellipse 45% 40% at 95% 0%,rgba(30,152,164,.14),transparent 100%),var(--bg);background-attachment:fixed}
+.btn.primary{color:#fff}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 24px;border-bottom:1px solid var(--line);background:rgba(22,25,34,.85)}
+.brand{font:600 24px/1 "Palatino Linotype","Book Antiqua",Palatino,Georgia,"Times New Roman",serif;letter-spacing:.4px;color:var(--title)}
+.brand .muted{font:500 14px/1 system-ui,sans-serif;letter-spacing:0;color:var(--teal)}
+.top .right{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:14px}.top form{margin:0}
+.topbtn{display:inline-flex;align-items:center;gap:7px;padding:7px 13px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);color:var(--text);font-size:14px;text-decoration:none;white-space:nowrap}.topbtn:hover{border-color:var(--accent);color:#fff}.topbtn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.usermenu{position:relative}
+.usermenu summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:9px;padding:4px 10px 4px 5px;border:1px solid transparent;border-radius:10px;color:var(--text)}
+.usermenu summary::-webkit-details-marker{display:none}
+.usermenu summary:hover,.usermenu[open] summary{border-color:var(--line);background:var(--panel2)}
+.usermenu summary:after{content:"";width:6px;height:6px;margin:-3px 0 0 2px;border-right:1.6px solid var(--muted);border-bottom:1.6px solid var(--muted);transform:rotate(45deg)}
+.usermenu[open] summary:after{margin-top:3px;transform:rotate(225deg)}
+.uname span{color:var(--muted)}
+.avatar{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;letter-spacing:.3px}
+.avatar.big{width:46px;height:46px;font-size:17px;flex:none}
+.usercard{position:absolute;right:0;top:calc(100% + 8px);z-index:30;width:300px;max-width:calc(100vw - 32px);padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--panel);box-shadow:0 14px 36px rgba(0,0,0,.5);color:var(--text)}
+.uc-head{display:flex;align-items:center;gap:12px;margin-bottom:10px}.uc-head strong{display:block;font-size:15px}.uc-head .at{color:var(--muted);font-size:13px}
+.upill{display:inline-block;padding:2px 10px;border-radius:99px;border:1px solid var(--line);color:var(--muted);font-size:12px}
+.usercard .btn{display:flex;justify-content:center;width:100%;margin-top:14px}.usercard .btn.primary{color:#fff}
+.uc-note{margin:12px 0 0;color:var(--muted);font-size:13px}
+.layout{display:grid;grid-template-columns:210px minmax(0,1fr);gap:28px;max-width:1640px;margin:0 auto;padding:28px 24px 60px}
+.side{display:flex;flex-direction:column;gap:6px;position:sticky;top:20px;align-self:start}
+.side a{display:block;padding:10px 14px;border-radius:9px;border:1px solid transparent;color:var(--muted);text-decoration:none;font-weight:600}
+.side a:hover{color:var(--text);background:var(--panel)}
+.side a.active{color:var(--text);background:var(--panel);border-color:var(--line);box-shadow:inset 3px 0 0 var(--accent)}
+.tab{display:flex;flex-direction:column;gap:18px}
+[hidden]{display:none!important}
+h2{margin:0;font:600 32px/1.1 "Palatino Linotype","Book Antiqua",Palatino,Georgia,"Times New Roman",serif;letter-spacing:.3px;color:var(--title)}
+h3{margin:0 0 4px;font-size:17px;font-weight:600;color:var(--teal);display:flex;align-items:center;gap:10px}
+.num{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;border:1px solid var(--teal);font-size:13px;color:var(--teal)}
+.sub{margin:0 0 14px;color:var(--muted);font-size:14px}
+.lead{margin:-8px 0 4px;color:var(--muted);font-size:14.5px}
+.step{border:1px solid var(--line);border-radius:14px;background:var(--panel);padding:22px;box-shadow:0 14px 40px rgba(0,0,0,.30)}
+.step.off{opacity:.55}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.5px}
+td.actions{text-align:right;white-space:nowrap}td.actions .btn{margin-left:6px}
+table.hosts input{width:100%;min-width:150px}table.hosts td.hostres{font-size:13px;color:var(--muted)}table.hosts td.hostres.ok{color:#4ade80}table.hosts td.hostres.err{color:#ff8b8b}
+#step2 .row{margin-top:12px}
+.badge{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;border:1px solid var(--line);color:var(--muted)}
+.badge.ok{color:#4ade80;border-color:#1f5a38}
+form.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+form.grid .full{grid-column:1/-1}
+label{display:flex;flex-direction:column;gap:5px;font-size:13px;color:var(--muted)}
+input,select{padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:#0f1117;color:var(--text);font:inherit}
+input:focus,select:focus{outline:none;border-color:var(--accent)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.msg{min-height:22px;font-size:14px}.ok{color:#4ade80}.err{color:#ff8b8b}
+.pager{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:16px}.pager .btn[disabled]{opacity:.4;cursor:default}
+.jobs{display:flex;flex-direction:column;gap:18px;margin-top:14px}
+.job{display:flex;flex-direction:column;gap:14px;padding:18px 20px;border:1px solid var(--line);border-radius:12px;background:var(--panel2)}
+.jobhead{display:flex;align-items:center;gap:12px}.jobhead h4{margin:0;font:600 20px/1.2 "Palatino Linotype","Book Antiqua",Palatino,Georgia,serif;color:var(--title)}
+.tag{padding:2px 10px;border-radius:99px;border:1px solid var(--line);font-size:12px;color:var(--muted)}.tag.ai{border-color:#d8a84a;color:#f0c36a}
+.job .sub{margin:0;color:var(--muted);font-size:13.5px;line-height:1.5}
+.job .nums{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 22px}
+.job .hint{font-size:12px;line-height:1.45;color:var(--muted)}.job .hint code{color:var(--teal)}
+.job textarea{font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;min-height:120px;resize:vertical;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text)}
+.layout>main{min-width:0}.tab>.step{min-width:0}
+.tablewrap{overflow-x:auto;max-width:100%}
+.sumline{margin:0 0 14px;font-size:14px;line-height:1.7}.sumline b{color:var(--teal);font-weight:600}
+td.nw,th.nw{white-space:nowrap}
+#autoRuns tr.run>td{border-bottom:0}
+#autoRuns tr.usage>td{padding:0 8px 14px}
+table.use{width:auto;font-size:13px}table.use th,table.use td{padding:3px 22px 3px 0;border-bottom:0}
+table.use th.n,table.use td.n{text-align:right;white-space:nowrap}
+table.use tr.sum td{border-top:1px solid var(--line);font-weight:600}
+table.audit{font-size:13px;width:100%;min-width:900px}
+table.audit td{vertical-align:top}
+table.audit td.t{white-space:nowrap;color:var(--muted)}
+table.audit td.chg{min-width:230px;max-width:360px}
+table.audit td.desc{min-width:170px;max-width:280px}
+.ev{display:inline-block;padding:1px 9px;border-radius:99px;font-size:12px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.ev.login,.ev.create,.ev.fetch{color:var(--teal);border-color:#1d5f64}
+.ev.update{color:#b3a3ff;border-color:#4b3f94}
+.ev.login_failed,.ev.denied,.ev.delete,.ev.fetch_failed{color:#ff8b8b;border-color:#6a2e2e}
+pre.chg{margin:0;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+pre.chg .p{color:#6ee7a0}pre.chg .m{color:#ff9a9a}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#a3a8b8}
+.ev.auto_start,.ev.auto_run,.ev.auto_agree{color:#f0c36a;border-color:#6b5320}
+.btn:disabled{opacity:.45;cursor:not-allowed}.btn:disabled:hover{border-color:var(--line)}.btn.primary:disabled:hover{border-color:var(--accent)}
+.between{justify-content:space-between}
+.switch{flex-direction:row;align-items:center;gap:10px;color:var(--text);font-weight:600;font-size:14px;cursor:pointer}
+input.swin{appearance:none;-webkit-appearance:none;width:44px;height:24px;padding:0;border-radius:99px;border:0;background:#2a2e3b;position:relative;cursor:pointer;flex:none}
+input.swin:after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:left .15s}
+input.swin:checked{background:var(--accent)}input.swin:checked:after{left:23px}
+input.cbx{appearance:none;-webkit-appearance:none;width:18px;height:18px;padding:0;border-radius:5px;border:1.5px solid var(--muted);background:transparent;position:relative;cursor:pointer;flex:none}
+input.cbx:checked{background:var(--accent);border-color:var(--accent)}
+input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;height:10px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.when{display:grid;grid-template-columns:1.25fr 1fr;gap:22px}
+.box{border:1px solid var(--line);border-radius:12px;background:var(--panel2);padding:16px 18px;display:flex;flex-direction:column;gap:12px}
+.radio{flex-direction:row;align-items:center;gap:10px;color:var(--text);font-size:14px;font-weight:600;cursor:pointer}
+.radio input{padding:0;width:16px;height:16px;accent-color:var(--accent)}
+.days{display:flex;gap:8px;flex-wrap:wrap;padding-left:26px}
+.day{min-width:56px;text-align:center;padding:8px 0;border-radius:8px;border:1px solid var(--line);background:#0f1117;color:var(--muted);font:inherit;font-weight:600;font-size:13px;cursor:pointer}
+.day.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.fields{display:grid;grid-template-columns:1fr 1.3fr;gap:14px}
+.next{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:10px;border:1px solid #1d5f64;background:#0e1c1f;color:#bfeff2;font-size:14px}
+.next b{color:#fff}
+.hint2{color:var(--muted);font-size:12.5px;line-height:1.5}
+.tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.tools input{flex:1;min-width:220px}
+.count{color:var(--muted);font-size:13px;margin-left:auto}
+.plist{height:330px;overflow-y:scroll;border:1px solid var(--line);border-radius:10px;background:var(--panel2)}
+.plist::-webkit-scrollbar{width:12px}.plist::-webkit-scrollbar-track{background:#0f1117}.plist::-webkit-scrollbar-thumb{background:#3a4052;border-radius:8px;border:2px solid #0f1117}
+.ph,.pr{display:grid;grid-template-columns:40px minmax(190px,1.3fr) minmax(170px,1fr) 90px 130px 250px;align-items:center;padding:9px 14px;gap:8px;border-bottom:1px solid var(--line);font-size:14px}
+.ph{position:sticky;top:0;background:#171a23;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;z-index:1}
+.pr:hover{background:#171b25}.pr .nm{font-weight:600}.pr .pa{color:var(--muted);font-size:13px}
+.pr.none{display:block;color:var(--muted)}
+.st{display:inline-block;padding:1px 9px;border-radius:99px;font-size:12px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.st.chg{color:#f0c36a;border-color:#6b5320;background:#211b0c}.st.new{color:#b3a3ff;border-color:#4b3f94;background:#171335}.st.ok{color:#4ade80;border-color:#1f5a38}
+.what{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.opt{flex-direction:row;display:flex;gap:14px;align-items:flex-start;padding:16px 18px;border:1px solid var(--line);border-radius:12px;background:var(--panel2);cursor:pointer;color:var(--text)}
+.opt.on{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
+.opt b{display:block;font-size:15px;margin-bottom:3px}.opt .d{display:block;color:var(--muted);font-size:13.5px;line-height:1.5}
+.opt input{margin-top:2px}
+.money{display:grid;grid-template-columns:1.1fr 1fr;gap:22px;align-items:start}
+.facts{display:grid;grid-template-columns:auto 1fr;gap:7px 18px;font-size:14px;margin:0}.facts dt{color:var(--muted)}.facts dd{margin:0}
+.cap{display:flex;align-items:center;gap:10px}.cap input{width:130px}
+.live{display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:10px;border:1px solid #1d5f64;background:#0e1c1f;color:#bfeff2;font-size:14px;margin-bottom:14px}
+.bar{height:7px;border-radius:99px;background:#0b2a2d;flex:1;overflow:hidden}.bar i{display:block;height:100%;width:0;background:var(--teal)}
+.fail{color:#ff8b8b}
+.veil{position:fixed;inset:0;background:rgba(5,6,10,.72);display:flex;align-items:flex-start;justify-content:center;padding:70px 16px 0;z-index:9;overflow:auto}
+.modal{width:760px;max-width:100%;border:1px solid var(--line);border-radius:16px;background:var(--panel);padding:26px 28px;box-shadow:0 30px 80px rgba(0,0,0,.6)}
+.modal h3{font:600 22px/1.2 "Palatino Linotype","Book Antiqua",Palatino,Georgia,serif;color:var(--title);margin:0 0 6px;display:block}
+.warn{margin:16px 0;padding:12px 14px;border-radius:10px;border:1px solid #6b5320;background:#211b0c;color:#f0c36a;font-size:14px;line-height:1.5}
+.agree{display:flex;gap:12px;align-items:flex-start;color:var(--text);font-size:14px;line-height:1.5;margin:6px 0 18px;flex-direction:row}
+.agree input{margin-top:3px}
+@media(max-width:860px){.layout{grid-template-columns:1fr}.side{flex-direction:row;position:static;flex-wrap:wrap}.job .nums,form.grid,.when,.what,.money{grid-template-columns:1fr}.ph,.pr{grid-template-columns:34px minmax(100px,1fr) 100px 130px}.ph span:nth-child(3),.pr span:nth-child(3),.ph span:nth-child(4),.pr span:nth-child(4){display:none}}</style></head><body><header class="top">
+  <span class="brand">Mnemosyne <span class="muted">admin</span></span>
+  <div class="right"><a class="topbtn" href="@@BASE@@/" title="Back to the projects and their documentation"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg><span>Projects</span></a>@@USERMENU@@
+  <form method="post" action="@@BASE@@/admin/auth/logout"><button class="btn small" type="submit">Sign out</button></form></div>
+</header>
+<div class="layout">
+  <nav class="side" aria-label="Admin sections"><a href="#llm" data-tab="llm" class="active">LLM</a><a href="#auto" data-tab="auto">Auto</a><a href="#sso" data-tab="sso">SSO</a><a href="#audit" data-tab="audit">Audit</a><a href="#license" data-tab="license">License</a></nav>
+  <main>
+    <section id="tab-llm" class="tab">
+      <h2>LLM</h2>
+      <p class="lead">Connect a provider with its API key, fetch the models that key can really use, then choose which model does which job.</p>
+
+      <div class="step" id="step1">
+        <h3><span class="num">1</span> Connect a provider</h3>
+        <p class="sub">The API key is stored encrypted on the server and is never shown again after saving.</p>
+        <form id="form" class="grid" autocomplete="off">
+          <label>Provider
+            <select id="preset">
+              <option value="">Custom</option>
+              <option value="meta-openai">Meta Model API (OpenAI-compatible)</option>
+              <option value="meta-anthropic">Meta Model API (Anthropic Messages)</option>
+              <option value="openai">OpenAI</option>
+              <option value="xai">xAI</option>
+            </select></label>
+          <label>Name<input id="label" required maxlength="80" placeholder="Meta Model API"></label>
+          <label>API format
+            <select id="kind"><option value="openai-compatible">OpenAI-compatible</option><option value="anthropic-messages">Anthropic Messages</option></select></label>
+          <label>Base URL<input id="baseUrl" required maxlength="300" placeholder="https://api.meta.ai/v1"></label>
+          <label class="full">API key<input id="apiKey" type="password" maxlength="500" autocomplete="new-password"></label>
+          <div class="row full"><button class="btn primary" type="submit" id="save">Save &amp; fetch models</button>
+            <button class="btn" type="button" id="cancel" hidden>Cancel edit</button><span id="msg" class="msg"></span></div>
+        </form>
+      </div>
+
+      <div class="step" id="step2">
+        <h3><span class="num">2</span> Fixed addresses <span class="muted">(optional)</span></h3>
+        <p class="sub">Pin a host name to an IP address when the provider's DNS is unstable. Mnemosyne then connects to that address for its AI calls and model lists and does not ask DNS at all. The certificate is still checked against the host name. Nothing else on the server is changed. If the provider moves to a new address, its calls fail until the address here is changed, so use “Check” after typing it.</p>
+        <table class="hosts"><thead><tr><th>Host name</th><th>IP address</th><th>Check result</th><th></th></tr></thead>
+          <tbody id="hostRows"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody></table>
+        <datalist id="hostSuggest"></datalist>
+        <div class="row"><button class="btn" type="button" id="hostAdd">Add a host</button><button class="btn primary" type="button" id="hostSave">Save fixed addresses</button><span id="hostMsg" class="msg"></span></div>
+      </div>
+
+      <div class="step" id="step3">
+        <h3><span class="num">3</span> Models your keys can use</h3>
+        <p class="sub">Asked from each provider with its own key — only models it really offers are listed. This reads the model list only; it makes no model calls and costs nothing.</p>
+        <table><thead><tr><th>Name</th><th>Endpoint</th><th>Key</th><th>Models</th><th></th></tr></thead>
+          <tbody id="rows"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody></table>
+        <p class="msg" id="fetchMsg"></p>
+      </div>
+
+      <div class="step off" id="step4">
+        <h3><span class="num">4</span> Choose the model and settings for each job</h3>
+        <p class="sub">Every value the AI calls use is set here, nothing is fixed in the program. Leave a number empty to use the default; “Reset to defaults” puts the built-in prompts back. A change applies to the next run (the agreement popup then shows the new worst-case cost).</p>
+        <div class="jobs">
+  <form class="job" data-role="text" id="job-text">
+    <div class="jobhead"><h4>Text</h4><span class="tag ai">AI call · costs money</span></div>
+    <p class="sub">Writes the project documentation page from all notes of a project (product description, hardware and software requirements, disaster recovery). Runs when an administrator presses “Generate documentation” and agrees to the cost.</p>
+    <label class="wide">Model<select id="m-text"></select><span class="hint">Picked from the models your keys can use (step 3).</span></label>
+    <div class="nums">
+      <label>Max output tokens<input id="maxTokens-text" inputmode="numeric" placeholder="50,000" autocomplete="off"><span class="hint">The most the AI may write in one call. You pay per token written, so this is the cost ceiling of a call; the agreement popup shows the worst case. Big projects and reasoning models need a high limit. Default 50,000, allowed 256 to 1,000,000.</span></label>
+      <label>Temperature<input id="temperature-text" inputmode="decimal" placeholder="provider default" autocomplete="off"><span class="hint">0 to 2. Lower = more factual and repeatable, higher = more varied. Empty = the provider's own default (the value is not sent).</span></label>
+      <label>Top-p<input id="topP-text" inputmode="decimal" placeholder="provider default" autocomplete="off"><span class="hint">0.01 to 1. The share of most-likely words the AI may choose from; lower = safer wording. Empty = the provider's own default (not sent).</span></label>
+      <label>Reasoning effort<select id="reasoningEffort-text"><option value="">Provider default (not sent)</option><option value="minimal">Minimal</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select><span class="hint">How long a reasoning model thinks before it answers. The thinking is written as output tokens: you wait for it and pay for it, and it can be most of what a call produces (the Runs list in Auto shows the share the provider reports). Lower = faster and cheaper, perhaps less careful. Sent as <code>reasoning_effort</code> to OpenAI-compatible providers only; a model that does not know the setting may refuse the request, then set it back to the default.</span></label>
+      <label>Time limit per call (minutes)<input id="timeoutMinutes-text" inputmode="numeric" placeholder="20" autocomplete="off"><span class="hint">A call that takes longer is stopped. Default 20, allowed 1 to 60.</span></label>
+    </div>
+    <label class="wide">System prompt - who the AI is and the rules it must follow<textarea id="sys-text" rows="6" spellcheck="false"></textarea></label>
+    <label class="wide">Instruction - what the AI is asked to write<textarea id="usr-text" rows="14" spellcheck="false"></textarea><span class="hint">Placeholders the server fills in: <code>{{project}}</code> = the project name (GitLab project name when one matches) · <code>{{notes_count}}</code> = how many notes are sent · <code>{{notes}}</code> = all notes of the project, newest first, credentials masked <b>(required)</b></span></label>
+    <div class="row"><button class="btn primary" type="submit">Save Text settings</button><button class="btn" type="button" data-reset="text">Reset to defaults</button><span id="msg-text" class="msg"></span></div>
+  </form>
+  <form class="job" data-role="image" id="job-image">
+    <div class="jobhead"><h4>Images</h4><span class="tag ai">AI call · costs money</span></div>
+    <p class="sub">Creates the architecture diagrams. The text model (the one chosen for Text) reads the article and writes a PLAN as data using the prompts below: an overview picture and, for a bigger system, detail pictures by topic (at most 5 pictures, each with at most 10 boxes and 14 arrows, columns of boxes and the arrows between them); Mnemosyne itself then draws every picture from that plan, so every word is spelled exactly and the layout is always the same. No image model is called for diagrams, so the model chosen here is not used by them. Runs when an administrator presses “Create workflow diagram” and agrees to the cost. The limit, sampling values and prompts below belong to the text call that writes the plan.</p>
+    <label class="wide">Model<select id="m-image"></select><span class="hint">Picked from the models your keys can use (step 3).</span></label>
+    <div class="nums">
+      <label>Max output tokens<input id="maxTokens-image" inputmode="numeric" placeholder="50,000" autocomplete="off"><span class="hint">The most the AI may write in one call. You pay per token written, so this is the cost ceiling of a call; the agreement popup shows the worst case. Big projects and reasoning models need a high limit. Default 50,000, allowed 256 to 1,000,000.</span></label>
+      <label>Temperature<input id="temperature-image" inputmode="decimal" placeholder="provider default" autocomplete="off"><span class="hint">0 to 2. Lower = more factual and repeatable, higher = more varied. Empty = the provider's own default (the value is not sent).</span></label>
+      <label>Top-p<input id="topP-image" inputmode="decimal" placeholder="provider default" autocomplete="off"><span class="hint">0.01 to 1. The share of most-likely words the AI may choose from; lower = safer wording. Empty = the provider's own default (not sent).</span></label>
+      <label>Reasoning effort<select id="reasoningEffort-image"><option value="">Provider default (not sent)</option><option value="minimal">Minimal</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select><span class="hint">How long a reasoning model thinks before it answers. The thinking is written as output tokens: you wait for it and pay for it, and it can be most of what a call produces (the Runs list in Auto shows the share the provider reports). Lower = faster and cheaper, perhaps less careful. Sent as <code>reasoning_effort</code> to OpenAI-compatible providers only; a model that does not know the setting may refuse the request, then set it back to the default.</span></label>
+      <label>Time limit per call (minutes)<input id="timeoutMinutes-image" inputmode="numeric" placeholder="20" autocomplete="off"><span class="hint">A call that takes longer is stopped. Default 20, allowed 1 to 60.</span></label>
+    </div>
+    <label class="wide">System prompt for the diagram plan - who the AI is and the rules<textarea id="sys-image" rows="6" spellcheck="false"></textarea></label>
+    <label class="wide">Instruction for the diagram plan - what the picture must show (the AI must answer with the JSON plan)<textarea id="usr-image" rows="14" spellcheck="false"></textarea><span class="hint">Placeholders the server fills in: <code>{{project}}</code> = the project name · <code>{{article}}</code> = the generated documentation article (first 60,000 characters) <b>(required)</b></span></label>
+    <div class="row"><button class="btn primary" type="submit">Save Images settings</button><button class="btn" type="button" data-reset="image">Reset to defaults</button><span id="msg-image" class="msg"></span></div>
+  </form>
+  <form class="job" data-role="pdf" id="job-pdf">
+    <div class="jobhead"><h4>PDF</h4><span class="tag">no AI call yet</span></div>
+    <p class="sub">Today the PDF handbook is built from the article and the diagram without any AI call (it costs nothing), so the values below are not used yet and are left empty. They are here, like for the other jobs, so an AI-written PDF handbook can be controlled the same way as soon as it exists: whatever you save now will be used then.</p>
+    <label class="wide">Model<select id="m-pdf"></select><span class="hint">Picked from the models your keys can use (step 3).</span></label>
+    <div class="nums">
+      <label>Max output tokens<input id="maxTokens-pdf" inputmode="numeric" placeholder="50,000" autocomplete="off"><span class="hint">The most the AI may write in one call. You pay per token written, so this is the cost ceiling of a call; the agreement popup shows the worst case. Big projects and reasoning models need a high limit. Default 50,000, allowed 256 to 1,000,000.</span></label>
+      <label>Temperature<input id="temperature-pdf" inputmode="decimal" placeholder="provider default" autocomplete="off"><span class="hint">0 to 2. Lower = more factual and repeatable, higher = more varied. Empty = the provider's own default (the value is not sent).</span></label>
+      <label>Top-p<input id="topP-pdf" inputmode="decimal" placeholder="provider default" autocomplete="off"><span class="hint">0.01 to 1. The share of most-likely words the AI may choose from; lower = safer wording. Empty = the provider's own default (not sent).</span></label>
+      <label>Reasoning effort<select id="reasoningEffort-pdf"><option value="">Provider default (not sent)</option><option value="minimal">Minimal</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select><span class="hint">How long a reasoning model thinks before it answers. The thinking is written as output tokens: you wait for it and pay for it, and it can be most of what a call produces (the Runs list in Auto shows the share the provider reports). Lower = faster and cheaper, perhaps less careful. Sent as <code>reasoning_effort</code> to OpenAI-compatible providers only; a model that does not know the setting may refuse the request, then set it back to the default.</span></label>
+      <label>Time limit per call (minutes)<input id="timeoutMinutes-pdf" inputmode="numeric" placeholder="20" autocomplete="off"><span class="hint">A call that takes longer is stopped. Default 20, allowed 1 to 60.</span></label>
+    </div>
+    <label class="wide">System prompt - who the AI is and the rules (not used yet)<textarea id="sys-pdf" rows="6" spellcheck="false"></textarea></label>
+    <label class="wide">Instruction - what the AI is asked to write (not used yet)<textarea id="usr-pdf" rows="14" spellcheck="false"></textarea><span class="hint">Placeholders the server fills in: <code>{{project}}</code> = the project name · <code>{{article}}</code> = the generated documentation article</span></label>
+    <div class="row"><button class="btn primary" type="submit">Save PDF settings</button><button class="btn" type="button" data-reset="pdf">Reset to defaults</button><span id="msg-pdf" class="msg"></span></div>
+  </form>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-auto" class="tab" hidden>
+      <h2>Auto</h2>
+      <p class="lead">Let Mnemosyne update the documentation by itself at a time when nobody is working. Only projects whose notes changed since their last article are touched; everything else is left alone.</p>
+      <div class="notice error" id="autoPaused" hidden></div>
+
+      <div class="step">
+        <div class="row between"><h3><span class="num">1</span> When</h3>
+          <label class="switch"><input type="checkbox" id="autoOn" class="swin"><b id="autoOnText">Automatic update is OFF</b></label></div>
+        <p class="sub">Set the day and the time. The switch is the kill switch: turned off, nothing runs and nothing is spent.</p>
+        <div class="when">
+          <div class="box">
+            <label class="radio"><input type="radio" name="autoMode" id="autoWeekly" checked> Every week on</label>
+            <div class="days" id="autoDays"></div>
+            <label class="radio" style="margin-top:6px"><input type="radio" name="autoMode" id="autoOnce"> Once, on a date</label>
+            <div class="days"><input type="date" id="autoDate" style="width:180px"></div>
+          </div>
+          <div class="box">
+            <div class="fields">
+              <label>Start at (24-hour clock, HH:MM)<input id="autoTime" value="02:00" maxlength="5" placeholder="02:00" inputmode="numeric" autocomplete="off"></label>
+              <label>Time zone<select id="autoTz"></select></label>
+            </div>
+            <div class="next" id="autoNext">Loading…</div>
+            <span class="hint2">A run that was missed because the server was down starts when it is back, if it is less than 12 hours late; otherwise it is skipped and shown in the run list.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <h3><span class="num">2</span> Which projects</h3>
+        <p class="sub">Tick the projects that are kept up to date automatically. The badge shows what a run would do <em>right now</em>; this check reads the notes only and costs nothing.</p>
+        <div class="tools">
+          <input type="search" id="autoSearch" placeholder="Search projects…">
+          <button class="btn small" type="button" id="autoAll">Select all</button>
+          <button class="btn small" type="button" id="autoChanged">Only projects with changes</button>
+          <button class="btn small" type="button" id="autoNone">Clear</button>
+          <span class="count" id="autoCount"></span>
+        </div>
+        <div class="plist">
+          <div class="ph"><span></span><span>Project</span><span>GitLab</span><span>Notes</span><span>Last article</span><span>State</span></div>
+          <div id="autoRows"></div>
+        </div>
+        <p class="hint2" id="autoNewNote" hidden style="margin:10px 0 0">Projects added since you saved are marked “new” and are <b>not</b> included until you tick them: nothing is added to the spending without you.</p>
+      </div>
+
+      <div class="step">
+        <h3><span class="num">3</span> What to create</h3>
+        <p class="sub">Both are AI calls and cost money. The picture is always made from the newest article of the project.</p>
+        <div class="what">
+          <label class="opt on" id="autoTextBox"><input type="checkbox" class="cbx" id="autoText" checked><span><b>TEXT</b><span class="d">The project documentation article, written by AI from all notes of the project (what “Generate documentation” does today).</span></span></label>
+          <label class="opt on" id="autoChartsBox"><input type="checkbox" class="cbx" id="autoCharts" checked><span><b>AI flow charts</b><span class="d">The architecture diagrams: AI plans the pictures from the article, Mnemosyne draws them (what “Create workflow diagram” does today).</span></span></label>
+        </div>
+      </div>
+
+      <div class="step">
+        <h3><span class="num">4</span> Spending limit and agreement</h3>
+        <p class="sub">Automatic runs use the models and limits chosen in LLM. Nothing runs until you have agreed to the cost below.</p>
+        <div class="money">
+          <div><dl class="facts" id="autoFacts"></dl><p class="err" id="autoFactsErr"></p></div>
+          <div class="box">
+            <label>Stop the run when the cost reaches (USD, required)
+              <span class="cap"><input id="autoLimit" inputmode="decimal" value="10.00" autocomplete="off"> <span class="muted">per run</span></span></label>
+            <span class="hint2">The cost is counted from the tokens the provider reports. When the next project could take the run over this limit, the run stops and lists the projects it did not reach. The agreement popup shows the highest amount a month can cost with this limit.</span>
+            <div class="row"><button class="btn primary" type="button" id="autoSave">Save schedule…</button><span class="msg" id="autoMsg"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <h3><span class="num">5</span> Runs</h3>
+        <div class="live" id="autoLive" hidden><span id="autoLiveText"></span><span class="bar"><i id="autoBar"></i></span><span id="autoLiveTime"></span></div>
+        <p class="sumline" id="autoTotals" hidden></p>
+        <div class="tablewrap"><table><thead><tr><th class="nw">Start (UTC)</th><th class="nw">End (UTC)</th><th class="nw">Runtime</th><th>Trigger</th><th>Updated</th><th>Unchanged</th><th>Failed / not reached</th><th>Tokens in / out</th><th>Cost</th><th>Result</th></tr></thead>
+          <tbody id="autoRuns"><tr><td colspan="10" class="muted">Loading…</td></tr></tbody></table></div>
+        <p class="hint2" style="margin:10px 0 0">Under every run: what each model used for TEXT (the articles) and for IMAGES (the AI flow charts), and how long its calls took. IMAGES is not an image model: the AI writes the plan as text, Mnemosyne draws the pictures, so only those text tokens are used. The cost is the tokens the provider reported times the list price of the model; what the provider really charges you is on its own billing page. Every automatic AI call is also written to the Audit tab (who agreed, which project, tokens, cost).</p>
+      </div>
+    </section>
+
+    <section id="tab-sso" class="tab" hidden>
+      <h2>SSO</h2>
+      <p class="lead">Let GitLab users sign in with their GitLab account. Admin access comes from GitLab itself: only a GitLab administrator can open this admin area.</p>
+      <div class="step">
+        <h3>GitLab application</h3>
+        <p class="sub">In GitLab create an application (Admin → Applications) with scope <code>read_user</code>, tick <em>Trusted</em> so signed-in users are not asked again, and add these redirect URIs (one per line; the first is the public sign-in, the second the admin sign-in):</p>
+        <p class="sub">@@REDIRECTS@@</p>
+        <form id="ssoForm" class="grid" autocomplete="off">
+          <label class="full">GitLab URL<input id="gitlabUrl" maxlength="300" placeholder="https://gitlab.example.com"></label>
+          <label>Application ID<input id="clientId" maxlength="200"></label>
+          <label>Secret<input id="clientSecret" type="password" maxlength="500" autocomplete="new-password"></label>
+          <div class="row full"><button class="btn primary" type="submit">Save GitLab SSO</button><span id="ssoMsg" class="msg"></span></div>
+        </form>
+        <p class="sub" id="ssoState" style="margin-top:12px"></p>
+      </div>
+    </section>
+
+    <section id="tab-audit" class="tab" hidden>
+      <h2>Audit</h2>
+      <p class="lead">Every sign-in and every change made in this admin area. Secrets are never written to the log.</p>
+      <div class="step">
+        <div class="row" style="margin-bottom:14px">
+          <input id="auditSearch" type="search" placeholder="Search events…" style="flex:1;min-width:220px">
+          <button class="btn small" type="button" id="auditRefresh">Refresh</button>
+          <span class="muted" id="auditCount"></span><span class="muted" id="auditTz"></span>
+        </div>
+        <div class="tablewrap">
+          <table class="audit"><thead><tr><th>Date / Time</th><th>Event</th><th>Entity Type</th><th>Name / ID</th><th>User</th><th>IP Address</th><th>Changes</th><th>Description</th></tr></thead>
+            <tbody id="auditRows"><tr><td colspan="8" class="muted">Loading…</td></tr></tbody></table>
+        </div>
+        <div class="pager" id="auditPager"></div>
+        <div class="row" style="margin-top:8px"><span id="auditMsg" class="msg"></span></div>
+      </div>
+    </section>
+
+    <section id="tab-license" class="tab" hidden>
+      <h2>License</h2>
+      <p class="lead">This installation works free for 30 days from its first start. After that it needs a licence key. A licence counts seats: a seat is a person with a GitLab account who uses Mnemosyne, in any role.</p>
+      <div class="step">
+        <h3>Status</h3>
+        <dl class="facts" id="licFacts"><dt>Status</dt><dd>Loading…</dd></dl>
+        <div class="row" style="margin-top:14px"><button class="btn small" type="button" id="licCheck">Check now</button><span class="msg" id="licMsg"></span></div>
+      </div>
+      <div class="step">
+        <h3>Licence key</h3>
+        <p class="sub">Enter the key you received. The first time it is used it is bound to this installation.</p>
+        <form id="licForm" class="grid" autocomplete="off">
+          <label class="full">Licence key<input id="licKey" maxlength="64" placeholder="LSE-…" autocomplete="off" spellcheck="false"></label>
+          <div class="row full"><button class="btn primary" type="submit">Activate</button><span class="msg" id="licKeyMsg"></span></div>
+        </form>
+      </div>
+    </section>
+  </main>
+</div>
+<div class="veil" id="autoModal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="autoModalTitle">
+    <h3 id="autoModalTitle">Agree to automatic AI use</h3>
+    <p class="sub" style="margin:0">Mnemosyne will call an AI model by itself, on a schedule, with no one pressing a button. This costs money.</p>
+    <dl class="facts" id="autoModalFacts" style="margin-top:16px"></dl>
+    <div class="warn">The agreement is tied to exactly this setup. If the project list, what is created, the schedule, the model, the token limits or the spending limit change, the schedule pauses and asks you to agree again. The switch in step 1 stops everything at any time.</div>
+    <label class="agree"><input type="checkbox" class="cbx" id="autoAgree"><span>I agree that Mnemosyne uses AI automatically on this schedule and I accept the cost.</span></label>
+    <div class="row"><button class="btn primary" type="button" id="autoGo" disabled>Agree and save schedule</button><button class="btn" type="button" id="autoCancel">Cancel</button><span class="msg" id="autoModalMsg"></span></div>
+  </div>
+</div>
+<script nonce="@@NONCE@@">
+(function(){
+  var API="@@BASE@@/admin/api";
+  var PRESETS={"meta-openai":{"label":"Meta Model API","kind":"openai-compatible","baseUrl":"https://api.meta.ai/v1"},"meta-anthropic":{"label":"Meta Model API (Anthropic format)","kind":"anthropic-messages","baseUrl":"https://api.meta.ai"},"openai":{"label":"OpenAI","kind":"openai-compatible","baseUrl":"https://api.openai.com/v1"},"xai":{"label":"xAI","kind":"openai-compatible","baseUrl":"https://api.x.ai/v1"}};
+  var ROLES=['text','image','pdf'];
+  var HINTS={image:/image|imagen|flux|dall|diffusion|sdxl|sam|vision/i,text:/chat|muse|gpt|llama|claude|grok|spark|wonder|instruct/i,pdf:/muse|gpt|llama|claude|grok|spark|wonder|instruct|doc|long/i};
+  var $=function(id){return document.getElementById(id)};
+  var editing=null,data={providers:[],assignments:{}};
+  function note(id,t,ok){var m=$(id);m.textContent=t||'';m.className='msg '+(ok?'ok':'err')}
+  function call(method,path,body){
+    return fetch(API+path,{method:method,credentials:'same-origin',
+      headers:{'Content-Type':'application/json','X-Requested-With':'mnemosyne-admin'},
+      body:body?JSON.stringify(body):undefined}).then(function(r){
+        return r.json().catch(function(){return {}}).then(function(j){
+          if(r.status===401){location.href="@@BASE@@/admin/";throw new Error('signed out')}
+          if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j})})
+  }
+  // --- tabs (left menu) ---
+  function showTab(){
+    var TABS=['llm','auto','sso','audit','license'];
+    var t=(location.hash||'#llm').slice(1);if(TABS.indexOf(t)<0)t='llm';
+    TABS.forEach(function(n){$('tab-'+n).hidden=(n!==t)});
+    if(t==='audit')loadAudit();
+    if(t==='license')loadLicense();
+    if(t==='auto')loadAuto(autoLoaded);
+    Array.prototype.forEach.call(document.querySelectorAll('.side a'),function(a){a.className=a.getAttribute('data-tab')===t?'active':''});
+  }
+  var autoLoaded=false;
+  window.addEventListener('hashchange',showTab);showTab();
+
+  function cell(tr,text,cls){var td=document.createElement('td');td.textContent=text;if(cls)td.className=cls;tr.appendChild(td);return td}
+  function btn(label,cls,fn){var b=document.createElement('button');b.type='button';b.className='btn small '+cls;b.textContent=label;b.addEventListener('click',fn);return b}
+  function ago(ms){if(!ms)return 'never fetched';var m=Math.round((Date.now()-ms)/60000);return m<1?'just now':m<60?m+' min ago':Math.round(m/60)+' h ago'}
+
+  // --- step 3: connections + their fetched models ---
+  function renderRows(){
+    var rows=$('rows');rows.textContent='';
+    if(!data.providers.length){var tr=document.createElement('tr');cell(tr,'No provider connected yet — start with step 1.','muted').colSpan=5;rows.appendChild(tr);return}
+    data.providers.forEach(function(p){
+      var tr=document.createElement('tr');
+      cell(tr,p.label);cell(tr,p.baseUrl);cell(tr,p.hasKey?p.keyHint:'none');
+      var m=cell(tr,'');var b=document.createElement('span');b.className='badge'+(p.models.length?' ok':'');
+      b.textContent=p.models.length?p.models.length+' models · '+ago(p.modelsPulledAt):'not fetched yet';m.appendChild(b);
+      var act=cell(tr,'','actions');
+      act.appendChild(btn(p.models.length?'Refresh models':'Fetch models','',function(){fetchModels(p.id,p.label)}));
+      act.appendChild(btn('Edit','',function(){startEdit(p)}));
+      act.appendChild(btn('Delete','danger',function(){if(confirm('Delete "'+p.label+'" and its stored key?'))call('DELETE','/providers/'+p.id).then(load).catch(function(e){note('fetchMsg',e.message)})}));
+      rows.appendChild(tr);
+    });
+  }
+  function fetchModels(id,label){
+    note('fetchMsg','Asking '+label+' for its models…',true);
+    return call('POST','/providers/'+id+'/models').then(function(p){note('fetchMsg',label+': '+p.models.length+' models available.',true);return load()})
+      .catch(function(e){note('fetchMsg',label+': '+e.message);return load()});
+  }
+
+  // --- step 4: one model per job ---
+  function ordered(role,ids){
+    var re=HINTS[role],hit=[],rest=[];ids.forEach(function(i){(re.test(i)?hit:rest).push(i)});return hit.concat(rest);
+  }
+  var JOBS={};
+  function modelOptions(role,sel,any){
+    sel.textContent='';sel.disabled=!any;
+    var none=document.createElement('option');none.value='';none.textContent='— not set —';sel.appendChild(none);
+    data.providers.forEach(function(p){
+      if(!p.models.length)return;
+      var g=document.createElement('optgroup');g.label=p.label;
+      ordered(role,p.models).forEach(function(mid){var o=document.createElement('option');o.value=p.id+'::'+mid;o.textContent=mid;g.appendChild(o)});
+      sel.appendChild(g);
+    });
+  }
+  function fillJob(role){
+    var j=JOBS[role];if(!j)return;
+    var a=j.assignment;if(a)$('m-'+role).value=a.providerId+'::'+a.model;
+    var st=j.settings||{},e=j.effective;
+    ['maxTokens','temperature','topP','reasoningEffort','timeoutMinutes'].forEach(function(k){$(k+'-'+role).value=st[k]===undefined?'':st[k]});
+    $('sys-'+role).value=e.systemPrompt;$('usr-'+role).value=e.userPrompt;
+  }
+  function renderRoles(){
+    var any=data.providers.some(function(p){return p.models.length});
+    $('step4').className='step'+(any?'':' off');
+    ROLES.forEach(function(role){modelOptions(role,$('m-'+role),any);fillJob(role)});
+    Array.prototype.forEach.call(document.querySelectorAll('#step4 .job button[type=submit]'),function(b){b.disabled=!any});
+  }
+  ROLES.forEach(function(role){
+    $('job-'+role).addEventListener('submit',function(ev){
+      ev.preventDefault();note('msg-'+role,'');
+      var body={},v=$('m-'+role).value;
+      if(v){var i=v.indexOf('::');body.model={providerId:v.slice(0,i),model:v.slice(i+2)}}
+      ['maxTokens','temperature','topP','reasoningEffort','timeoutMinutes'].forEach(function(k){body[k]=$(k+'-'+role).value.trim()});
+      body.systemPrompt=$('sys-'+role).value;body.userPrompt=$('usr-'+role).value;
+      call('PUT','/llm/jobs/'+role,body).then(function(r){JOBS=r.jobs;data.assignments={};ROLES.forEach(function(x){if(JOBS[x].assignment)data.assignments[x]=JOBS[x].assignment});fillJob(role);note('msg-'+role,'Saved. It applies to the next run.',true)}).catch(function(e){note('msg-'+role,e.message)});
+    });
+    var rb=document.querySelector('[data-reset="'+role+'"]');
+    if(rb)rb.addEventListener('click',function(){
+      var d=JOBS[role].def.defaults;
+      ['maxTokens','temperature','topP','reasoningEffort','timeoutMinutes'].forEach(function(k){$(k+'-'+role).value=''});
+      $('sys-'+role).value=d.systemPrompt;$('usr-'+role).value=d.userPrompt;
+      note('msg-'+role,'Defaults filled in - press Save to keep them.',true);
+    });
+  });
+
+  function load(){return Promise.all([call('GET','/providers'),call('GET','/llm/jobs')]).then(function(r){data=r[0];JOBS=(r[1]&&r[1].jobs)||{};renderRows();renderRoles()}).catch(function(e){note('fetchMsg',e.message)})}
+
+  // --- step 1: connect ---
+  function startEdit(p){
+    editing=p.id;$('cancel').hidden=false;$('save').textContent='Save & fetch models';
+    $('label').value=p.label;$('kind').value=p.kind;$('baseUrl').value=p.baseUrl;
+    $('apiKey').value='';$('apiKey').placeholder=p.hasKey?'Leave empty to keep '+p.keyHint:'';$('preset').value='';
+    $('step1').scrollIntoView({behavior:'smooth'});
+  }
+  function reset(){editing=null;$('form').reset();$('cancel').hidden=true;$('apiKey').placeholder=''}
+  $('cancel').addEventListener('click',function(){reset();note('msg','')});
+  $('preset').addEventListener('change',function(){var p=PRESETS[$('preset').value];if(!p)return;
+    $('label').value=p.label;$('kind').value=p.kind;$('baseUrl').value=p.baseUrl});
+  $('form').addEventListener('submit',function(ev){
+    ev.preventDefault();note('msg','');$('save').disabled=true;
+    var label=$('label').value;
+    call('POST','/providers',{id:editing||undefined,label:label,kind:$('kind').value,baseUrl:$('baseUrl').value,apiKey:$('apiKey').value})
+      .then(function(p){reset();note('msg','Saved. Fetching models…',true);return load().then(function(){return fetchModels(p.id,label)})})
+      .then(function(){note('msg','')}).catch(function(e){note('msg',e.message)}).then(function(){$('save').disabled=false});
+  });
+
+  // --- step 2: fixed addresses (host name -> IP) ---
+  var HOSTS=[];
+  function hostRowsRead(){
+    return Array.prototype.map.call($('hostRows').querySelectorAll('tr[data-row]'),function(tr){
+      var i=tr.querySelectorAll('input');return {host:i[0].value.trim(),ip:i[1].value.trim()}});
+  }
+  function hostRowAdd(h){
+    var rows=$('hostRows');if(!rows.querySelector('tr[data-row]'))rows.textContent='';
+    var tr=document.createElement('tr');tr.setAttribute('data-row','1');
+    var a=cell(tr,'');var hi=document.createElement('input');hi.setAttribute('list','hostSuggest');hi.placeholder='api.meta.ai';hi.maxLength=253;hi.value=h.host||'';hi.autocomplete='off';a.appendChild(hi);
+    var b=cell(tr,'');var ii=document.createElement('input');ii.placeholder='57.144.64.141';ii.maxLength=45;ii.value=h.ip||'';ii.autocomplete='off';b.appendChild(ii);
+    var res=cell(tr,'','hostres');
+    var act=cell(tr,'','actions');
+    act.appendChild(btn('Check','',function(){
+      res.className='hostres';res.textContent='Connecting…';
+      call('POST','/llm/hosts/check',{host:hi.value,ip:ii.value}).then(function(r){res.className='hostres '+(r.ok?'ok':'err');res.textContent=(r.ok?'OK · ':'Failed · ')+r.ms+' ms · '+r.detail})
+        .catch(function(e){res.className='hostres err';res.textContent=e.message});
+    }));
+    act.appendChild(btn('Remove','danger',function(){tr.remove();if(!$('hostRows').querySelector('tr[data-row]'))hostRowsEmpty()}));
+    rows.appendChild(tr);return hi;
+  }
+  function hostRowsEmpty(){
+    var rows=$('hostRows');rows.textContent='';var tr=document.createElement('tr');
+    cell(tr,'No fixed addresses: DNS is asked as usual.','muted').colSpan=4;rows.appendChild(tr);
+  }
+  function loadHosts(){
+    return call('GET','/llm/hosts').then(function(r){
+      HOSTS=r.hosts||[];$('hostRows').textContent='';
+      if(!HOSTS.length)hostRowsEmpty();else HOSTS.forEach(hostRowAdd);
+      var dl=$('hostSuggest');dl.textContent='';(r.providerHosts||[]).forEach(function(h){var o=document.createElement('option');o.value=h;dl.appendChild(o)});
+    }).catch(function(e){note('hostMsg',e.message)});
+  }
+  $('hostAdd').addEventListener('click',function(){hostRowAdd({host:'',ip:''}).focus()});
+  $('hostSave').addEventListener('click',function(){
+    note('hostMsg','');$('hostSave').disabled=true;
+    call('PUT','/llm/hosts',{hosts:hostRowsRead()}).then(function(r){
+      HOSTS=r.hosts||[];note('hostMsg',HOSTS.length?'Saved. These addresses are used from the next connection on.':'Saved. No fixed addresses: DNS is asked as usual.',true);
+    }).catch(function(e){note('hostMsg',e.message)}).then(function(){$('hostSave').disabled=false});
+  });
+  loadHosts();
+
+  // --- SSO tab ---
+  function loadSso(){return call('GET','/settings').then(function(c){
+    $('gitlabUrl').value=c.gitlabUrl;$('clientId').value=c.clientId;
+    $('clientSecret').value='';$('clientSecret').placeholder=c.hasSecret?'Leave empty to keep '+c.secretHint:'';
+    $('ssoState').textContent=(c.ssoActive?'GitLab sign-in is active.':'GitLab sign-in is not active yet.')+(c.localUser?' Local admin account: '+c.localUser+'.':'')
+  }).catch(function(e){note('ssoMsg',e.message)})}
+  $('ssoForm').addEventListener('submit',function(ev){
+    ev.preventDefault();note('ssoMsg','');
+    call('PUT','/settings',{gitlabUrl:$('gitlabUrl').value,clientId:$('clientId').value,clientSecret:$('clientSecret').value})
+      .then(function(){note('ssoMsg','Saved.',true);return loadSso()}).catch(function(e){note('ssoMsg',e.message)});
+  });
+
+  // --- Audit tab ---
+  var auditPage=0,AUDIT_PER_PAGE=10;
+  $('auditTz').textContent=Intl.DateTimeFormat().resolvedOptions().timeZone;
+  function changeCell(td,text){
+    if(!text)return;var pre=document.createElement('pre');pre.className='chg';
+    text.split('\n').forEach(function(l,i){var sp=document.createElement('span');sp.className=l.charAt(0)==='+'?'p':l.charAt(0)==='-'?'m':'';sp.textContent=(i?'\n':'')+l;pre.appendChild(sp)});
+    td.appendChild(pre);
+  }
+  function auditRow(e){
+    var tr=document.createElement('tr');
+    cell(tr,new Date(e.time).toLocaleString(),'t');
+    var ev=cell(tr,'');var b=document.createElement('span');b.className='ev '+e.event;b.textContent=e.event.replace('_',' ');ev.appendChild(b);
+    cell(tr,e.entityType);cell(tr,e.entityName+(e.entityId&&e.entityId!==e.entityName?' ('+e.entityId.slice(0,8)+')':''));
+    cell(tr,e.user);cell(tr,e.ip);changeCell(cell(tr,'','chg'),e.changes);cell(tr,e.description,'desc');
+    return tr;
+  }
+  function pageBtn(label,page,cur,off){
+    var b=document.createElement('button');b.type='button';b.className='btn small'+(cur?' primary':'');b.textContent=label;b.disabled=!!off;
+    b.addEventListener('click',function(){auditPage=page;loadAudit()});return b;
+  }
+  function renderPager(total){
+    var box=$('auditPager');box.textContent='';
+    var pages=Math.max(1,Math.ceil(total/AUDIT_PER_PAGE));
+    if(pages<2)return;
+    box.appendChild(pageBtn('‹ Previous',auditPage-1,false,auditPage===0));
+    var last=-1;
+    for(var p=0;p<pages;p++){
+      if(p===0||p===pages-1||Math.abs(p-auditPage)<=2){
+        if(last!==-1&&p-last>1){var gap=document.createElement('span');gap.className='muted';gap.textContent='…';box.appendChild(gap)}
+        box.appendChild(pageBtn(String(p+1),p,p===auditPage,false));last=p;
+      }
+    }
+    box.appendChild(pageBtn('Next ›',auditPage+1,false,auditPage>=pages-1));
+    var t=document.createElement('span');t.className='muted';t.style.marginLeft='10px';t.textContent='Page '+(auditPage+1)+' of '+pages;box.appendChild(t);
+  }
+  function loadAudit(){
+    note('auditMsg','');var rows=$('auditRows');
+    call('GET','/audit?q='+encodeURIComponent($('auditSearch').value.trim())+'&offset='+(auditPage*AUDIT_PER_PAGE)+'&limit='+AUDIT_PER_PAGE).then(function(d){
+      var pages=Math.max(1,Math.ceil(d.total/AUDIT_PER_PAGE));
+      if(auditPage>pages-1){auditPage=pages-1;return loadAudit()}
+      rows.textContent='';
+      if(!d.events.length){var tr=document.createElement('tr');cell(tr,$('auditSearch').value.trim()?'No matching events.':'No events yet.','muted').colSpan=8;rows.appendChild(tr)}
+      d.events.forEach(function(e){rows.appendChild(auditRow(e))});
+      $('auditCount').textContent=d.total?((auditPage*AUDIT_PER_PAGE+1)+'–'+(auditPage*AUDIT_PER_PAGE+d.events.length)+' of '+d.total+' events'):'0 events';
+      renderPager(d.total);
+    }).catch(function(e){note('auditMsg',e.message)});
+  }
+  var st;$('auditSearch').addEventListener('input',function(){clearTimeout(st);st=setTimeout(function(){auditPage=0;loadAudit()},250)});
+  $('auditRefresh').addEventListener('click',function(){loadAudit()});
+  setInterval(function(){if(!$('tab-audit').hidden&&auditPage===0&&!$('auditSearch').value)loadAudit()},15000);
+
+  // --- Auto tab: schedule, project selection, agreement, runs ---
+  var DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  var ZONES=['UTC','Europe/London','Europe/Zurich','Europe/Berlin','Europe/Paris','Europe/Amsterdam','Europe/Madrid','Europe/Rome','Europe/Vienna','Europe/Istanbul','Europe/Moscow','Africa/Johannesburg','Asia/Dubai','Asia/Kolkata','Asia/Singapore','Asia/Hong_Kong','Asia/Shanghai','Asia/Tokyo','Asia/Seoul','Australia/Sydney','Pacific/Auckland','America/Sao_Paulo','America/New_York','America/Chicago','America/Denver','America/Los_Angeles','America/Anchorage','Pacific/Honolulu'];
+  var RESULT={completed:'completed',nothing:'nothing changed',limit:'stopped at the limit',missed:'missed',stopped:'stopped',running:'running'};
+  var AUTO=null,autoSel={},autoDay={},autoWas=false,autoTimer=0,autoToken=null;
+  function span(parent,text,cls){var s=document.createElement('span');s.textContent=text;if(cls)s.className=cls;parent.appendChild(s);return s}
+  function fillDl(dl,rows){dl.textContent='';(rows||[]).forEach(function(r){var dt=document.createElement('dt');dt.textContent=r[0];var dd=document.createElement('dd');dd.textContent=r[1];dl.appendChild(dt);dl.appendChild(dd)})}
+  function fmtZ(iso,tz){try{return new Date(iso).toLocaleString('en-GB',{timeZone:tz,weekday:'long',day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:false})+' ('+tz+')'}catch(e){return iso}}
+  function fmtT(iso){return iso?iso.slice(0,16).replace('T',' '):''}
+  function secs(since){var s=Math.max(0,Math.round((Date.now()-Date.parse(since))/1000));return Math.floor(s/60)+':'+('0'+(s%60)).slice(-2)}
+  function autoZones(want){
+    var sel=$('autoTz'),list=ZONES.slice(),mine='';
+    try{mine=Intl.DateTimeFormat().resolvedOptions().timeZone}catch(e){}
+    [mine,want].forEach(function(z){if(z&&list.indexOf(z)<0)list.push(z)});
+    sel.textContent='';list.forEach(function(z){var o=document.createElement('option');o.value=z;o.textContent=z;sel.appendChild(o)});
+    sel.value=want||'UTC';
+  }
+  function autoDays(){
+    var box=$('autoDays');box.textContent='';
+    [1,2,3,4,5,6,0].forEach(function(d){
+      var b=document.createElement('button');b.type='button';b.className='day'+(autoDay[d]?' on':'');b.textContent=DAYS[d];
+      b.addEventListener('click',function(){autoDay[d]=!autoDay[d];autoDays();autoDirty()});box.appendChild(b);
+    });
+  }
+  // what a run would do for this project with the ticks as they are now
+  function autoWould(p){
+    var t=$('autoText').checked,c=$('autoCharts').checked;
+    var text=t&&p.textDue,charts=c&&(p.chartsDue||text)&&(p.hasArticle||text);
+    if(text)return p.hasArticle?{k:'chg',l:p.detail,w:true}:{k:'new',l:'no article yet',w:true};
+    if(charts)return {k:'chg',l:p.detail,w:true};
+    if(p.textDue)return {k:'',l:'changed - TEXT is not ticked',w:false};
+    return {k:'ok',l:'up to date',w:false};
+  }
+  function autoRows(){
+    var rows=$('autoRows');rows.textContent='';
+    var q=$('autoSearch').value.trim().toLowerCase(),known=AUTO&&AUTO.config?AUTO.config.known:null,shown=0;
+    (AUTO?AUTO.projects:[]).forEach(function(p){
+      if(q&&(p.project+' '+(p.glPath||'')).toLowerCase().indexOf(q)<0)return;
+      shown++;
+      var r=document.createElement('div');r.className='pr';
+      var cb=document.createElement('input');cb.type='checkbox';cb.className='cbx';cb.checked=!!autoSel[p.project];
+      cb.addEventListener('change',function(){autoSel[p.project]=cb.checked;autoDirty()});r.appendChild(cb);
+      var nm=span(r,p.project,'nm');
+      if(known&&known.indexOf(p.project)<0){var nw=span(nm,'new','st new');nw.style.marginLeft='8px'}
+      span(r,p.glPath||'—','pa');span(r,String(p.notes));span(r,p.lastArticle?p.lastArticle.slice(0,10):'—');
+      var w=autoWould(p),c=document.createElement('span');span(c,w.l,'st '+w.k);r.appendChild(c);
+      rows.appendChild(r);
+    });
+    if(!shown){var e=document.createElement('div');e.className='pr none';e.textContent=AUTO&&AUTO.projects.length?'No matching project.':'No project has notes yet.';rows.appendChild(e)}
+  }
+  function autoCounts(){
+    var n=0,ch=0,nw=0,all=AUTO?AUTO.projects:[];
+    all.forEach(function(p){if(autoSel[p.project]){n++;if(autoWould(p).w)ch++;if(!p.hasArticle)nw++}});
+    $('autoCount').textContent=n+' of '+all.length+' selected · '+ch+' have changes · '+nw+' have no article yet';
+  }
+  function autoRead(){
+    var d=[],sel=[];
+    [0,1,2,3,4,5,6].forEach(function(x){if(autoDay[x])d.push(x)});
+    (AUTO?AUTO.projects:[]).forEach(function(p){if(autoSel[p.project])sel.push(p.project)});
+    return {schedule:{mode:$('autoOnce').checked?'once':'weekly',days:d,date:$('autoDate').value,time:$('autoTime').value,tz:$('autoTz').value},projects:sel,text:$('autoText').checked,charts:$('autoCharts').checked,limitUsd:$('autoLimit').value};
+  }
+  function autoOpts(){$('autoTextBox').className='opt'+($('autoText').checked?' on':'');$('autoChartsBox').className='opt'+($('autoCharts').checked?' on':'')}
+  // the form shows the saved setup (or the defaults: Saturday and Sunday, 02:00, both ticked, 10 dollars)
+  function autoWrite(){
+    var c=AUTO&&AUTO.config,s=c?c.schedule:{mode:'weekly',days:[6,0],time:'02:00',tz:'UTC',date:''};
+    autoDay={};(s.days||[]).forEach(function(d){autoDay[d]=true});autoDays();
+    $('autoWeekly').checked=s.mode!=='once';$('autoOnce').checked=s.mode==='once';
+    $('autoDate').value=s.date||'';$('autoTime').value=s.time;autoZones(s.tz);
+    $('autoText').checked=c?c.text:true;$('autoCharts').checked=c?c.charts:true;autoOpts();
+    $('autoLimit').value=c?Number(c.limitUsd).toFixed(2):'10.00';
+    autoSel={};if(c)c.projects.forEach(function(p){autoSel[p]=true});
+  }
+  function autoSwitch(){var on=!!(AUTO&&AUTO.config&&AUTO.config.enabled);$('autoOn').checked=on;$('autoOnText').textContent='Automatic update is '+(on?'ON':'OFF')}
+  function autoNext(){
+    var el=$('autoNext');el.textContent='';var s=AUTO,c=s&&s.config;
+    if(!c){el.textContent='Not set up yet. Choose the days, the projects and the limit, then press “Save schedule…”.';return}
+    if(!c.enabled){el.textContent='Switched off — nothing will run.';return}
+    if(s.pausedReason){el.textContent='Paused — see the warning at the top of this page.';return}
+    if(!s.nextRunAt){el.textContent='No further run is planned (a one-time schedule has run).';return}
+    span(el,'Next run:');var b=document.createElement('b');b.textContent=fmtZ(s.nextRunAt,c.schedule.tz);el.appendChild(b);
+  }
+  function autoPaused(){var el=$('autoPaused');el.hidden=!(AUTO&&AUTO.pausedReason);el.textContent=AUTO&&AUTO.pausedReason?AUTO.pausedReason:''}
+  function dur(ms){var s=Math.max(0,Math.round(ms/1000));if(s<60)return s+' s';var m=Math.floor(s/60);if(m<60)return m+' min '+s%60+' s';return Math.floor(m/60)+' h '+m%60+' min'}
+  function num(n){return Number(n).toLocaleString('en-US')}
+  function usd4(n){return '$'+Number(n).toFixed(4)}
+  function fmtS(iso){return iso?iso.slice(0,19).replace('T',' '):''}
+  var KIND={wiki:'TEXT (articles)',diagram:'IMAGES (AI flow charts)'};
+  // what each model used in one run: one row per model and kind, and a total when there is more than one
+  function usageTable(u){
+    var t=document.createElement('table');t.className='use';
+    var hr=document.createElement('tr');
+    ['Model','What','Calls','Tokens in','Tokens out','of it reasoning','Cost','AI time'].forEach(function(x,i){var th=document.createElement('th');th.textContent=x;if(i>1)th.className='n';hr.appendChild(th)});
+    var hd=document.createElement('thead');hd.appendChild(hr);t.appendChild(hd);
+    var b=document.createElement('tbody');t.appendChild(b);
+    var tot={c:0,i:0,o:0,r:undefined,u:0,ms:0};
+    function row(tr,m,w,x,cls){cell(tr,m);cell(tr,w);[num(x.c),num(x.i),num(x.o),x.r===undefined?'—':num(x.r),usd4(x.u),dur(x.ms)].forEach(function(v){cell(tr,v,'n')});if(cls)tr.className=cls;b.appendChild(tr)}
+    u.slice().sort(function(a,c){return a.model!==c.model?(a.model<c.model?-1:1):(a.kind===c.kind?0:a.kind==='wiki'?-1:1)}).forEach(function(x){
+      var v={c:x.calls,i:x.inputTokens,o:x.outputTokens,r:x.reasoningTokens,u:x.usd,ms:x.ms};
+      tot.c+=v.c;tot.i+=v.i;tot.o+=v.o;tot.u+=v.u;tot.ms+=v.ms;if(v.r!==undefined)tot.r=(tot.r||0)+v.r;
+      row(document.createElement('tr'),x.model,KIND[x.kind]||x.kind,v);
+    });
+    if(u.length>1)row(document.createElement('tr'),'','Together',tot,'sum');
+    return t;
+  }
+  function autoRuns(runs){
+    var tb=$('autoRuns');tb.textContent='';
+    if(!runs||!runs.length){var e=document.createElement('tr');cell(e,'No automatic run yet.','muted').colSpan=10;tb.appendChild(e);return}
+    runs.forEach(function(r){
+      var tr=document.createElement('tr');tr.className='run';
+      var end=r.finishedAt&&r.finishedAt.slice(0,10)===r.startedAt.slice(0,10)?r.finishedAt.slice(11,19):fmtS(r.finishedAt);
+      cell(tr,fmtS(r.startedAt),'nw');cell(tr,end,'nw');cell(tr,r.finishedAt?dur(Date.parse(r.finishedAt)-Date.parse(r.startedAt)):'','nw');
+      cell(tr,r.trigger);cell(tr,String(r.updated.length));cell(tr,String(r.unchanged.length));
+      var f=cell(tr,r.failed.length+' / '+r.notReached.length+(r.failed.length?' — '+r.failed[0].project+': '+r.failed[0].error:''));if(r.failed.length)f.className='fail';
+      cell(tr,num(r.inputTokens)+' / '+num(r.outputTokens),'nw');cell(tr,usd4(r.usd),'nw');
+      var td=cell(tr,'');var b=document.createElement('span');b.className='badge'+(r.status==='completed'?' ok':'');b.textContent=RESULT[r.status]||r.status;td.appendChild(b);
+      if(r.note){var n=document.createElement('div');n.className='hint2';n.textContent=r.note;td.appendChild(n)}
+      tb.appendChild(tr);
+      // the split under the run: a run without calls has nothing to split, an old run whose split could not be proven says so
+      if(r.usage&&r.usage.length||!r.usage&&r.inputTokens){
+        var dr=document.createElement('tr');dr.className='usage';var dc=document.createElement('td');dc.colSpan=10;
+        if(r.usage)dc.appendChild(usageTable(r.usage));else{dc.textContent='The split by model, TEXT and IMAGES is not available for this run (it was made before the split was recorded and the audit trail no longer matches its totals).';dc.className='muted'}
+        dr.appendChild(dc);tb.appendChild(dr);
+      }
+    });
+  }
+  // all runs of the list together: time, tokens, cost, and what part was TEXT and what part IMAGES
+  function autoTotals(runs){
+    var el=$('autoTotals'),done=(runs||[]).filter(function(r){return r.finishedAt});
+    if(!done.length){el.hidden=true;return}
+    var ms=0,i=0,o=0,u=0,miss=0,k={wiki:{c:0,u:0,ms:0},diagram:{c:0,u:0,ms:0}};
+    done.forEach(function(r){
+      ms+=Date.parse(r.finishedAt)-Date.parse(r.startedAt);i+=r.inputTokens;o+=r.outputTokens;u+=r.usd;
+      if(r.usage)r.usage.forEach(function(x){k[x.kind].c+=x.calls;k[x.kind].u+=x.usd;k[x.kind].ms+=x.ms});else if(r.inputTokens)miss++;
+    });
+    el.textContent='';
+    function kv(l,v){span(el,l+' ');var b=document.createElement('b');b.textContent=v;el.appendChild(b);span(el,'   ')}
+    kv('All '+done.length+(done.length===1?' run':' runs')+' below:',dur(ms));kv('·',num(i)+' tokens in / '+num(o)+' out');kv('·',usd4(u));
+    kv('— TEXT',usd4(k.wiki.u)+' ('+num(k.wiki.c)+' calls, '+dur(k.wiki.ms)+')');kv('· IMAGES',usd4(k.diagram.u)+' ('+num(k.diagram.c)+' calls, '+dur(k.diagram.ms)+')');
+    if(miss)span(el,'· the split is missing for '+miss+(miss===1?' run':' runs'),'muted');
+    el.hidden=false;
+  }
+  function autoLive(run){
+    var box=$('autoLive');if(!run){box.hidden=true;return}box.hidden=false;
+    var done=run.total-run.queue.length,cur=run.current;
+    $('autoLiveText').textContent=(cur?'While a run is going: project '+(done+1)+' of '+run.total+' — '+cur.project+' — '+(cur.waiting||(cur.kind==='wiki'?'writing the article':'planning the diagrams')):'Run in progress: '+done+' of '+run.total+' projects done')+' · running for '+dur(Date.now()-Date.parse(run.startedAt))+' · spent so far '+usd4(run.usd);
+    $('autoBar').style.width=(run.total?Math.round(100*done/run.total):0)+'%';
+    $('autoLiveTime').textContent=cur?secs(cur.since):'';
+  }
+  // what the setup would cost (free: reads notes only), asked from the server so the numbers are the ones the agreement shows
+  function autoFacts(){
+    clearTimeout(autoTimer);
+    autoTimer=setTimeout(function(){
+      if(AUTO&&!AUTO.model){fillDl($('autoFacts'),[]);$('autoFactsErr').textContent='Choose a model for Text in LLM first.';return}
+      call('POST','/auto/estimate',{config:autoRead()}).then(function(r){$('autoFactsErr').textContent='';fillDl($('autoFacts'),r.live)})
+        .catch(function(e){fillDl($('autoFacts'),[]);$('autoFactsErr').textContent=e.message});
+    },300);
+  }
+  function autoDirty(){autoCounts();autoFacts()}
+  function autoShow(keepForm){
+    if(!keepForm)autoWrite();
+    autoSwitch();autoNext();autoPaused();autoRows();autoCounts();autoRuns(AUTO.runs);autoTotals(AUTO.runs);autoLive(AUTO.run);autoWas=!!AUTO.run;
+    $('autoNewNote').hidden=!(AUTO.config&&AUTO.projects.some(function(p){return AUTO.config.known.indexOf(p.project)<0}));
+    autoFacts();
+  }
+  function loadAuto(keepForm){
+    return call('GET','/auto').then(function(d){d.projects=d.projects||[];d.runs=d.runs||[];AUTO=d;autoLoaded=true;autoShow(keepForm)}).catch(function(e){note('autoMsg',e.message)});
+  }
+  function autoPoll(){
+    if($('tab-auto').hidden||!AUTO)return;
+    call('GET','/auto/status').then(function(s){
+      var now=!!s.run;AUTO.run=s.run||null;AUTO.runs=s.runs||[];AUTO.nextRunAt=s.nextRunAt;AUTO.pausedReason=s.pausedReason;
+      if(AUTO.config)AUTO.config.enabled=!!s.enabled;
+      autoLive(s.run);autoRuns(AUTO.runs);autoTotals(AUTO.runs);autoNext();autoPaused();autoSwitch();
+      if(autoWas&&!now)loadAuto(true);autoWas=now;
+    }).catch(function(){});
+  }
+  setInterval(autoPoll,5000);
+  ['autoWeekly','autoOnce'].forEach(function(id){$(id).addEventListener('change',autoDirty)});
+  ['autoDate','autoTime','autoTz','autoLimit'].forEach(function(id){$(id).addEventListener('input',autoDirty);$(id).addEventListener('change',autoDirty)});
+  ['autoText','autoCharts'].forEach(function(id){$(id).addEventListener('change',function(){autoOpts();autoRows();autoDirty()})});
+  $('autoSearch').addEventListener('input',autoRows);
+  function pick(all,fn){(AUTO?AUTO.projects:[]).forEach(function(p){if(all||!$('autoSearch').value.trim()||(p.project+' '+(p.glPath||'')).toLowerCase().indexOf($('autoSearch').value.trim().toLowerCase())>=0)fn(p)});autoRows();autoDirty()}
+  $('autoAll').addEventListener('click',function(){pick(false,function(p){autoSel[p.project]=true})});
+  $('autoNone').addEventListener('click',function(){pick(false,function(p){autoSel[p.project]=false})});
+  $('autoChanged').addEventListener('click',function(){autoSel={};pick(true,function(p){if(autoWould(p).w)autoSel[p.project]=true})});
+  $('autoOn').addEventListener('change',function(){
+    var want=$('autoOn').checked;note('autoMsg','');
+    call('PUT','/auto/switch',{enabled:want}).then(function(d){d.projects=d.projects||[];d.runs=d.runs||[];AUTO=d;autoShow(true)}).catch(function(e){note('autoMsg',e.message);autoSwitch()});
+  });
+  // saving asks for the agreement first: the popup shows what it can cost, the server only accepts the setup with that agreement
+  $('autoSave').addEventListener('click',function(){
+    note('autoMsg','');$('autoSave').disabled=true;
+    call('POST','/auto/estimate',{config:autoRead()}).then(function(r){
+      autoToken=r.token;fillDl($('autoModalFacts'),r.agree);$('autoAgree').checked=false;$('autoGo').disabled=true;note('autoModalMsg','');$('autoModal').hidden=false;
+    }).catch(function(e){note('autoMsg',e.message)}).then(function(){$('autoSave').disabled=false});
+  });
+  $('autoAgree').addEventListener('change',function(){$('autoGo').disabled=!$('autoAgree').checked});
+  $('autoCancel').addEventListener('click',function(){$('autoModal').hidden=true});
+  $('autoGo').addEventListener('click',function(){
+    $('autoGo').disabled=true;
+    call('PUT','/auto',{config:autoRead(),token:autoToken}).then(function(d){
+      $('autoModal').hidden=true;d.projects=d.projects||[];d.runs=d.runs||[];AUTO=d;autoShow(false);note('autoMsg','Saved and agreed. The schedule is ON.',true);
+    }).catch(function(e){note('autoModalMsg',e.message);$('autoGo').disabled=!$('autoAgree').checked});
+  });
+
+  // --- licence ---
+  var LIC_STATES={starting:'Starting',trial:'Free trial',licensed:'Licensed','renewal-grace':'Licence period ended, renewal period',locked:'Locked'};
+  function licDate(ms){return ms?new Date(ms).toISOString().slice(0,10)+' (UTC)':'-'}
+  function licFact(dl,k,v){var dt=document.createElement('dt');dt.textContent=k;var dd=document.createElement('dd');dd.textContent=v;dl.appendChild(dt);dl.appendChild(dd)}
+  function renderLicense(s){
+    var dl=$('licFacts');dl.textContent='';
+    licFact(dl,'Status',LIC_STATES[s.state]||s.state);
+    if(s.reason)licFact(dl,'Reason',s.reason);
+    if(s.state==='trial'&&s.trialEndsAt)licFact(dl,'Trial ends',licDate(s.trialEndsAt));
+    if(s.org)licFact(dl,'Licensed to',s.org);
+    if(s.hasKey)licFact(dl,'Licence key',s.keyHint);
+    if(s.licenseExpiresAt)licFact(dl,'Licence period ends',licDate(s.licenseExpiresAt));
+    licFact(dl,'Seats in use',s.seatsUsed+(s.seats===null||s.seats===undefined?' (the licence has no limit)':' of '+s.seats));
+    licFact(dl,'Last check',s.checkedAt?ago(s.checkedAt):'never');
+    if(s.lastError)licFact(dl,'Last problem',s.lastError);
+    licFact(dl,'Installation',s.instanceId);
+    licFact(dl,'Domain',s.domain);
+    licFact(dl,'Licence server',s.server);
+  }
+  function licFail(id,e){note(id,/HTTP 404/.test(e.message)?'Licence handling is not part of this server.':e.message,false)}
+  function loadLicense(){call('GET','/license').then(renderLicense).catch(function(e){licFail('licMsg',e)})}
+  $('licCheck').addEventListener('click',function(){
+    $('licCheck').disabled=true;note('licMsg','Asking the licence server…',true);
+    call('POST','/license/check').then(function(s){renderLicense(s);note('licMsg',s.lastError?'':'Checked.',!s.lastError)}).catch(function(e){licFail('licMsg',e)}).then(function(){$('licCheck').disabled=false});
+  });
+  $('licForm').addEventListener('submit',function(e){
+    e.preventDefault();var k=$('licKey').value.trim();
+    if(!k){note('licKeyMsg','Enter the key first.',false);return}
+    note('licKeyMsg','Checking the key with the licence server…',true);
+    call('POST','/license/activate',{key:k}).then(function(s){$('licKey').value='';renderLicense(s);note('licKeyMsg','The key is accepted.',true)}).catch(function(e2){licFail('licKeyMsg',e2)});
+  });
+
+  load();loadSso();
+})();</script>@@FOOTER@@</body></html>
