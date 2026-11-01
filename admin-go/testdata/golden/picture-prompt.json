@@ -1,0 +1,84 @@
+{
+  "plan": {
+    "title": "Shop \"main\"",
+    "columns": [
+      {
+        "title": "Clients",
+        "nodes": [
+          {
+            "id": "u",
+            "label": "Browser",
+            "detail": "people",
+            "lane": "path"
+          }
+        ]
+      },
+      {
+        "title": "App",
+        "nodes": [
+          {
+            "id": "a",
+            "label": "Web app",
+            "detail": "Node",
+            "lane": "path"
+          },
+          {
+            "id": "c",
+            "label": "Admin \"console\"",
+            "detail": "",
+            "lane": "control"
+          }
+        ]
+      },
+      {
+        "title": "Data",
+        "nodes": [
+          {
+            "id": "d",
+            "label": "PostgreSQL",
+            "detail": ":5432",
+            "lane": "path"
+          }
+        ]
+      },
+      {
+        "title": "Ops",
+        "nodes": [
+          {
+            "id": "m",
+            "label": "Monitoring",
+            "detail": "",
+            "lane": "control"
+          }
+        ]
+      }
+    ],
+    "links": [
+      {
+        "from": "u",
+        "to": "a",
+        "label": "HTTPS",
+        "dashed": false
+      },
+      {
+        "from": "a",
+        "to": "d",
+        "label": "SQL :5432",
+        "dashed": false
+      },
+      {
+        "from": "c",
+        "to": "d",
+        "label": "",
+        "dashed": true
+      },
+      {
+        "from": "m",
+        "to": "ghost",
+        "label": "x",
+        "dashed": true
+      }
+    ]
+  },
+  "prompt": "Draw a clear, professional workflow / architecture diagram of the software system \"Shop 'main'\" as one flat infographic, 16:9, on a dark navy background.\nStyle: rounded boxes with thin teal and violet outlines, thin arrows with arrowheads, all text in crisp white sans-serif, large and easy to read, generous spacing, nothing overlapping, nothing cut off.\nLayout: the columns run from LEFT to RIGHT in the order a request travels, closest to the user first. The boxes of a column stand above each other.\n\nCOLUMNS AND BOXES:\nColumn 1 (small heading \"Clients\"): \"Browser\"\nColumn 2 (small heading \"App\"): \"Web app\"; in a band below the main row, drawn with dashed arrows: \"Admin 'console'\"\nColumn 3 (small heading \"Data\"): \"PostgreSQL\"\nColumn 4 (small heading \"Ops\"): (no box in the main row); in a band below the main row, drawn with dashed arrows: \"Monitoring\"\n\nARROWS (each one starts at the first box and its arrowhead points at the second):\n\"Browser\" -> \"Web app\", label on the arrow: \"HTTPS\"\n\"Web app\" -> \"PostgreSQL\", label on the arrow: \"SQL :5432\"\n\"Admin 'console'\" -> \"PostgreSQL\" (dashed)\n\"Monitoring\" -> \"ghost\", label on the arrow: \"x\" (dashed)\n\nRULES: spell every word EXACTLY as it is written between the quotation marks above, character for character, and put no other text anywhere in the picture (no title, no caption, no extra words, no numbers that are not given). Draw every box once and every arrow between exactly the two boxes named. Do not add, invent or leave out anything."
+}

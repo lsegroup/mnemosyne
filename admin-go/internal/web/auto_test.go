@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -53,12 +54,31 @@ None.`
 const planAnswer = `{"title":"Alpha","diagrams":[{"name":"Overview","columns":[{"title":"CLIENTS","nodes":[{"id":"u","label":"Browser"}]},{"title":"APP","nodes":[{"id":"a","label":"Server","detail":"Node, :40001"}]}],"links":[{"from":"u","to":"a","label":"HTTPS"}]}]}`
 
 // llmServer answers like an AI provider: an article for the writer, a diagram plan for the architect.
-func llmServer(t *testing.T, planText string) (*httptest.Server, *[]map[string]any) {
+// fakeImages is what the fake provider got asked to paint, and whether it should refuse.
+type fakeImages struct {
+	bodies []map[string]any
+	fail   bool
+}
+
+// fakePNG is the picture the fake image model returns.
+var fakePNG = []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 1}
+
+func llmServer(t *testing.T, planText string) (*httptest.Server, *[]map[string]any, *fakeImages) {
 	var seen []map[string]any
+	images := &fakeImages{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/models":
-			_, _ = w.Write([]byte(`{"data":[{"id":"muse-spark-1.3-contributor"},{"id":"mystery-model"}]}`))
+			_, _ = w.Write([]byte(`{"data":[{"id":"muse-spark-1.3-contributor"},{"id":"mystery-model"},{"id":"muse-image-1.0"}]}`))
+		case "/v1/images/generations":
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			images.bodies = append(images.bodies, body)
+			if images.fail {
+				w.WriteHeader(500)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"b64_json": base64.StdEncoding.EncodeToString(fakePNG)}}})
 		case "/v1/chat/completions":
 			var body map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&body)
@@ -78,7 +98,7 @@ func llmServer(t *testing.T, planText string) (*httptest.Server, *[]map[string]a
 		}
 	}))
 	t.Cleanup(srv.Close)
-	return srv, &seen
+	return srv, &seen, images
 }
 
 func writeNote(t *testing.T, dir, project, id, observed, body string) {
@@ -98,17 +118,21 @@ type autoRig struct {
 	cookie string
 	llm    *httptest.Server
 	seen   *[]map[string]any
+	images *fakeImages
+	// provider is the id of the fake provider
+	provider string
 }
 
 func newAutoRig(t *testing.T, model string, plan string) *autoRig {
 	h := newHarness(t, withLocal(nil))
-	llm, seen := llmServer(t, plan)
+	llm, seen, images := llmServer(t, plan)
 	cookie, _ := h.localCookie("Admin", "correct horse")
 	writeNote(t, h.dir, "alpha", "alpha-one", "2026-10-20", "Alpha runs on :3000. password: hunter2hunter2")
 	writeNote(t, h.dir, "alpha", "alpha-two", "2026-10-21", "More about alpha.")
 	writeNote(t, h.dir, "beta", "beta-one", "2026-10-22", "Beta.")
-	r := &autoRig{harness: h, cookie: cookie, llm: llm, seen: seen}
+	r := &autoRig{harness: h, cookie: cookie, llm: llm, seen: seen, images: images}
 	id := h.api(cookie, "POST", "/providers", `{"label":"Fake AI","kind":"openai-compatible","baseUrl":"`+llm.URL+`/v1","apiKey":"sk-test-key-1234567890"}`).json(t)["id"].(string)
+	r.provider = id
 	h.api(cookie, "POST", "/providers/"+id+"/models", "")
 	if model != "" {
 		if got := h.api(cookie, "PUT", "/llm/jobs/text", `{"model":{"providerId":"`+id+`","model":"`+model+`"}}`); got.status != 200 {

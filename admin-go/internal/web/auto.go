@@ -139,6 +139,9 @@ type autoModel struct {
 	priced bool
 	tj, ij jobs.Effective
 	key    string
+	// pictureUSD is what the image model's picture costs per diagram job: zero when no image model is chosen, nil when the chosen one has no
+	// list price (the cost of a diagram job then cannot be limited).
+	pictureUSD *float64
 }
 
 // autoModel is the model for TEXT (it also plans the charts) and everything that decides what a call can cost, as one fingerprint; nil
@@ -154,7 +157,25 @@ func (s *Server) autoModel() (*autoModel, error) {
 	}
 	tj, ij := jobs.Effect(jobs.Text, stored[jobs.Text]), jobs.Effect(jobs.Image, stored[jobs.Image])
 	_, priced := engine.EstimateUSD(model, 1, 1)
-	return &autoModel{label: p.Label + " / " + model, model: model, priced: priced, tj: tj, ij: ij, key: auto.ModelKey(p.ID, model, tj, ij)}, nil
+	m := &autoModel{label: p.Label + " / " + model, model: model, priced: priced, tj: tj, ij: ij}
+	zero := 0.0
+	m.pictureUSD = &zero
+	ip, im, err := s.providers.Assigned(jobs.Image)
+	if err != nil {
+		return nil, err
+	}
+	if ip != nil {
+		// the image model paints the workflow diagram: it is named in the agreement, part of its key and of what a diagram job can cost
+		m.label += ", and the pictures by " + ip.Label + " / " + im
+		m.key = auto.ModelKey(p.ID, model, tj, ij, ip.ID, im)
+		m.pictureUSD = nil
+		if usd, ok := engine.ImagePriceUSD(im); ok {
+			m.pictureUSD = &usd
+		}
+	} else {
+		m.key = auto.ModelKey(p.ID, model, tj, ij)
+	}
+	return m, nil
 }
 
 type autoStateInfo struct {
@@ -193,11 +214,19 @@ func (s *Server) autoFacts(project string, m *autoModel) autoFactsInfo {
 		}
 		return nil
 	}
+	// a diagram job is the text call that plans it plus the picture the image model paints (one price per picture)
+	withPicture := func(v *float64) *float64 {
+		if v == nil || m.pictureUSD == nil {
+			return nil
+		}
+		sum := *v + *m.pictureUSD
+		return &sum
+	}
 	return autoFactsInfo{state: st.state, est: auto.Estimate{
 		TextTypical:   usd(prompt.InputTokens, min(12_000, m.tj.MaxTokens)),
 		TextWorst:     usd(prompt.InputTokens, m.tj.MaxTokens),
-		ChartsTypical: usd(planIn, min(12_000, m.ij.MaxTokens)),
-		ChartsWorst:   usd(planIn, m.ij.MaxTokens),
+		ChartsTypical: withPicture(usd(planIn, min(12_000, m.ij.MaxTokens))),
+		ChartsWorst:   withPicture(usd(planIn, m.ij.MaxTokens)),
 	}}
 }
 

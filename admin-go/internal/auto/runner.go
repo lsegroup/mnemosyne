@@ -313,7 +313,7 @@ func usageWords(u *[]Usage) string {
 		return ""
 	}
 	var parts []string
-	for _, k := range []Kind{engine.Wiki, engine.Diagram} {
+	for _, k := range []Kind{engine.Wiki, engine.Diagram, engine.Painted} {
 		cost, calls := 0.0, 0
 		var models []string
 		seen := map[string]bool{}
@@ -331,8 +331,11 @@ func usageWords(u *[]Usage) string {
 			continue
 		}
 		label := "IMAGES"
-		if k == engine.Wiki {
+		switch k {
+		case engine.Wiki:
 			label = "TEXT"
+		case engine.Painted:
+			label = "PICTURES"
 		}
 		parts = append(parts, fmt.Sprintf("%s $%.4f in %d calls (%s)", label, cost, calls, joinComma(models)))
 	}
@@ -521,6 +524,11 @@ func (r *Runner) execute(id string) error {
 							x.Usage = &[]Usage{}
 						}
 						addUsage(x.Usage, Usage{Model: out.Model, Kind: kind, Calls: 1, InputTokens: out.InputTokens, OutputTokens: out.OutputTokens, ReasoningTokens: out.ReasoningTokens, USD: cost, MS: took})
+						// the image model's call inside a diagram job is its own line (it used no tokens, it is billed per picture)
+						if p := out.Picture; p != nil {
+							x.USD = round6(x.USD + p.USD)
+							addUsage(x.Usage, Usage{Model: p.Model, Kind: engine.Painted, Calls: 1, USD: p.USD, MS: p.MS})
+						}
 						if out.Warning != "" {
 							x.Warnings = append(x.Warnings, item.Project+": "+out.Warning)
 						}

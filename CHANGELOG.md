@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### The image model paints the workflow diagram
+- The image model chosen for the *Images* job in Admin -> LLM is used again: after the text model has planned the diagrams and Mnemosyne has drawn them exactly, the image model paints the workflow diagram as one picture from the same plan. It is given every box and arrow with the exact words and told to use no other text (the first image-only version misspelled them).
+- The painted picture is shown first on the project page and gets the first page after the index in the PDF; the exact diagrams stay beside it. With no image model chosen only the exact diagrams are made.
+- The agreement popup and Admin -> Auto show the image model and its price (about $0.01 per picture for `muse-image-1.0`); Auto counts the pictures as their own *PICTURES* line, and choosing or changing the image model needs a new Auto agreement.
+- A refusing image model costs only the picture: the diagrams are saved first and the person is told why.
+
 ## 0.6.1 — 2026-11-01
 
 The admin becomes a separate, compiled program; every person gets a profile with personal MCP tokens.

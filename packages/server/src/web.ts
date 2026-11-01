@@ -14,8 +14,9 @@ import { effectiveJob } from './ai-jobs.js';
 import { MemberStore, type MemberEntry } from './member-store.js';
 import { NodeIndex, fetchMemberships, matchProject, noteHashes, redact, slug, type GitLabProject } from './docs.js';
 import { outline, renderMarkdown } from './markdown.js';
-import { DocStore, approxTokens, buildDiagramPlanPrompt, buildWikiPrompt, changeHistory, estimateText, historyMarkdown, missingSections, toPdfImage, type DocMeta } from './docgen.js';
+import { DocStore, approxTokens, buildDiagramPlanPrompt, buildPicturePrompt, buildWikiPrompt, changeHistory, estimateText, historyMarkdown, imagePriceUsd, missingSections, toPdfImage, type DocMeta } from './docgen.js';
 import { chat } from './llm-call-chat.js';
+import { generateImage } from './llm-call-image.js';
 import { setHostPins } from './host-pins.js';
 import { PlanError, drawScene, layout, parsePlanSet, renderSvg, type DiagramPlan, type DiagramSet } from './diagram.js';
 import { buildPdf, type PdfInput } from './pdf.js';
@@ -640,6 +641,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       wiki = { meta: wanted, html: renderMarkdown(text, { article: true }), toc: outline(text, { article: true }) };
     }
     const diagrams = await docStore!.list(project, 'diagram');
+    const pictures = await docStore!.list(project, 'picture');
     const pdfs = await docStore!.list(project, 'pdf');
     const job = jobs.get(project);
     const nonce = randomBytes(16).toString('base64');
@@ -659,6 +661,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         wikiVersions: wikis,
         diagram: diagrams[0] ?? null,
         diagramVersions: diagrams,
+        picture: pictures[0] ?? null,
         pdf: pdfs[0] ?? null,
         pdfVersions: pdfs,
         busy: job?.state === 'running' ? job.kind : null,
@@ -719,6 +722,18 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     res.send(Buffer.from(renderSvg(layout(pic.plan), pic.plan)));
   });
 
+  // The workflow diagram the image model painted from the plan; png, jpeg or webp, sniffed from its bytes when it was stored.
+  router.get('/p/:project/picture/:id', async (req, res) => {
+    const g = await gate(req, res);
+    if (!g) return;
+    const meta = await docStore!.get(g.project, 'picture', String(req.params.id));
+    if (!meta || !DIAGRAM_MIME[meta.ext] || meta.ext === 'svg') return notFound(res, g.ds, 'This picture does not exist.');
+    res.setHeader('Content-Type', DIAGRAM_MIME[meta.ext]!);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(await docStore!.read(meta));
+  });
+
   router.get('/p/:project/pdf/:id', async (req, res) => {
     const g = await gate(req, res);
     if (!g) return;
@@ -763,15 +778,24 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     const wikiChars = Math.min((await docStore!.read(wiki)).length, 60_000);
     const typical = estimateText(text.model, approxTokens(wikiChars) + 1500, Math.min(12_000, ij.maxTokens)); // the article plus the rules; the real runs wrote about 11,800 tokens (thinking included)
     const worst = estimateText(text.model, approxTokens(wikiChars) + 1500, ij.maxTokens);
+    // the image model (Admin → LLM → Images) paints the workflow diagram as a picture from the plan: first on the project page and first in the PDF
+    const img = await providers!.getAssigned('image');
+    const imgUsd = img ? imagePriceUsd(img.model) : 0;
+    const total = (t: number | null) => (t === null || imgUsd === null ? null : t + imgUsd);
+    const typicalUsd = total(typical.usd);
+    const worstUsd = total(worst.usd);
     return {
-      key: `${text.provider.id}:${text.model}|plan:${ij.maxTokens}:${ij.userPrompt.length}:${ij.systemPrompt.length}${ij.reasoningEffort ? `:r=${ij.reasoningEffort}` : ''}`,
-      what: `One AI call: ${text.provider.label} reads the article and writes the plan of the diagrams (an overview and, for a bigger system, detail pictures: boxes, arrows, ports) as data. Mnemosyne then draws the pictures itself, so every word is spelled exactly. No image model is used.`,
+      key: `${text.provider.id}:${text.model}|plan:${ij.maxTokens}:${ij.userPrompt.length}:${ij.systemPrompt.length}${ij.reasoningEffort ? `:r=${ij.reasoningEffort}` : ''}${img ? `|picture:${img.provider.id}:${img.model}` : ''}`,
+      what: img
+        ? `Two AI calls: ${text.provider.label} reads the article and writes the plan of the diagrams (boxes, arrows, ports) as data, and Mnemosyne draws the pictures itself, so every word is spelled exactly. Then the image model ${img.provider.label} / ${img.model} paints the workflow diagram as a picture from that plan, for the project page and the PDF.`
+        : `One AI call: ${text.provider.label} reads the article and writes the plan of the diagrams (an overview and, for a bigger system, detail pictures: boxes, arrows, ports) as data. Mnemosyne then draws the pictures itself, so every word is spelled exactly. No image model is chosen in Admin → LLM → Images, so no picture of the workflow diagram is painted.`,
       facts: [
         ['Text model', `${text.provider.label} / ${text.model}`],
+        ...(img ? [['Image model', `${img.provider.label} / ${img.model}`]] : [['Image model', 'none chosen (Admin → LLM → Images)']]),
         ['Based on', `the article from ${wiki.generatedAt.slice(0, 16).replace('T', ' ')} UTC`],
-        ['Estimated cost', typical.usd === null || worst.usd === null ? 'unknown (no list price for this model)' : `about $${money(typical.usd)} (at most $${money(worst.usd)} if the whole ${ij.maxTokens.toLocaleString('en-US')}-token limit of the answer is used)`],
+        ['Estimated cost', typicalUsd === null || worstUsd === null ? 'unknown (no list price for this model)' : `about $${money(typicalUsd)} (at most $${money(worstUsd)} if the whole ${ij.maxTokens.toLocaleString('en-US')}-token limit of the answer is used${img ? `; the picture is about $${money(imgUsd ?? 0)} of it` : ''})`],
       ],
-      usd: worst.usd,
+      usd: worstUsd,
     };
   };
 
@@ -795,6 +819,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
    */
   const generate = async (project: string, kind: 'wiki' | 'diagram', user: string, glName: string | null, log: (e: AuditInput) => unknown) => {
     let warning: string | undefined;
+    let pictureUsd = 0;
     let used: { inputTokens: number; outputTokens: number; reasoningTokens?: number } = { inputTokens: 0, outputTokens: 0 };
     const thinking = (o: { reasoningTokens?: number }) => (o.reasoningTokens !== undefined ? `, ${o.reasoningTokens} of it reasoning` : '');
     {
@@ -842,8 +867,25 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
           entityId: meta.id,
           description: `Architecture diagrams drawn by Mnemosyne from a plan written by ${text.model} (${set.pictures.length} picture${set.pictures.length > 1 ? 's' : ''}: ${set.pictures.map((p) => p.name).join(', ')}; ${boxes} boxes, ${arrows} arrows; ${out.inputTokens} tokens in, ${out.outputTokens} out${thinking(out)})${set.dropped.length ? `; left out of the plan: ${set.dropped.length}` : ''}`,
         });
+        // the image model chosen in Admin → LLM → Images paints the workflow diagram as a picture, from the exact plan above (every word is given
+        // to it). The exact diagrams are saved already, so a failure here costs only the picture; the person is told why.
+        const img = await providers!.getAssigned('image');
+        if (img) {
+          try {
+            const pic = await generateImage(img.provider, img.model, buildPicturePrompt(overview!.plan));
+            const ext = pic.mime === 'image/png' ? 'png' : pic.mime === 'image/jpeg' ? 'jpg' : 'webp';
+            const pm = await docStore!.save({ kind: 'picture', id: meta.id, project, model: `${img.provider.label} / ${img.model}`, by: user, basedOn: meta.id, ext }, pic.bytes);
+            pictureUsd = imagePriceUsd(img.model) ?? 0;
+            void log({ event: 'ai_done', entityType: 'docs_picture', entityId: pm.id, description: `Workflow diagram painted by ${img.provider.label} / ${img.model} from the plan (${Math.round(pic.bytes.length / 1024)} KB ${pic.mime.slice(6)})` });
+          } catch (err) {
+            const why = failureMessage(err, 'picture', project);
+            warning = `${warning ? `${warning} ` : ''}The exact diagrams were saved, but the image model ${img.model} could not paint the workflow diagram: ${why}`;
+            void log({ event: 'ai_failed', entityType: 'docs_picture', description: `Workflow diagram by ${img.provider.label} / ${img.model} failed: ${why}` });
+          }
+        }
       }
-      return { model: text.model, inputTokens: used.inputTokens, outputTokens: used.outputTokens, reasoningTokens: used.reasoningTokens, usd: estimateText(text.model, used.inputTokens, used.outputTokens).usd, warning };
+      const textUsd = estimateText(text.model, used.inputTokens, used.outputTokens).usd;
+      return { model: text.model, inputTokens: used.inputTokens, outputTokens: used.outputTokens, reasoningTokens: used.reasoningTokens, usd: textUsd === null ? null : textUsd + pictureUsd, warning };
     }
   };
 
@@ -934,11 +976,17 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         const scene = layout(plan);
         return { width: scene.width, height: scene.height, draw: (d, x, y, s) => drawScene(d, scene, x, y, s) };
       };
+      // the workflow diagram the image model painted comes first (the one that goes with the newest diagrams)
+      const picture = await docStore!.latest(g.project, 'picture');
+      if (picture) {
+        const png = await toPdfImage({ bytes: await docStore!.read(picture), mime: picture.ext === 'png' ? 'image/png' : picture.ext === 'jpg' ? 'image/jpeg' : 'image/webp' });
+        if (png) pics.push({ name: 'Workflow diagram', caption: `Painted ${picture.generatedAt.slice(0, 16).replace('T', ' ')} UTC by ${picture.model} from the exact plan on the next page`, png });
+      }
       if (diagram) {
         const made = `Created ${diagram.generatedAt.slice(0, 16).replace('T', ' ')} UTC by ${diagram.model}`;
         if (diagram.ext === 'svg' && diagram.plan) {
           // drawn by Mnemosyne: the PDF paints the same plans as vectors (sharp at any zoom, selectable text)
-          pics.push({ name: 'Workflow diagram', caption: made, vector: vector(diagram.plan) });
+          pics.push({ name: 'Architecture diagram', caption: made, vector: vector(diagram.plan) });
           for (const p of diagram.pictures ?? []) pics.push({ name: `Diagram: ${p.name}`, caption: `${p.name} - ${made}`, vector: vector(p.plan) });
         } else if (diagram.ext !== 'svg') {
           const png = await toPdfImage({ bytes: await docStore!.read(diagram), mime: diagram.ext === 'png' ? 'image/png' : diagram.ext === 'jpg' ? 'image/jpeg' : 'image/webp' });
@@ -957,7 +1005,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         logo: (await pdfLogo()) ?? undefined,
       });
       const meta: DocMeta = await docStore!.save({ kind: 'pdf', project: g.project, model: wiki.model, by: g.ds.s.u, basedOn: wiki.id, diagram: pics.length ? diagram?.id : undefined, noteCount: wiki.noteCount, ext: 'pdf' }, pdf);
-      void rec(req, { event: 'create', entityType: 'docs_pdf', entityId: meta.id, entityName: g.project, user: g.ds.s.u, description: `Project PDF built from the article of ${wiki.generatedAt.slice(0, 16).replace('T', ' ')} UTC${pics.length ? ` with ${pics.length === 1 ? 'the workflow diagram' : `${pics.length} diagram pages`}` : ''}` });
+      void rec(req, { event: 'create', entityType: 'docs_pdf', entityId: meta.id, entityName: g.project, user: g.ds.s.u, description: `Project PDF built from the article of ${wiki.generatedAt.slice(0, 16).replace('T', ' ')} UTC${pics.length ? ` with ${pics.length === 1 ? 'the workflow diagram' : `${pics.length} diagram pages`}` : ''}${picture ? ' and the painted workflow diagram' : ''}` });
       res.json({ id: meta.id });
     } catch (err) {
       console.error('pdf:', (err as Error).message);

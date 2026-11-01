@@ -6,15 +6,15 @@ import { redact } from './docs.js';
 import type { ImageResult } from './llm-call-image.js';
 
 /**
- * Generated project documentation: a Wikipedia-style document written from a project's notes, an
- * optional workflow-diagram image, and a PDF built from both. Every artefact is stored with its
+ * Generated project documentation: a Wikipedia-style document written from a project's notes, the architecture
+ * diagrams drawn from a plan, the workflow diagram painted by the image model from the same plan, and a PDF built from all of them. Every artefact is stored with its
  * date stamp, so earlier versions stay available.
  *
  * This file builds prompts and stores results; the actual model calls live in llm-call-chat.ts and
  * llm-call-image.ts (the only places that spend money).
  */
 
-export type DocKind = 'wiki' | 'diagram' | 'pdf';
+export type DocKind = 'wiki' | 'diagram' | 'picture' | 'pdf';
 
 export interface DocMeta {
   kind: DocKind;
@@ -31,7 +31,7 @@ export interface DocMeta {
   noteHashes?: Record<string, string>;
   inputTokens?: number;
   outputTokens?: number;
-  /** The wiki version a diagram or PDF was made from. */
+  /** The wiki version a diagram or PDF was made from (for a picture: the diagram it was made together with, which has the same id). */
   basedOn?: string;
   /** The diagram a PDF embeds, if there was one. */
   diagram?: string;
@@ -106,6 +106,9 @@ const PRICES: Record<string, { in: number; out: number }> = {
   'muse-wonder-1.0': { in: 4.0, out: 20.0 },
 };
 export const IMAGE_PRICE_USD = 0.01; // muse-image-1.0, per image
+/** List price per picture; a model that is not here has no known price. */
+const IMAGE_PRICES: Record<string, number> = { 'muse-image-1.0': IMAGE_PRICE_USD };
+export const imagePriceUsd = (model: string): number | null => IMAGE_PRICES[model] ?? null;
 
 export const approxTokens = (chars: number) => Math.ceil(chars / 4);
 
@@ -229,6 +232,34 @@ export function buildDiagramPlanPrompt(project: string, wiki: string, tpl: Promp
     system: tpl.system?.trim() ? tpl.system : DEFAULT_PLAN_SYSTEM,
     user: fillTemplate(tpl.user?.trim() ? tpl.user : DEFAULT_PLAN_USER, { project, article: wiki.slice(0, 60_000) }),
   };
+}
+
+/**
+ * What the IMAGE MODEL is told when it paints the workflow diagram (Admin -> LLM -> Images). The text model has already planned the
+ * system as data (diagram.ts validates it), so the picture is described box by box and arrow by arrow with the exact words: an image
+ * model draws text as pixels and spells badly when it has to invent the words, so it is given every word and told to use no other.
+ * Mnemosyne also draws the same plan itself (exact, vector) next to this picture.
+ */
+export function buildPicturePrompt(plan: DiagramPlan): string {
+  const q = (t: string) => `"${t.replace(/"/g, "'")}"`;
+  const label = new Map<string, string>();
+  for (const c of plan.columns) for (const n of c.nodes) label.set(n.id, n.label);
+  const lines = [
+    `Draw a clear, professional workflow / architecture diagram of the software system ${q(plan.title)} as one flat infographic, 16:9, on a dark navy background.`,
+    'Style: rounded boxes with thin teal and violet outlines, thin arrows with arrowheads, all text in crisp white sans-serif, large and easy to read, generous spacing, nothing overlapping, nothing cut off.',
+    'Layout: the columns run from LEFT to RIGHT in the order a request travels, closest to the user first. The boxes of a column stand above each other.',
+    '',
+    'COLUMNS AND BOXES:',
+  ];
+  plan.columns.forEach((c, i) => {
+    const path = c.nodes.filter((n) => n.lane !== 'control').map((n) => q(n.label));
+    const control = c.nodes.filter((n) => n.lane === 'control').map((n) => q(n.label));
+    lines.push(`Column ${i + 1} (small heading ${q(c.title)}): ${path.join(', ') || '(no box in the main row)'}${control.length ? `; in a band below the main row, drawn with dashed arrows: ${control.join(', ')}` : ''}`);
+  });
+  lines.push('', 'ARROWS (each one starts at the first box and its arrowhead points at the second):');
+  for (const l of plan.links) lines.push(`${q(label.get(l.from) ?? l.from)} -> ${q(label.get(l.to) ?? l.to)}${l.label ? `, label on the arrow: ${q(l.label)}` : ''}${l.dashed ? ' (dashed)' : ''}`);
+  lines.push('', 'RULES: spell every word EXACTLY as it is written between the quotation marks above, character for character, and put no other text anywhere in the picture (no title, no caption, no extra words, no numbers that are not given). Draw every box once and every arrow between exactly the two boxes named. Do not add, invent or leave out anything.');
+  return lines.join('\n');
 }
 
 /** PDFs cannot embed WebP; convert it (or pass PNG/JPEG through). Returns null if conversion is impossible. */

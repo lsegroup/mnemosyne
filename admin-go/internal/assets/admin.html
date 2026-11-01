@@ -220,10 +220,24 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
     <div class="row"><button class="btn primary" type="submit">Save Text settings</button><button class="btn" type="button" data-reset="text">Reset to defaults</button><span id="msg-text" class="msg"></span></div>
   </form>
   <form class="job" data-role="image" id="job-image">
-    <div class="jobhead"><h4>Diagrams</h4><span class="tag ai">AI call · costs money</span></div>
-    <p class="sub"><b>There is no model to choose here.</b> The text model (the one chosen for Text) reads the article and writes a PLAN as data using the prompts below, and Mnemosyne itself draws every picture from that plan, so every word is spelled exactly and the layout is always the same. No image model is called. The plan holds an overview picture and, for a bigger system, detail pictures by topic (at most 5 pictures, each with at most 10 boxes and 14 arrows, columns of boxes and the arrows between them). Runs when an administrator presses “Create workflow diagram” and agrees to the cost. The limit, sampling values and prompts below belong to the text call that writes the plan.</p>
-    <p class="sub">Model used: the one chosen for Text.</p>
-    <label class="wide" hidden>Model<select id="m-image"></select></label>
+    <div class="jobhead"><h4>Images</h4><span class="tag ai">AI call · costs money</span></div>
+    <p class="sub">Writes the project documentation page from all notes of a project (product description, hardware and software requirements, disaster recovery). Runs when an administrator presses “Generate documentation” and agrees to the cost.',
+    usesAi: true,
+    systemLabel: 'System prompt - who the AI is and the rules it must follow',
+    userLabel: 'Instruction - what the AI is asked to write',
+    placeholders: [
+      { name: 'project', meaning: 'the project name (GitLab project name when one matches)', required: false },
+      { name: 'notes_count', meaning: 'how many notes are sent', required: false },
+      { name: 'notes', meaning: 'all notes of the project, newest first, credentials masked', required: true },
+    ],
+    defaults: { maxTokens: 50_000, timeoutMinutes: 20, systemPrompt: DEFAULT_WIKI_SYSTEM, userPrompt: DEFAULT_WIKI_USER },
+  },
+  image: {
+    role: 'image',
+    title: 'Images',
+    summary:
+      'Creates the workflow diagram. Step 1: the text model (the one chosen for Text) reads the article and writes a PLAN as data using the prompts below - an overview picture and, for a bigger system, detail pictures by topic (at most 5 pictures, each with at most 10 boxes and 14 arrows, columns of boxes and the arrows between them) - and Mnemosyne itself draws every picture from that plan, so every word of these exact diagrams is spelled right and the layout is always the same. Step 2: the image model chosen here paints the workflow diagram as one picture from the same plan; it is given every word of the plan and told to use no other text. That picture is shown first on the project page and gets the first page after the index in the PDF; the exact diagrams stay next to it. Leave the model unset to get only the exact diagrams. Runs when an administrator presses “Create workflow diagram” and agrees to the cost (the image model is billed per picture, about $0.01 for muse-image-1.0). The limit, sampling values and prompts below belong to the text call that writes the plan.</p>
+    <label class="wide">Model<select id="m-image"></select><span class="hint">The image model that paints the workflow diagram, picked from the models your keys can use (step 3). Leave it unset for the exact diagrams only. The settings below are for the text call that plans the diagram.</span></label>
     <div class="nums">
       <label>Max output tokens<input id="maxTokens-image" inputmode="numeric" placeholder="50,000" autocomplete="off"><span class="hint">The most the AI may write in one call. You pay per token written, so this is the cost ceiling of a call; the agreement popup shows the worst case. Big projects and reasoning models need a high limit. Default 50,000, allowed 256 to 1,000,000.</span></label>
       <label>Temperature<input id="temperature-image" inputmode="decimal" placeholder="provider default" autocomplete="off"><span class="hint">0 to 2. Lower = more factual and repeatable, higher = more varied. Empty = the provider's own default (the value is not sent).</span></label>
@@ -233,7 +247,7 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
     </div>
     <label class="wide">System prompt for the diagram plan - who the AI is and the rules<textarea id="sys-image" rows="6" spellcheck="false"></textarea></label>
     <label class="wide">Instruction for the diagram plan - what the picture must show (the AI must answer with the JSON plan)<textarea id="usr-image" rows="14" spellcheck="false"></textarea><span class="hint">Placeholders the server fills in: <code>{{project}}</code> = the project name · <code>{{article}}</code> = the generated documentation article (first 60,000 characters) <b>(required)</b></span></label>
-    <div class="row"><button class="btn primary" type="submit">Save Diagram settings</button><button class="btn" type="button" data-reset="image">Reset to defaults</button><span id="msg-image" class="msg"></span></div>
+    <div class="row"><button class="btn primary" type="submit">Save Images settings</button><button class="btn" type="button" data-reset="image">Reset to defaults</button><span id="msg-image" class="msg"></span></div>
   </form>
   <form class="job" data-role="pdf" id="job-pdf">
     <div class="jobhead"><h4>PDF</h4><span class="tag">no AI call yet</span></div>
@@ -327,7 +341,7 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
         <p class="sumline" id="autoTotals" hidden></p>
         <div class="tablewrap"><table><thead><tr><th class="nw">Start (UTC)</th><th class="nw">End (UTC)</th><th class="nw">Runtime</th><th>Trigger</th><th>Updated</th><th>Unchanged</th><th>Failed / not reached</th><th>Tokens in / out</th><th>Cost</th><th>Result</th></tr></thead>
           <tbody id="autoRuns"><tr><td colspan="10" class="muted">Loading…</td></tr></tbody></table></div>
-        <p class="hint2" style="margin:10px 0 0">Under every run: what each model used for TEXT (the articles) and for IMAGES (the AI flow charts), and how long its calls took. IMAGES is not an image model: the AI writes the plan as text, Mnemosyne draws the pictures, so only those text tokens are used. The cost is the tokens the provider reported times the list price of the model; what the provider really charges you is on its own billing page. Every automatic AI call is also written to the Audit tab (who agreed, which project, tokens, cost).</p>
+        <p class="hint2" style="margin:10px 0 0">Under every run: what each model used for TEXT (the articles), for IMAGES (the AI flow charts: the text model writes the plan as text, Mnemosyne draws the exact diagrams from it) and for PICTURES (the image model chosen under LLM → Images paints the workflow diagram from that plan, billed per picture, no tokens), and how long its calls took. The cost is the tokens the provider reported times the list price of the model; what the provider really charges you is on its own billing page. Every automatic AI call is also written to the Audit tab (who agreed, which project, tokens, cost).</p>
       </div>
     </section>
 
@@ -482,7 +496,7 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
   ROLES.forEach(function(role){
     $('job-'+role).addEventListener('submit',function(ev){
       ev.preventDefault();note('msg-'+role,'');
-      var body={},v=role==='image'?'':$('m-'+role).value;
+      var body={},v=$('m-'+role).value;
       if(v){var i=v.indexOf('::');body.model={providerId:v.slice(0,i),model:v.slice(i+2)}}
       ['maxTokens','temperature','topP','reasoningEffort','timeoutMinutes'].forEach(function(k){body[k]=$(k+'-'+role).value.trim()});
       body.systemPrompt=$('sys-'+role).value;body.userPrompt=$('usr-'+role).value;
@@ -708,7 +722,7 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
   function num(n){return Number(n).toLocaleString('en-US')}
   function usd4(n){return '$'+Number(n).toFixed(4)}
   function fmtS(iso){return iso?iso.slice(0,19).replace('T',' '):''}
-  var KIND={wiki:'TEXT (articles)',diagram:'IMAGES (AI flow charts)'};
+  var KIND={wiki:'TEXT (articles)',diagram:'IMAGES (AI flow charts, planned by the text model)',picture:'PICTURES (workflow diagram, painted by the image model)'};
   // what each model used in one run: one row per model and kind, and a total when there is more than one
   function usageTable(u){
     var t=document.createElement('table');t.className='use';
@@ -751,15 +765,15 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
   function autoTotals(runs){
     var el=$('autoTotals'),done=(runs||[]).filter(function(r){return r.finishedAt});
     if(!done.length){el.hidden=true;return}
-    var ms=0,i=0,o=0,u=0,miss=0,k={wiki:{c:0,u:0,ms:0},diagram:{c:0,u:0,ms:0}};
+    var ms=0,i=0,o=0,u=0,miss=0,k={wiki:{c:0,u:0,ms:0},diagram:{c:0,u:0,ms:0},picture:{c:0,u:0,ms:0}};
     done.forEach(function(r){
       ms+=Date.parse(r.finishedAt)-Date.parse(r.startedAt);i+=r.inputTokens;o+=r.outputTokens;u+=r.usd;
-      if(r.usage)r.usage.forEach(function(x){k[x.kind].c+=x.calls;k[x.kind].u+=x.usd;k[x.kind].ms+=x.ms});else if(r.inputTokens)miss++;
+      if(r.usage)r.usage.forEach(function(x){var z=k[x.kind];if(!z)return;z.c+=x.calls;z.u+=x.usd;z.ms+=x.ms});else if(r.inputTokens)miss++;
     });
     el.textContent='';
     function kv(l,v){span(el,l+' ');var b=document.createElement('b');b.textContent=v;el.appendChild(b);span(el,'   ')}
     kv('All '+done.length+(done.length===1?' run':' runs')+' below:',dur(ms));kv('·',num(i)+' tokens in / '+num(o)+' out');kv('·',usd4(u));
-    kv('— TEXT',usd4(k.wiki.u)+' ('+num(k.wiki.c)+' calls, '+dur(k.wiki.ms)+')');kv('· IMAGES',usd4(k.diagram.u)+' ('+num(k.diagram.c)+' calls, '+dur(k.diagram.ms)+')');
+    kv('— TEXT',usd4(k.wiki.u)+' ('+num(k.wiki.c)+' calls, '+dur(k.wiki.ms)+')');kv('· IMAGES',usd4(k.diagram.u)+' ('+num(k.diagram.c)+' calls, '+dur(k.diagram.ms)+')');kv('· PICTURES',usd4(k.picture.u)+' ('+num(k.picture.c)+' calls, '+dur(k.picture.ms)+')');
     if(miss)span(el,'· the split is missing for '+miss+(miss===1?' run':' runs'),'muted');
     el.hidden=false;
   }

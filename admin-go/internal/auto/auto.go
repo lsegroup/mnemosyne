@@ -76,7 +76,8 @@ type Config struct {
 	Agreement *Agreement `json:"agreement,omitempty"`
 }
 
-// Usage is what one kind of AI call of one model used in one run. "wiki" is TEXT, "diagram" is IMAGES (the AI flow charts).
+// Usage is what one kind of AI call of one model used in one run. "wiki" is TEXT, "diagram" is IMAGES (the text call that plans the AI flow
+// charts), "picture" is PICTURES (the image model that paints the workflow diagram).
 type Usage struct {
 	Model           string  `json:"model"`
 	Kind            Kind    `json:"kind"`

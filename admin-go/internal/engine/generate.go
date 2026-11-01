@@ -15,11 +15,22 @@ import (
 // Kind is what one AI job writes: the article ("wiki", TEXT) or the diagrams ("diagram", the AI flow charts).
 type Kind string
 
-// The two kinds of AI job.
+// The two kinds of AI job, and Painted: the usage line of the image model's call inside a Diagram job (it is not a job of its own).
 const (
 	Wiki    Kind = "wiki"
 	Diagram Kind = "diagram"
+	Painted Kind = "picture"
 )
+
+// PictureOutcome is the workflow diagram the image model painted inside a Diagram job.
+type PictureOutcome struct {
+	// Model is the image model (its id, e.g. "muse-image-1.0").
+	Model string
+	// USD is the list price of one picture; zero when the model has no list price.
+	USD float64
+	// MS is how long the call took.
+	MS int64
+}
 
 // Outcome is what one AI job used.
 type Outcome struct {
@@ -31,6 +42,8 @@ type Outcome struct {
 	// USD is counted from the reported tokens; nil when the model has no list price.
 	USD     *float64
 	Warning string
+	// Picture is set when the image model painted the workflow diagram; its cost is NOT in USD.
+	Picture *PictureOutcome
 }
 
 // Generator runs ONE AI job for one project.
@@ -86,6 +99,7 @@ func (g *Generator) Generate(project string, kind Kind, user, glName string, log
 	label := provider.Label + " / " + model
 	var used ChatResult
 	warning := ""
+	var picture *PictureOutcome
 
 	opts := func(e jobs.Effective) ChatOptions {
 		return ChatOptions{MaxTokens: e.MaxTokens, Temperature: e.Temperature, TopP: e.TopP, ReasoningEffort: e.ReasoningEffort, Timeout: time.Duration(e.TimeoutMinutes) * time.Minute}
@@ -174,8 +188,43 @@ func (g *Generator) Generate(project string, kind Kind, user, glName string, log
 			plural = "s"
 		}
 		log(audit.Input{Event: "ai_done", EntityID: meta.ID, Description: fmt.Sprintf("Architecture diagrams drawn by Mnemosyne from a plan written by %s (%d picture%s: %s; %d boxes, %d arrows; %d tokens in, %d out%s)%s", model, len(set.Pictures), plural, strings.Join(names, ", "), boxes, arrows, out.InputTokens, out.OutputTokens, thinking(out.ReasoningTokens), tail)})
+
+		// The image model chosen in Admin -> LLM -> Images paints the workflow diagram as a picture, from the exact plan above (every word is
+		// given to it). The exact diagrams are saved already, so a failure here costs only the picture and never fails (or repeats) the job.
+		ip, im, aerr := g.Providers.Assigned(jobs.Image)
+		if aerr == nil && ip != nil {
+			began := time.Now()
+			pic, perr := GenerateImage(*ip, im, BuildPicturePrompt(plan), 0)
+			imgLabel := ip.Label + " / " + im
+			if perr == nil {
+				var pm DocMeta
+				if pm, perr = g.Docs.Save(DocMeta{Kind: "picture", ID: meta.ID, Project: project, Model: imgLabel, By: user, BasedOn: meta.ID, Ext: pic.Ext}, pic.Bytes); perr == nil {
+					usd, _ := ImagePriceUSD(im)
+					picture = &PictureOutcome{Model: im, USD: usd, MS: time.Since(began).Milliseconds()}
+					log(audit.Input{Event: "ai_done", EntityType: "docs_picture", EntityID: pm.ID, Description: fmt.Sprintf("Workflow diagram painted by %s from the plan (%d KB %s)", imgLabel, len(pic.Bytes)/1024, strings.TrimPrefix(pic.Mime, "image/"))})
+				}
+			}
+			if perr != nil {
+				why := perr.Error()
+				var ve *jobs.ValidationError
+				var ue *UnreachableError
+				switch {
+				case errors.As(perr, &ve):
+					why = ve.Msg
+				case errors.As(perr, &ue):
+					why = ue.Msg
+				default:
+					why = "the picture could not be stored (" + why + ")"
+				}
+				if warning != "" {
+					warning += " "
+				}
+				warning += fmt.Sprintf("The exact diagrams were saved, but the image model %s could not paint the workflow diagram: %s", im, why)
+				log(audit.Input{Event: "ai_failed", EntityType: "docs_picture", Description: fmt.Sprintf("Workflow diagram by %s failed: %s", imgLabel, why)})
+			}
+		}
 	}
-	o := Outcome{Model: model, InputTokens: used.InputTokens, OutputTokens: used.OutputTokens, ReasoningTokens: used.ReasoningTokens, Warning: warning}
+	o := Outcome{Model: model, InputTokens: used.InputTokens, OutputTokens: used.OutputTokens, ReasoningTokens: used.ReasoningTokens, Warning: warning, Picture: picture}
 	if usd, ok := EstimateUSD(model, used.InputTokens, used.OutputTokens); ok {
 		o.USD = &usd
 	}

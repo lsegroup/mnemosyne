@@ -250,24 +250,3 @@ func TestTheLicensedDomainIsTheHostOfThePublicURLUnlessOneIsSet(t *testing.T) {
 		eq(t, h.srv.lic.Status().Domain, "lumanet.info", "domain set as "+written)
 	}
 }
-
-// The diagrams are planned by the Text model and drawn by Mnemosyne itself: there is no model to choose for them, and the page must not
-// offer one (it used to offer image models, which were never used).
-func TestTheDiagramsCardOffersNoModelAndNeverSavesOne(t *testing.T) {
-	h := newHarness(t, withLocal(nil))
-	cookie, _ := h.localCookie("Admin", "correct horse")
-	page := h.do(call{path: "/admin/", cookie: cookie}).body
-	a := strings.Index(page, `id="job-image"`)
-	b := strings.Index(page[a:], "</form>")
-	card := page[a : a+b]
-	has(t, card, "<h4>Diagrams</h4>")
-	has(t, card, "There is no model to choose here.")
-	has(t, card, "Model used: the one chosen for Text.")
-	has(t, card, `<label class="wide" hidden>Model<select id="m-image">`)
-	if strings.Contains(card, "Picked from the models") {
-		t.Error("the Diagrams card still offers a model")
-	}
-	has(t, page, "Save Diagram settings")
-	// the script does not send a model for this card
-	has(t, page, "v=role==='image'?'':$('m-'+role).value;")
-}
