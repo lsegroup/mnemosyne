@@ -107,6 +107,45 @@ WantedBy=multi-user.target
 If it shares a host with a firewall that reverts unknown rules, keep it on localhost and
 proxy through the existing web server rather than opening a port.
 
+## Run — the admin program in front of the server
+
+The admin (`/mnemosyne/admin`) is the compiled program in `bin/` (see the README; checksums in `bin/SHA256SUMS`). It becomes the front door:
+it listens where the server listened (`127.0.0.1:40001`), serves `/mnemosyne/admin` itself, starts the server on `127.0.0.1:40002` and passes
+everything else on to it. A reverse proxy in front keeps sending `/mnemosyne/` to `127.0.0.1:40001`, so nothing changes for people or MCP clients.
+It reads the same environment file as the server. Install it and swap the unit:
+
+```bash
+sudo install -m 0755 bin/mnemosyne-admin-linux-amd64 /usr/local/bin/mnemosyne-admin     # linux-arm64 on ARM
+```
+
+```ini
+# /etc/systemd/system/mnemosyne.service  (replace the ExecStart of the plain server unit)
+[Unit]
+Description=mnemosyne - self-hosted AI team memory (admin and front door)
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/mnemosyne.env
+Environment=MNEMOSYNE_ADMIN_LISTEN=127.0.0.1:40001
+Environment=MNEMOSYNE_UPSTREAM=http://127.0.0.1:40002
+Environment=MNEMOSYNE_NODE_DIR=/opt/mnemosyne
+Environment="MNEMOSYNE_NODE_CMD=/usr/bin/node /opt/mnemosyne/packages/server/dist/bin/mnemosyne.js serve --http"
+WorkingDirectory=/opt/mnemosyne
+ExecStart=/usr/local/bin/mnemosyne-admin
+Restart=on-failure
+RestartSec=5
+User=mnemosyne
+NoNewPrivileges=true
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`sudo systemctl daemon-reload && sudo systemctl restart mnemosyne`, then open `/mnemosyne/admin/`. The admin needs `MNEMOSYNE_SECRET` and
+`MNEMOSYNE_PUBLIC_URL` in the environment file. `MNEMOSYNE_HTTP_PORT` in that file is overridden for the server it starts.
+
 ## Run — per user (stdio)
 
 ```jsonc

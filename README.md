@@ -84,6 +84,27 @@ Non-MCP client: `POST /mnemosyne/search` to pull nodes into the prompt,
 
 See [docs/architecture.md](docs/architecture.md) and [docs/self-hosting.md](docs/self-hosting.md).
 
+## The admin program
+
+The admin (`/mnemosyne/admin`: sign-in, LLM, SSO, Audit, Auto, License) is a separate, compiled program. It runs in front of this server and
+starts it. It is delivered as a program only; its source is not published.
+
+| file | platform |
+|---|---|
+| `bin/mnemosyne-admin-linux-amd64` | Linux, x86-64 |
+| `bin/mnemosyne-admin-linux-arm64` | Linux, ARM64 |
+
+The checksums are in `bin/SHA256SUMS`. It reads the same environment as the server (see `.env.example`) and, by default, listens on
+`127.0.0.1:40001` and starts the server on `127.0.0.1:40002`:
+
+```bash
+MNEMOSYNE_NODE_DIR=/opt/mnemosyne \
+MNEMOSYNE_NODE_CMD="node /opt/mnemosyne/packages/server/dist/bin/mnemosyne.js serve --http" \
+./bin/mnemosyne-admin-linux-amd64
+```
+
+`bin/mnemosyne-admin-linux-amd64 --version` prints its version. A systemd unit and the details are in `docs/self-hosting.md`.
+
 ## License
 
 Proprietary, commercial software. © 2026 GCD Investment Group, sold under the LSE Group Corporation
