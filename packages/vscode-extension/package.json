@@ -2,7 +2,7 @@
   "name": "mnemosyne-vscode",
   "displayName": "mnemosyne",
   "description": "Browse and capture team memory nodes; MCP-capable AI extensions connect to the mnemosyne server directly.",
-  "version": "0.1.0",
+  "version": "0.6.0",
   "license": "MIT",
   "private": true,
   "engines": {
@@ -57,7 +57,7 @@
     "test": "node -e \"process.stdout.write('no extension unit tests yet\\n')\""
   },
   "dependencies": {
-    "@mnemosyne/core": "0.1.0"
+    "@mnemosyne/core": "0.6.0"
   },
   "devDependencies": {
     "@types/vscode": "^1.90.0",

@@ -11,9 +11,10 @@ import { createMcpServer } from '../mcp.js';
 import { createHttpApp } from '../http.js';
 import { resolveLLM } from '../embedding.js';
 import { extractFromHistory } from '../extract.js';
+import { VERSION } from '../version.js';
 
 const program = new Command();
-program.name('mnemosyne').description('Self-hosted AI team memory').version('0.1.0');
+program.name('mnemosyne').description('Self-hosted AI team memory').version(VERSION);
 
 program
   .command('serve')

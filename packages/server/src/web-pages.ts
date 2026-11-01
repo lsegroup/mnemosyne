@@ -3,6 +3,7 @@
 import { esc } from './html.js';
 import type { DocMeta, HistoryEntry } from './docgen.js';
 import { JOB_DEFS, MAX_OUTPUT_TOKENS, REASONING_EFFORTS } from './ai-jobs.js';
+import { shownVersion } from './version.js';
 export { esc };
 
 const CSS = `
@@ -18,13 +19,21 @@ a{color:var(--accent)}
 .btn.small{padding:5px 10px;font-size:13px}
 .notice{padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:#161a23;color:var(--muted);font-size:14px}
 .notice.error{border-color:#5a2a2a;color:#ffb4b4;background:#1d1214}
+body{position:relative;min-height:100vh;padding-bottom:56px}
+.site-foot{position:absolute;left:0;right:0;bottom:0;padding:0 16px 20px;text-align:center;color:var(--muted);font-size:12.5px}
+.site-foot span{margin:0 6px;opacity:.6}
 `;
+
+/** The line at the bottom of every page: "2026 © LSE Group Corporation | Version 0.6". */
+export function siteFooter(year = new Date().getFullYear()): string {
+  return `<div class="site-foot">${year} &copy; LSE Group Corporation <span aria-hidden="true">|</span>Version ${esc(shownVersion())}</div>`;
+}
 
 function shell(title: string, body: string, extraCss = ''): string {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex"><title>${esc(title)}</title>
-<style>${CSS}${extraCss}</style></head><body>${body}</body></html>`;
+<style>${CSS}${extraCss}</style></head><body>${body}${siteFooter()}</body></html>`;
 }
 
 export interface LoginView {
@@ -95,6 +104,8 @@ export function loginPage(v: LoginView): string {
     // Palette sampled from the approved mockup: near-black base, violet glow left, teal glow right.
     `:root{--bg:#0d0e13;--panel:#161922;--line:#262a36;--text:#e6e9ef;--muted:#8b90a0;--accent:#7a66e0;--accent-h:#9482ee}
 html,body{background:var(--bg)}
+body{padding-bottom:0}
+.site-foot{position:fixed;left:0;right:0;bottom:12px;padding:0;z-index:3;pointer-events:none}
 .stage{position:relative;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;overflow:hidden}
 .glow{position:absolute;inset:0;pointer-events:none;
 background:

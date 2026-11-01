@@ -1,11 +1,12 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ToolDef } from './tools.js';
+import { VERSION } from './version.js';
 
 /** Build an MCP server exposing the given tools. Transport-agnostic. */
 export function createMcpServer(tools: ToolDef[]): McpServer {
   const server = new McpServer({
     name: 'mnemosyne',
-    version: '0.1.0',
+    version: VERSION,
   });
 
   for (const tool of tools) {
