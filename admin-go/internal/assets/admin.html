@@ -220,9 +220,10 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
     <div class="row"><button class="btn primary" type="submit">Save Text settings</button><button class="btn" type="button" data-reset="text">Reset to defaults</button><span id="msg-text" class="msg"></span></div>
   </form>
   <form class="job" data-role="image" id="job-image">
-    <div class="jobhead"><h4>Images</h4><span class="tag ai">AI call · costs money</span></div>
-    <p class="sub">Creates the architecture diagrams. The text model (the one chosen for Text) reads the article and writes a PLAN as data using the prompts below: an overview picture and, for a bigger system, detail pictures by topic (at most 5 pictures, each with at most 10 boxes and 14 arrows, columns of boxes and the arrows between them); Mnemosyne itself then draws every picture from that plan, so every word is spelled exactly and the layout is always the same. No image model is called for diagrams, so the model chosen here is not used by them. Runs when an administrator presses “Create workflow diagram” and agrees to the cost. The limit, sampling values and prompts below belong to the text call that writes the plan.</p>
-    <label class="wide">Model<select id="m-image"></select><span class="hint">Picked from the models your keys can use (step 3).</span></label>
+    <div class="jobhead"><h4>Diagrams</h4><span class="tag ai">AI call · costs money</span></div>
+    <p class="sub"><b>There is no model to choose here.</b> The text model (the one chosen for Text) reads the article and writes a PLAN as data using the prompts below, and Mnemosyne itself draws every picture from that plan, so every word is spelled exactly and the layout is always the same. No image model is called. The plan holds an overview picture and, for a bigger system, detail pictures by topic (at most 5 pictures, each with at most 10 boxes and 14 arrows, columns of boxes and the arrows between them). Runs when an administrator presses “Create workflow diagram” and agrees to the cost. The limit, sampling values and prompts below belong to the text call that writes the plan.</p>
+    <p class="sub">Model used: the one chosen for Text.</p>
+    <label class="wide" hidden>Model<select id="m-image"></select></label>
     <div class="nums">
       <label>Max output tokens<input id="maxTokens-image" inputmode="numeric" placeholder="50,000" autocomplete="off"><span class="hint">The most the AI may write in one call. You pay per token written, so this is the cost ceiling of a call; the agreement popup shows the worst case. Big projects and reasoning models need a high limit. Default 50,000, allowed 256 to 1,000,000.</span></label>
       <label>Temperature<input id="temperature-image" inputmode="decimal" placeholder="provider default" autocomplete="off"><span class="hint">0 to 2. Lower = more factual and repeatable, higher = more varied. Empty = the provider's own default (the value is not sent).</span></label>
@@ -232,7 +233,7 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
     </div>
     <label class="wide">System prompt for the diagram plan - who the AI is and the rules<textarea id="sys-image" rows="6" spellcheck="false"></textarea></label>
     <label class="wide">Instruction for the diagram plan - what the picture must show (the AI must answer with the JSON plan)<textarea id="usr-image" rows="14" spellcheck="false"></textarea><span class="hint">Placeholders the server fills in: <code>{{project}}</code> = the project name · <code>{{article}}</code> = the generated documentation article (first 60,000 characters) <b>(required)</b></span></label>
-    <div class="row"><button class="btn primary" type="submit">Save Images settings</button><button class="btn" type="button" data-reset="image">Reset to defaults</button><span id="msg-image" class="msg"></span></div>
+    <div class="row"><button class="btn primary" type="submit">Save Diagram settings</button><button class="btn" type="button" data-reset="image">Reset to defaults</button><span id="msg-image" class="msg"></span></div>
   </form>
   <form class="job" data-role="pdf" id="job-pdf">
     <div class="jobhead"><h4>PDF</h4><span class="tag">no AI call yet</span></div>
@@ -481,7 +482,7 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
   ROLES.forEach(function(role){
     $('job-'+role).addEventListener('submit',function(ev){
       ev.preventDefault();note('msg-'+role,'');
-      var body={},v=$('m-'+role).value;
+      var body={},v=role==='image'?'':$('m-'+role).value;
       if(v){var i=v.indexOf('::');body.model={providerId:v.slice(0,i),model:v.slice(i+2)}}
       ['maxTokens','temperature','topP','reasoningEffort','timeoutMinutes'].forEach(function(k){body[k]=$(k+'-'+role).value.trim()});
       body.systemPrompt=$('sys-'+role).value;body.userPrompt=$('usr-'+role).value;
