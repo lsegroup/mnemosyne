@@ -83,6 +83,8 @@ export interface MnemosyneConfig {
     tokensFile: string;
     /** Append-only audit trail (JSON lines) of sign-ins and admin changes. */
     auditFile: string;
+    /** Append-only cost center (JSON lines): one line per AI job, who started it, what each model used, what it cost. */
+    usageFile: string;
     /** Generated project documentation (articles, diagrams, PDFs), kept with their date stamps. */
     docsDir: string;
     /** The Auto schedule file of the admin program; its folder is also where the one-AI-job lock file lives. */
@@ -160,6 +162,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, repoOverride?: 
       membersFile: resolve(env.MNEMOSYNE_MEMBERS_FILE ?? `${dirname(dbPath)}/members.enc`),
       tokensFile: resolve(env.MNEMOSYNE_TOKENS_FILE ?? `${dirname(dbPath)}/tokens.enc`),
       auditFile: resolve(env.MNEMOSYNE_AUDIT_FILE ?? `${dirname(dbPath)}/audit.jsonl`),
+      usageFile: resolve(env.MNEMOSYNE_USAGE_FILE ?? `${dirname(dbPath)}/usage.jsonl`),
       docsDir: resolve(env.MNEMOSYNE_DOCS_DIR ?? `${dirname(dbPath)}/docs`),
       autoFile: resolve(env.MNEMOSYNE_AUTO_FILE ?? `${dirname(dbPath)}/auto.json`),
       aiDailyLimit: int(env.MNEMOSYNE_AI_DAILY_LIMIT, 20),

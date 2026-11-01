@@ -46,6 +46,7 @@ type Config struct {
 	MembersFile   string
 	TokensFile    string
 	AuditFile     string
+	UsageFile     string
 	DocsDir       string
 	AutoFile      string
 	AIDailyLimit  int
@@ -153,6 +154,7 @@ func Load(get func(string) string, cwd string) (Config, error) {
 		MembersFile:   file("MNEMOSYNE_MEMBERS_FILE", "members.enc"),
 		TokensFile:    file("MNEMOSYNE_TOKENS_FILE", "tokens.enc"),
 		AuditFile:     file("MNEMOSYNE_AUDIT_FILE", "audit.jsonl"),
+		UsageFile:     file("MNEMOSYNE_USAGE_FILE", "usage.jsonl"),
 		DocsDir:       file("MNEMOSYNE_DOCS_DIR", "docs"),
 		AutoFile:      file("MNEMOSYNE_AUTO_FILE", "auto.json"),
 		AIDailyLimit:  intOf(get("MNEMOSYNE_AI_DAILY_LIMIT"), 20),

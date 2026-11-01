@@ -83,8 +83,8 @@ input:focus,select:focus{outline:none;border-color:var(--accent)}
 .tablewrap{overflow-x:auto;max-width:100%}
 .sumline{margin:0 0 14px;font-size:14px;line-height:1.7}.sumline b{color:var(--teal);font-weight:600}
 td.nw,th.nw{white-space:nowrap}
-#autoRuns tr.run>td{border-bottom:0}
-#autoRuns tr.usage>td{padding:0 8px 14px}
+#usageRows tr.run>td{border-bottom:0}
+#usageRows tr.usage>td{padding:0 8px 14px}
 table.use{width:auto;font-size:13px}table.use th,table.use td{padding:3px 22px 3px 0;border-bottom:0}
 table.use th.n,table.use td.n{text-align:right;white-space:nowrap}
 table.use tr.sum td{border-top:1px solid var(--line);font-weight:600}
@@ -155,7 +155,7 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
   <form method="post" action="@@BASE@@/admin/auth/logout"><button class="btn small" type="submit">Sign out</button></form></div>
 </header>
 <div class="layout">
-  <nav class="side" aria-label="Admin sections"><a href="#llm" data-tab="llm" class="active">LLM</a><a href="#auto" data-tab="auto">Auto</a><a href="#sso" data-tab="sso">SSO</a><a href="#audit" data-tab="audit">Audit</a><a href="#license" data-tab="license">License</a></nav>
+  <nav class="side" aria-label="Admin sections"><a href="#llm" data-tab="llm" class="active">LLM</a><a href="#auto" data-tab="auto">Auto</a><a href="#usage" data-tab="usage">LLM usage</a><a href="#sso" data-tab="sso">SSO</a><a href="#audit" data-tab="audit">Audit</a><a href="#license" data-tab="license">License</a></nav>
   <main>
     <section id="tab-llm" class="tab">
       <h2>LLM</h2>
@@ -322,12 +322,29 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
       </div>
 
       <div class="step">
-        <h3><span class="num">5</span> Runs</h3>
+        <h3><span class="num">5</span> Progress</h3>
         <div class="live" id="autoLive" hidden><span id="autoLiveText"></span><span class="bar"><i id="autoBar"></i></span><span id="autoLiveTime"></span></div>
-        <p class="sumline" id="autoTotals" hidden></p>
-        <div class="tablewrap"><table><thead><tr><th class="nw">Start (UTC)</th><th class="nw">End (UTC)</th><th class="nw">Runtime</th><th>Trigger</th><th>Updated</th><th>Unchanged</th><th>Failed / not reached</th><th>Tokens in / out</th><th>Cost</th><th>Result</th></tr></thead>
-          <tbody id="autoRuns"><tr><td colspan="10" class="muted">Loading…</td></tr></tbody></table></div>
-        <p class="hint2" style="margin:10px 0 0">Under every run: what each model used for TEXT (the articles), for IMAGES (the AI flow charts: the text model writes the plan as text, Mnemosyne draws the exact diagrams from it) and for PICTURES (the image model chosen under LLM → Images paints the workflow diagram from that plan, billed per picture, no tokens), and how long its calls took. The cost is the tokens the provider reported times the list price of the model; what the provider really charges you is on its own billing page. Every automatic AI call is also written to the Audit tab (who agreed, which project, tokens, cost).</p>
+        <p class="hint2" id="autoLast" style="margin:0"></p>
+        <p class="hint2" style="margin:10px 0 0">What every automatic job used, who agreed to it and what it cost is under <a href="#usage">LLM usage</a>, together with the jobs people start on the project pages.</p>
+      </div>
+    </section>
+
+    <section id="tab-usage" class="tab" hidden>
+      <h2>LLM usage</h2>
+      <p class="lead">The cost center of the AI: every AI job that ran, started by a person on a project page or by the automatic schedule, with who started it, for which project, what each model used and what it cost.</p>
+      <div class="step">
+        <h3>Cost per month</h3>
+        <p class="sumline" id="usageNow"></p>
+        <div class="tablewrap"><table class="use"><thead><tr><th>Month (UTC)</th><th class="n">Jobs</th><th class="n">Calls</th><th class="n">Tokens in</th><th class="n">Tokens out</th><th class="n">TEXT</th><th class="n">IMAGES</th><th class="n">PICTURES</th><th class="n">Total</th></tr></thead>
+          <tbody id="usageMonths"><tr><td colspan="9" class="muted">Loading…</td></tr></tbody></table></div>
+      </div>
+      <div class="step">
+        <h3>Every job</h3>
+        <div class="row" style="margin-bottom:14px"><button class="btn small" type="button" id="usageRefresh">Refresh</button><span class="muted" id="usageCount"></span></div>
+        <div class="tablewrap"><table><thead><tr><th class="nw">Start (UTC)</th><th class="nw">Runtime</th><th>Started by</th><th>What</th><th>Tokens in / out</th><th>Cost</th><th>Result</th></tr></thead>
+          <tbody id="usageRows"><tr><td colspan="7" class="muted">Loading…</td></tr></tbody></table></div>
+        <div class="pager" id="usagePager"></div>
+        <p class="hint2" style="margin:10px 0 0"><span id="usageMsg" class="msg"></span>The cost is the tokens the provider reported times the list price of the model, and one price per picture. The providers answer with token counts, not with an amount of money, so what is really charged is on the provider's own billing page. TEXT is the article, IMAGES the text call that plans the workflow diagram, PICTURES the image model that paints it (billed per picture, no tokens).</p>
       </div>
     </section>
 
@@ -414,10 +431,11 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
   }
   // --- tabs (left menu) ---
   function showTab(){
-    var TABS=['llm','auto','sso','audit','license'];
+    var TABS=['llm','auto','usage','sso','audit','license'];
     var t=(location.hash||'#llm').slice(1);if(TABS.indexOf(t)<0)t='llm';
     TABS.forEach(function(n){$('tab-'+n).hidden=(n!==t)});
     if(t==='audit')loadAudit();
+    if(t==='usage')loadUsage();
     if(t==='license')loadLicense();
     if(t==='auto')loadAuto(autoLoaded);
     Array.prototype.forEach.call(document.querySelectorAll('.side a'),function(a){a.className=a.getAttribute('data-tab')===t?'active':''});
@@ -622,6 +640,81 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
   $('auditRefresh').addEventListener('click',function(){loadAudit()});
   setInterval(function(){if(!$('tab-audit').hidden&&auditPage===0&&!$('auditSearch').value)loadAudit()},15000);
 
+  // --- LLM usage tab: the cost center ---
+  var usagePage=0,USAGE_PER=10;
+  var WHAT={TEXT:'TEXT (article)',IMAGES:'IMAGES (diagram plan, text model)',PICTURES:'PICTURES (painted by the image model)'};
+  var JOBKIND={wiki:'Article',diagram:'Workflow diagram','auto-run':'Automatic run (before every job was logged)'};
+  function usageLines(lines){
+    var t=document.createElement('table');t.className='use';
+    var hr=document.createElement('tr');
+    ['Model','What','Calls','Tokens in','Tokens out','of it reasoning','Cost','AI time'].forEach(function(x,i){var th=document.createElement('th');th.textContent=x;if(i>1)th.className='n';hr.appendChild(th)});
+    var hd=document.createElement('thead');hd.appendChild(hr);t.appendChild(hd);
+    var b=document.createElement('tbody');t.appendChild(b);
+    lines.forEach(function(l){
+      var tr=document.createElement('tr');cell(tr,l.model);cell(tr,WHAT[l.what]||l.what);
+      [num(l.calls),num(l.in),num(l.out),l.reasoning===undefined||l.reasoning===null?'—':num(l.reasoning),usd4(l.usd),dur(l.ms)].forEach(function(v){cell(tr,v,'n')});
+      b.appendChild(tr);
+    });
+    return t;
+  }
+  function usageRow(e,rows){
+    var tr=document.createElement('tr');tr.className='run';
+    cell(tr,fmtS(e.time),'nw');cell(tr,dur(e.ms),'nw');
+    cell(tr,e.trigger==='auto'?'Auto schedule — '+e.by:e.by);
+    cell(tr,(JOBKIND[e.kind]||e.kind)+(e.project?' · '+e.project:''));
+    cell(tr,num(e.in)+' / '+num(e.out),'nw');cell(tr,usd4(e.usd),'nw');
+    var td=cell(tr,'');var b=document.createElement('span');b.className='badge'+(e.status==='done'?' ok':'');b.textContent=e.status==='done'?'done':'failed';td.appendChild(b);
+    if(e.note){var n=document.createElement('div');n.className='hint2';n.textContent=e.note;td.appendChild(n)}
+    rows.appendChild(tr);
+    if(e.lines&&e.lines.length){
+      var dr=document.createElement('tr');dr.className='usage';var dc=document.createElement('td');dc.colSpan=7;dc.appendChild(usageLines(e.lines));dr.appendChild(dc);rows.appendChild(dr);
+    }
+  }
+  function usagePageBtn(label,page,cur,off){
+    var b=document.createElement('button');b.type='button';b.className='btn small'+(cur?' primary':'');b.textContent=label;b.disabled=!!off;
+    b.addEventListener('click',function(){usagePage=page;loadUsage()});return b;
+  }
+  function usagePager(total){
+    var box=$('usagePager');box.textContent='';
+    var pages=Math.max(1,Math.ceil(total/USAGE_PER));
+    if(pages<2)return;
+    box.appendChild(usagePageBtn('‹ Previous',usagePage-1,false,usagePage===0));
+    var last=-1;
+    for(var p=0;p<pages;p++){
+      if(p===0||p===pages-1||Math.abs(p-usagePage)<=2){
+        if(last!==-1&&p-last>1){var gap=document.createElement('span');gap.className='muted';gap.textContent='…';box.appendChild(gap)}
+        box.appendChild(usagePageBtn(String(p+1),p,p===usagePage,false));last=p;
+      }
+    }
+    box.appendChild(usagePageBtn('Next ›',usagePage+1,false,usagePage>=pages-1));
+    var t=document.createElement('span');t.className='muted';t.style.marginLeft='10px';t.textContent='Page '+(usagePage+1)+' of '+pages;box.appendChild(t);
+  }
+  function loadUsage(){
+    note('usageMsg','');
+    call('GET','/usage?offset='+(usagePage*USAGE_PER)+'&limit='+USAGE_PER).then(function(d){
+      var pages=Math.max(1,Math.ceil(d.total/USAGE_PER));
+      if(usagePage>pages-1){usagePage=pages-1;return loadUsage()}
+      var mb=$('usageMonths');mb.textContent='';
+      var now=new Date().toISOString().slice(0,7),cur=d.months.filter(function(m){return m.month===now})[0];
+      $('usageNow').textContent='';
+      span($('usageNow'),'This month ('+now+'): ');var bb=document.createElement('b');bb.textContent=usd4(cur?cur.usd:0)+' · '+(cur?cur.jobs:0)+(cur&&cur.jobs===1?' job':' jobs');$('usageNow').appendChild(bb);
+      if(!d.months.length){var e=document.createElement('tr');cell(e,'No AI job has run yet.','muted').colSpan=9;mb.appendChild(e)}
+      d.months.forEach(function(m){
+        var tr=document.createElement('tr');if(m.month===now)tr.className='sum';
+        cell(tr,m.month+(m.month===now?' (this month)':''),'nw');
+        [num(m.jobs)+(m.failed?' ('+m.failed+' failed)':''),num(m.calls),num(m.in),num(m.out),usd4(m.text),usd4(m.images),usd4(m.pictures),usd4(m.usd)].forEach(function(v){cell(tr,v,'n')});
+        mb.appendChild(tr);
+      });
+      var rows=$('usageRows');rows.textContent='';
+      if(!d.rows.length){var tr=document.createElement('tr');cell(tr,'No AI job has run yet.','muted').colSpan=7;rows.appendChild(tr)}
+      d.rows.forEach(function(e){usageRow(e,rows)});
+      $('usageCount').textContent=d.total?((usagePage*USAGE_PER+1)+'–'+(usagePage*USAGE_PER+d.rows.length)+' of '+d.total+' jobs'):'0 jobs';
+      usagePager(d.total);
+    }).catch(function(e){note('usageMsg',e.message)});
+  }
+  $('usageRefresh').addEventListener('click',function(){loadUsage()});
+  setInterval(function(){if(!$('tab-usage').hidden&&usagePage===0)loadUsage()},15000);
+
   // --- Auto tab: schedule, project selection, agreement, runs ---
   var DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   var ZONES=['UTC','Europe/London','Europe/Zurich','Europe/Berlin','Europe/Paris','Europe/Amsterdam','Europe/Madrid','Europe/Rome','Europe/Vienna','Europe/Istanbul','Europe/Moscow','Africa/Johannesburg','Asia/Dubai','Asia/Kolkata','Asia/Singapore','Asia/Hong_Kong','Asia/Shanghai','Asia/Tokyo','Asia/Seoul','Australia/Sydney','Pacific/Auckland','America/Sao_Paulo','America/New_York','America/Chicago','America/Denver','America/Los_Angeles','America/Anchorage','Pacific/Honolulu'];
@@ -708,60 +801,10 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
   function num(n){return Number(n).toLocaleString('en-US')}
   function usd4(n){return '$'+Number(n).toFixed(4)}
   function fmtS(iso){return iso?iso.slice(0,19).replace('T',' '):''}
-  var KIND={wiki:'TEXT (articles)',diagram:'IMAGES (AI flow charts, planned by the text model)',picture:'PICTURES (workflow diagram, painted by the image model)'};
-  // what each model used in one run: one row per model and kind, and a total when there is more than one
-  function usageTable(u){
-    var t=document.createElement('table');t.className='use';
-    var hr=document.createElement('tr');
-    ['Model','What','Calls','Tokens in','Tokens out','of it reasoning','Cost','AI time'].forEach(function(x,i){var th=document.createElement('th');th.textContent=x;if(i>1)th.className='n';hr.appendChild(th)});
-    var hd=document.createElement('thead');hd.appendChild(hr);t.appendChild(hd);
-    var b=document.createElement('tbody');t.appendChild(b);
-    var tot={c:0,i:0,o:0,r:undefined,u:0,ms:0};
-    function row(tr,m,w,x,cls){cell(tr,m);cell(tr,w);[num(x.c),num(x.i),num(x.o),x.r===undefined?'—':num(x.r),usd4(x.u),dur(x.ms)].forEach(function(v){cell(tr,v,'n')});if(cls)tr.className=cls;b.appendChild(tr)}
-    u.slice().sort(function(a,c){return a.model!==c.model?(a.model<c.model?-1:1):(a.kind===c.kind?0:a.kind==='wiki'?-1:1)}).forEach(function(x){
-      var v={c:x.calls,i:x.inputTokens,o:x.outputTokens,r:x.reasoningTokens,u:x.usd,ms:x.ms};
-      tot.c+=v.c;tot.i+=v.i;tot.o+=v.o;tot.u+=v.u;tot.ms+=v.ms;if(v.r!==undefined)tot.r=(tot.r||0)+v.r;
-      row(document.createElement('tr'),x.model,KIND[x.kind]||x.kind,v);
-    });
-    if(u.length>1)row(document.createElement('tr'),'','Together',tot,'sum');
-    return t;
-  }
-  function autoRuns(runs){
-    var tb=$('autoRuns');tb.textContent='';
-    if(!runs||!runs.length){var e=document.createElement('tr');cell(e,'No automatic run yet.','muted').colSpan=10;tb.appendChild(e);return}
-    runs.forEach(function(r){
-      var tr=document.createElement('tr');tr.className='run';
-      var end=r.finishedAt&&r.finishedAt.slice(0,10)===r.startedAt.slice(0,10)?r.finishedAt.slice(11,19):fmtS(r.finishedAt);
-      cell(tr,fmtS(r.startedAt),'nw');cell(tr,end,'nw');cell(tr,r.finishedAt?dur(Date.parse(r.finishedAt)-Date.parse(r.startedAt)):'','nw');
-      cell(tr,r.trigger);cell(tr,String(r.updated.length));cell(tr,String(r.unchanged.length));
-      var f=cell(tr,r.failed.length+' / '+r.notReached.length+(r.failed.length?' — '+r.failed[0].project+': '+r.failed[0].error:''));if(r.failed.length)f.className='fail';
-      cell(tr,num(r.inputTokens)+' / '+num(r.outputTokens),'nw');cell(tr,usd4(r.usd),'nw');
-      var td=cell(tr,'');var b=document.createElement('span');b.className='badge'+(r.status==='completed'?' ok':'');b.textContent=RESULT[r.status]||r.status;td.appendChild(b);
-      if(r.note){var n=document.createElement('div');n.className='hint2';n.textContent=r.note;td.appendChild(n)}
-      tb.appendChild(tr);
-      // the split under the run: a run without calls has nothing to split, an old run whose split could not be proven says so
-      if(r.usage&&r.usage.length||!r.usage&&r.inputTokens){
-        var dr=document.createElement('tr');dr.className='usage';var dc=document.createElement('td');dc.colSpan=10;
-        if(r.usage)dc.appendChild(usageTable(r.usage));else{dc.textContent='The split by model, TEXT and IMAGES is not available for this run (it was made before the split was recorded and the audit trail no longer matches its totals).';dc.className='muted'}
-        dr.appendChild(dc);tb.appendChild(dr);
-      }
-    });
-  }
-  // all runs of the list together: time, tokens, cost, and what part was TEXT and what part IMAGES
-  function autoTotals(runs){
-    var el=$('autoTotals'),done=(runs||[]).filter(function(r){return r.finishedAt});
-    if(!done.length){el.hidden=true;return}
-    var ms=0,i=0,o=0,u=0,miss=0,k={wiki:{c:0,u:0,ms:0},diagram:{c:0,u:0,ms:0},picture:{c:0,u:0,ms:0}};
-    done.forEach(function(r){
-      ms+=Date.parse(r.finishedAt)-Date.parse(r.startedAt);i+=r.inputTokens;o+=r.outputTokens;u+=r.usd;
-      if(r.usage)r.usage.forEach(function(x){var z=k[x.kind];if(!z)return;z.c+=x.calls;z.u+=x.usd;z.ms+=x.ms});else if(r.inputTokens)miss++;
-    });
-    el.textContent='';
-    function kv(l,v){span(el,l+' ');var b=document.createElement('b');b.textContent=v;el.appendChild(b);span(el,'   ')}
-    kv('All '+done.length+(done.length===1?' run':' runs')+' below:',dur(ms));kv('·',num(i)+' tokens in / '+num(o)+' out');kv('·',usd4(u));
-    kv('— TEXT',usd4(k.wiki.u)+' ('+num(k.wiki.c)+' calls, '+dur(k.wiki.ms)+')');kv('· IMAGES',usd4(k.diagram.u)+' ('+num(k.diagram.c)+' calls, '+dur(k.diagram.ms)+')');kv('· PICTURES',usd4(k.picture.u)+' ('+num(k.picture.c)+' calls, '+dur(k.picture.ms)+')');
-    if(miss)span(el,'· the split is missing for '+miss+(miss===1?' run':' runs'),'muted');
-    el.hidden=false;
+  // the last automatic run in one line; every job and its cost are under LLM usage
+  function autoLast(runs){
+    var el=$('autoLast'),last=(runs||[]).filter(function(r){return r.finishedAt})[0];
+    el.textContent=last?('Last run: '+fmtS(last.startedAt)+' UTC — '+(RESULT[last.status]||last.status)+' — '+last.updated.length+' updated, '+last.unchanged.length+' unchanged'+(last.failed.length?', '+last.failed.length+' failed':'')+(last.notReached.length?', '+last.notReached.length+' not reached':'')+' — '+usd4(last.usd)):'No automatic run yet.';
   }
   function autoLive(run){
     var box=$('autoLive');if(!run){box.hidden=true;return}box.hidden=false;
@@ -782,7 +825,7 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
   function autoDirty(){autoCounts();autoFacts()}
   function autoShow(keepForm){
     if(!keepForm)autoWrite();
-    autoSwitch();autoNext();autoPaused();autoRows();autoCounts();autoRuns(AUTO.runs);autoTotals(AUTO.runs);autoLive(AUTO.run);autoWas=!!AUTO.run;
+    autoSwitch();autoNext();autoPaused();autoRows();autoCounts();autoLast(AUTO.runs);autoLive(AUTO.run);autoWas=!!AUTO.run;
     $('autoNewNote').hidden=!(AUTO.config&&AUTO.projects.some(function(p){return AUTO.config.known.indexOf(p.project)<0}));
     autoFacts();
   }
@@ -794,7 +837,7 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
     call('GET','/auto/status').then(function(s){
       var now=!!s.run;AUTO.run=s.run||null;AUTO.runs=s.runs||[];AUTO.nextRunAt=s.nextRunAt;AUTO.pausedReason=s.pausedReason;
       if(AUTO.config)AUTO.config.enabled=!!s.enabled;
-      autoLive(s.run);autoRuns(AUTO.runs);autoTotals(AUTO.runs);autoNext();autoPaused();autoSwitch();
+      autoLive(s.run);autoLast(AUTO.runs);autoNext();autoPaused();autoSwitch();
       if(autoWas&&!now)loadAuto(true);autoWas=now;
     }).catch(function(){});
   }

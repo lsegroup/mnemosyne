@@ -43,6 +43,7 @@ func (s *Server) startAuto() {
 		consents: map[string]int64{},
 	}
 	s.auto = ap
+	s.importUsageHistory()
 	gen := &engine.Generator{Providers: s.providers, Notes: ap.index, Docs: ap.docs}
 	ap.runner = auto.NewRunner(auto.Deps{
 		Store: ap.store,
@@ -82,16 +83,19 @@ func (s *Server) startAuto() {
 				e.User, e.EntityType, e.EntityName = "auto", "docs_"+string(kind), project
 				s.audit.Write(e)
 			}
+			began := s.now()
 			out, err := gen.Generate(project, kind, "auto (agreed by "+by+")", glName, logf)
 			if err != nil {
 				msg := failureMessage(err, string(kind), project)
 				s.audit.Write(audit.Input{Event: "ai_failed", User: "auto", EntityType: "docs_" + string(kind), EntityName: project, Description: msg})
 				var unreachable *engine.UnreachableError
 				if errors.As(err, &unreachable) {
-					return out, &engine.UnreachableError{Msg: msg}
+					return out, &engine.UnreachableError{Msg: msg} // nothing was billed and the run sends it again: not a job of its own
 				}
+				s.logUsage(project, kind, by+" (scheduled)", began, s.now(), out, err, msg)
 				return out, errors.New(msg)
 			}
+			s.logUsage(project, kind, by+" (scheduled)", began, s.now(), out, nil, "")
 			return out, nil
 		},
 		Busy: func() bool { return ap.lock.HeldBy("person", s.now()) || !s.licensed() },

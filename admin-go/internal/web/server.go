@@ -30,6 +30,7 @@ import (
 	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/llm"
 	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/secrets"
 	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/store"
+	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/usage"
 )
 
 const (
@@ -56,6 +57,7 @@ type Server struct {
 	providers  *store.Providers
 	settings   *store.Settings
 	audit      *audit.Log
+	usage      *usage.Log
 	secure     bool
 	localUser  string
 	localHash  string
@@ -91,6 +93,7 @@ func New(cfg config.Config) (*Server, error) {
 		s.providers = store.NewProviders(cfg.ProvidersFile, keys.Enc)
 		s.settings = store.NewSettings(cfg.SettingsFile, keys.Enc)
 		s.audit = audit.New(cfg.AuditFile)
+		s.usage = usage.New(cfg.UsageFile)
 		s.initLicense()
 		// fixed addresses are in force from start-up on
 		if hosts, err := s.providers.Hosts(); err == nil {
@@ -203,6 +206,7 @@ func (s *Server) routes() {
 	m.HandleFunc("GET "+api+"/settings", s.apiHandler(s.getSettings))
 	m.HandleFunc("PUT "+api+"/settings", s.apiHandler(s.putSettings))
 	m.HandleFunc("GET "+api+"/audit", s.apiHandler(s.getAudit))
+	m.HandleFunc("GET "+api+"/usage", s.apiHandler(s.getUsage))
 	m.HandleFunc("GET "+api+"/auto", s.apiHandler(s.getAuto))
 	m.HandleFunc("GET "+api+"/auto/status", s.apiHandler(s.getAutoStatus))
 	m.HandleFunc("POST "+api+"/auto/estimate", s.apiHandler(s.estimateAuto))

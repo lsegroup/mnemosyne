@@ -61,6 +61,16 @@ const (
 	TypicalPictures = 3
 )
 
+// spent is what a job that failed after the text call had used: the call was billed even though nothing was stored, and the cost center
+// counts it.
+func (g *Generator) spent(model string, out ChatResult) Outcome {
+	o := Outcome{Model: model, InputTokens: out.InputTokens, OutputTokens: out.OutputTokens, ReasoningTokens: out.ReasoningTokens}
+	if usd, ok := EstimateUSD(model, out.InputTokens, out.OutputTokens); ok {
+		o.USD = &usd
+	}
+	return o
+}
+
 var reFence = regexp.MustCompile("(?is)^```(?:markdown|md)?\n(.*?)\n```$")
 
 func stripFence(t string) string {
@@ -163,7 +173,7 @@ func (g *Generator) Generate(project string, kind Kind, user, glName string, log
 			if !errors.As(err, &pe) {
 				return Outcome{}, err
 			}
-			return Outcome{}, jobs.Invalid("The AI answered, but not with a usable diagram plan: %s. Nothing was drawn (%s tokens in, %s out were used). If you changed the instruction in Admin → LLM → Images, press “Reset to defaults” there: it must ask for the JSON plan.", pe.Msg, commas(out.InputTokens), commas(out.OutputTokens))
+			return g.spent(model, out), jobs.Invalid("The AI answered, but not with a usable diagram plan: %s. Nothing was drawn (%s tokens in, %s out were used). If you changed the instruction in Admin → LLM → Images, press “Reset to defaults” there: it must ask for the JSON plan.", pe.Msg, commas(out.InputTokens), commas(out.OutputTokens))
 		}
 		overview, details := set.Pictures[0], set.Pictures[1:]
 		boxes, arrows := 0, 0
@@ -235,7 +245,7 @@ func (g *Generator) Generate(project string, kind Kind, user, glName string, log
 						why = ue.Msg
 					}
 					if len(done) == 0 {
-						return Outcome{}, jobs.Invalid("The plan was written (%s tokens in, %s out were used), but the image model %s could not paint the overview: %s The earlier diagrams of this project were kept.", commas(out.InputTokens), commas(out.OutputTokens), im, why)
+						return g.spent(model, out), jobs.Invalid("The plan was written (%s tokens in, %s out were used), but the image model %s could not paint the overview: %s The earlier diagrams of this project were kept.", commas(out.InputTokens), commas(out.OutputTokens), im, why)
 					}
 					missed = append(missed, p.Name+": "+why)
 					continue

@@ -97,6 +97,10 @@ A picture holds at most 10 boxes and 14 arrows (more cannot be read: the arrow l
 
 Diagrams made before 2026-10-30 by an image model alone (png/jpg/webp, no plan) are still shown and embedded.
 
+## LLM usage (Admin -> LLM usage)
+
+Every AI job is one line in `usage.jsonl` (next to the audit trail; both the server and the admin program append to it): `time`, `end`, `trigger` (`person` or `auto`), `by`, `project`, `kind` (`wiki`, `diagram`, `auto-run` for the history imported from before), `status`, and `lines` - one per model and part (`TEXT`, `IMAGES` = the text call that plans the diagram, `PICTURES` = the image model, with calls, tokens in / out, reasoning tokens, cost, time). The tab sums the cost per month (UTC, the month the job started in) and lists the jobs ten to a page. The cost is tokens x the list price of the model (one price per picture); providers report tokens, not money, so the provider's billing page stays the truth.
+
 ## Automatic updates (Admin -> Auto)
 
 `packages/server/src/auto.ts` lets a company have the documentation kept up to date by itself, for example every Saturday and Sunday at 02:00 when nobody works. An administrator ticks the projects (a scroll box with *Select all* and *Only projects with changes*), ticks **TEXT** (the article) and/or **AI flow charts** (the diagrams), sets the days or a one-time date, the time and time zone, and a **dollar limit per run**. The Admin menu is LLM, Auto, SSO, Audit, License (License is a blank page for now).

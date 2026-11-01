@@ -1008,6 +1008,23 @@ describe('web portal', () => {
       expect(starts[0].description).toContain('Estimated cost');
       expect(audit.filter((e) => e.event === 'ai_done').length).toBe(5); // article, painted diagram, diagram with a missing detail picture, drawn diagram, article
       expect(audit.some((e) => e.event === 'ai_failed' && e.entityType === 'docs_picture')).toBe(true);
+      // the cost center: one line per job, who started it, what each model used
+      const usage = (await readFile(join(tmp, '.mnemosyne', 'usage.jsonl'), 'utf8')).split('\n').filter(Boolean).map((l) => JSON.parse(l));
+      expect(usage.length).toBe(6); // article, painted diagram, diagram with a missing picture, failed diagram, drawn diagram, article
+      expect(usage.every((u) => u.trigger === 'person' && typeof u.by === 'string' && u.by.length > 0 && u.project === 'alpha')).toBe(true);
+      expect(usage.filter((u) => u.kind === 'wiki').length).toBe(2);
+      const painted = usage.filter((u) => u.kind === 'diagram' && u.status === 'done' && u.lines.some((l: { what: string }) => l.what === 'PICTURES'));
+      expect(painted.length).toBe(2);
+      expect(painted[0].lines.map((l: { what: string }) => l.what)).toEqual(['IMAGES', 'PICTURES']);
+      expect(painted[0].lines[0]).toMatchObject({ model: 'text-model', calls: 1, in: 1200, out: 300 });
+      expect(painted[0].lines[1]).toMatchObject({ model: 'image-model', calls: 2 }); // the overview and the detail picture
+      expect(painted[1].lines[1]).toMatchObject({ calls: 1 }); // only the overview: the detail picture was refused and is not billed
+      const failed = usage.filter((u) => u.status === 'failed');
+      expect(failed.length).toBe(1);
+      expect(failed[0].note).toContain('could not paint the overview');
+      expect(failed[0].lines.map((l: { what: string }) => l.what)).toEqual(['IMAGES']); // the plan call was billed even though nothing was stored
+      expect(failed[0].in).toBe(1200);
+      expect(usage.find((u) => u.kind === 'diagram' && u.lines.length === 1 && u.status === 'done')?.lines[0].what).toBe('IMAGES'); // drawn without an image model
       expect(audit.some((e) => e.event === 'denied' && /daily limit/.test(e.description))).toBe(true);
       expect(audit.some((e) => e.event === 'denied' && /no valid agreement/.test(e.description))).toBe(true);
     });

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### LLM usage: the cost center of the AI
+- New admin tab **LLM usage**: the cost per month (jobs, calls, tokens, TEXT / IMAGES / PICTURES, total) and below it every AI job, ten to a page, newest first - who started it (the person who pressed the button, or the automatic schedule and who agreed to it), the project, what each model used (calls, tokens in and out, reasoning tokens, cost, AI time), the result and any warning.
+- One file for everything (`usage.jsonl` next to the audit trail, `MNEMOSYNE_USAGE_FILE`): the server writes the jobs started on the project pages, the admin program the automatic ones. A job that failed after the text call was billed is in it with what was used. The automatic runs from before every job was logged are imported once, one line per run.
+- The Auto tab no longer shows the run log (only the live progress and a line about the last run); it points to LLM usage.
+- The cost is the tokens the provider reports times the list price of the model, and one price per picture: the providers answer with token counts, not with an amount of money.
+
 ### The image model paints the workflow diagram
 - The image model chosen for the *Images* job in Admin -> LLM makes the workflow diagram again: after the text model has planned the system (an overview and, for a bigger system, detail pictures by topic), the image model paints **every picture of the plan**. The painted pictures are shown on the project page and each gets its own page in the PDF.
 - A new run **replaces** everything the project had: all earlier diagrams, their detail pictures and the pictures of earlier builds are deleted (the agreement popup says so). Nothing is deleted until the overview is painted: if the image model refuses, the earlier diagrams stay and the page says why. A detail picture that cannot be painted is left out and reported.

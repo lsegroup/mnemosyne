@@ -17,6 +17,7 @@ import { outline, renderMarkdown } from './markdown.js';
 import { DocStore, approxTokens, buildDiagramPlanPrompt, buildPicturePrompt, buildWikiPrompt, changeHistory, estimateText, historyMarkdown, imagePriceUsd, missingSections, stamp, toPdfImage, type DocMeta } from './docgen.js';
 import { chat } from './llm-call-chat.js';
 import { generateImage, type ImageResult } from './llm-call-image.js';
+import { appendUsage, type UsageLine } from './usage-log.js';
 import { setHostPins } from './host-pins.js';
 import { PICTURE_LIMITS, PlanError, drawScene, layout, parsePlanSet, renderSvg, type DiagramPlan, type DiagramSet } from './diagram.js';
 import { buildPdf, type PdfInput } from './pdf.js';
@@ -812,7 +813,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
    * ONE AI job for one project: builds the prompt, makes the ONE model call, stores the result. Used by the page buttons (after the
    * person agreed in the popup) and by the Auto scheduler (after an administrator agreed to the schedule). Throws when it fails.
    */
-  const generate = async (project: string, kind: 'wiki' | 'diagram', user: string, glName: string | null, log: (e: AuditInput) => unknown) => {
+  const generate = async (project: string, kind: 'wiki' | 'diagram', user: string, glName: string | null, log: (e: AuditInput) => unknown, lines: UsageLine[] = []) => {
     let warning: string | undefined;
     let pictureUsd = 0;
     let used: { inputTokens: number; outputTokens: number; reasoningTokens?: number } = { inputTokens: 0, outputTokens: 0 };
@@ -823,8 +824,10 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         const tj = effectiveJob('text', (await providers!.getJobs()).text);
         const notes = await nodeIndex!.inProject(project);
         const prompt = buildWikiPrompt(project, glName, notes, { system: tj.systemPrompt, user: tj.userPrompt });
+        const t0 = Date.now();
         const out = await chat(text.provider, text.model, prompt.system, prompt.user, { maxTokens: tj.maxTokens, temperature: tj.temperature, topP: tj.topP, reasoningEffort: tj.reasoningEffort, timeoutMs: tj.timeoutMinutes * 60_000 });
         used = out;
+        lines.push({ what: 'TEXT', model: text.model, calls: 1, in: out.inputTokens, out: out.outputTokens, reasoning: out.reasoningTokens, usd: estimateText(text.model, out.inputTokens, out.outputTokens).usd ?? 0, ms: Date.now() - t0 });
         const meta = await docStore!.save(
           { kind: 'wiki', project, model: `${text.provider.label} / ${text.model}`, by: user, noteCount: prompt.noteCount, noteHashes: noteHashes(notes), inputTokens: out.inputTokens, outputTokens: out.outputTokens, ext: 'md' },
           redact(stripFence(out.text)),
@@ -838,8 +841,11 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         const wikiText = (await docStore!.read(wiki)).toString('utf8');
         const ij = effectiveJob('image', (await providers!.getJobs()).image);
         const ask = buildDiagramPlanPrompt(project, wikiText, { system: ij.systemPrompt, user: ij.userPrompt });
+        const t1 = Date.now();
         const out = await chat(text.provider, text.model, ask.system, ask.user, { maxTokens: ij.maxTokens, temperature: ij.temperature, topP: ij.topP, reasoningEffort: ij.reasoningEffort, timeoutMs: ij.timeoutMinutes * 60_000 });
         used = out;
+        // counted at once: the plan call is billed even when nothing can be stored afterwards
+        lines.push({ what: 'IMAGES', model: text.model, calls: 1, in: out.inputTokens, out: out.outputTokens, reasoning: out.reasoningTokens, usd: estimateText(text.model, out.inputTokens, out.outputTokens).usd ?? 0, ms: Date.now() - t1 });
         let set: DiagramSet;
         try {
           set = parsePlanSet(out.text, glName ?? project);
@@ -875,6 +881,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
           const id = stamp();
           const painted: { name: string; plan: DiagramPlan; ext: string; image: ImageResult }[] = [];
           const missed: string[] = [];
+          const t2 = Date.now();
           for (const p of set.pictures) {
             try {
               const image = await generateImage(img.provider, img.model, buildPicturePrompt(p.plan, ij.picturePrompt));
@@ -887,6 +894,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
               missed.push(`${p.name}: ${why}`);
             }
           }
+          lines.push({ what: 'PICTURES', model: img.model, calls: painted.length, in: 0, out: 0, usd: (imagePriceUsd(img.model) ?? 0) * painted.length, ms: Date.now() - t2 });
           const [first, ...rest] = painted;
           for (const [i, r] of rest.entries()) await docStore!.saveExtra(project, 'diagram', id, i + 1, r.ext, r.image.bytes);
           const meta = await docStore!.save(
@@ -922,13 +930,21 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     jobs.set(project, { kind, state: 'running', startedAt: started });
     holdAiLock(aiLockPath, 'person'); // the admin program's Auto scheduler waits while a person's job runs
     const log = (e: AuditInput) => audit?.log({ ip, user, entityType: `docs_${kind}`, entityName: project, ...e });
+    const lines: UsageLine[] = [];
+    // the cost center: who started it, for which project, what each model used and what it cost (also when the job failed after a billed call)
+    const record = (status: 'done' | 'failed', note?: string) => {
+      const end = Date.now();
+      return appendUsage(cfg.web.usageFile, { time: new Date(started).toISOString(), end: new Date(end).toISOString(), ms: end - started, trigger: 'person', by: user, project, kind, status, lines, note });
+    };
     try {
-      const r = await generate(project, kind, user, glName, log);
+      const r = await generate(project, kind, user, glName, log, lines);
       jobs.set(project, { kind, state: 'done', startedAt: started, warning: r.warning });
+      await record('done', r.warning);
     } catch (err) {
       const msg = failureMessage(err, kind, project);
       jobs.set(project, { kind, state: 'error', startedAt: started, error: msg });
       void log({ event: 'ai_failed', description: msg });
+      await record('failed', msg);
     } finally {
       releaseAiLock(aiLockPath, 'person');
     }
