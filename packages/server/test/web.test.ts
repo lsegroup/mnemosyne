@@ -1203,7 +1203,9 @@ describe('web portal', () => {
       const order = ['llm', 'auto', 'sso', 'audit', 'license'].map((t) => page.indexOf(`data-tab="${t}"`));
       expect(order.every((i) => i > 0)).toBe(true);
       expect([...order].sort((a, b) => a - b)).toEqual(order);
-      expect(page).toMatch(/<section id="tab-license" class="tab" hidden>\s*<h2>License<\/h2>\s*<\/section>/);
+      expect(page).toMatch(/<section id="tab-license" class="tab" hidden>\s*<h2>License<\/h2>/);
+    expect(page).toContain('id="licForm"'); // the key is entered here; the licence itself is handled by the program in front of this server
+    expect(page).toContain('id="licFacts"');
       expect(page).toContain('id="tab-auto"');
 
       // closed to anonymous visitors and to calls from other sites

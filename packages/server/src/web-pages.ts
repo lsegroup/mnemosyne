@@ -590,6 +590,20 @@ export function adminPage(v: AdminView): string {
 
     <section id="tab-license" class="tab" hidden>
       <h2>License</h2>
+      <p class="lead">This installation works free for 30 days from its first start. After that it needs a licence key. A licence counts seats: a seat is a person with a GitLab account who uses Mnemosyne, in any role.</p>
+      <div class="step">
+        <h3>Status</h3>
+        <dl class="facts" id="licFacts"><dt>Status</dt><dd>Loading…</dd></dl>
+        <div class="row" style="margin-top:14px"><button class="btn small" type="button" id="licCheck">Check now</button><span class="msg" id="licMsg"></span></div>
+      </div>
+      <div class="step">
+        <h3>Licence key</h3>
+        <p class="sub">Enter the key you received. The first time it is used it is bound to this installation.</p>
+        <form id="licForm" class="grid" autocomplete="off">
+          <label class="full">Licence key<input id="licKey" maxlength="64" placeholder="LSE-…" autocomplete="off" spellcheck="false"></label>
+          <div class="row full"><button class="btn primary" type="submit">Activate</button><span class="msg" id="licKeyMsg"></span></div>
+        </form>
+      </div>
     </section>
   </main>
 </div>
@@ -639,6 +653,7 @@ function ADMIN_JS(basePath: string): string {
     var t=(location.hash||'#llm').slice(1);if(TABS.indexOf(t)<0)t='llm';
     TABS.forEach(function(n){$('tab-'+n).hidden=(n!==t)});
     if(t==='audit')loadAudit();
+    if(t==='license')loadLicense();
     if(t==='auto')loadAuto(autoLoaded);
     Array.prototype.forEach.call(document.querySelectorAll('.side a'),function(a){a.className=a.getAttribute('data-tab')===t?'active':''});
   }
@@ -1045,6 +1060,38 @@ function ADMIN_JS(basePath: string): string {
     call('PUT','/auto',{config:autoRead(),token:autoToken}).then(function(d){
       $('autoModal').hidden=true;d.projects=d.projects||[];d.runs=d.runs||[];AUTO=d;autoShow(false);note('autoMsg','Saved and agreed. The schedule is ON.',true);
     }).catch(function(e){note('autoModalMsg',e.message);$('autoGo').disabled=!$('autoAgree').checked});
+  });
+
+  // --- licence ---
+  var LIC_STATES={starting:'Starting',trial:'Free trial',licensed:'Licensed','renewal-grace':'Licence period ended, renewal period',locked:'Locked'};
+  function licDate(ms){return ms?new Date(ms).toISOString().slice(0,10)+' (UTC)':'-'}
+  function licFact(dl,k,v){var dt=document.createElement('dt');dt.textContent=k;var dd=document.createElement('dd');dd.textContent=v;dl.appendChild(dt);dl.appendChild(dd)}
+  function renderLicense(s){
+    var dl=$('licFacts');dl.textContent='';
+    licFact(dl,'Status',LIC_STATES[s.state]||s.state);
+    if(s.reason)licFact(dl,'Reason',s.reason);
+    if(s.state==='trial'&&s.trialEndsAt)licFact(dl,'Trial ends',licDate(s.trialEndsAt));
+    if(s.org)licFact(dl,'Licensed to',s.org);
+    if(s.hasKey)licFact(dl,'Licence key',s.keyHint);
+    if(s.licenseExpiresAt)licFact(dl,'Licence period ends',licDate(s.licenseExpiresAt));
+    licFact(dl,'Seats in use',s.seatsUsed+(s.seats===null||s.seats===undefined?' (the licence has no limit)':' of '+s.seats));
+    licFact(dl,'Last check',s.checkedAt?ago(s.checkedAt):'never');
+    if(s.lastError)licFact(dl,'Last problem',s.lastError);
+    licFact(dl,'Installation',s.instanceId);
+    licFact(dl,'Domain',s.domain);
+    licFact(dl,'Licence server',s.server);
+  }
+  function licFail(id,e){note(id,/HTTP 404/.test(e.message)?'Licence handling is not part of this server.':e.message,false)}
+  function loadLicense(){call('GET','/license').then(renderLicense).catch(function(e){licFail('licMsg',e)})}
+  $('licCheck').addEventListener('click',function(){
+    $('licCheck').disabled=true;note('licMsg','Asking the licence server…',true);
+    call('POST','/license/check').then(function(s){renderLicense(s);note('licMsg',s.lastError?'':'Checked.',!s.lastError)}).catch(function(e){licFail('licMsg',e)}).then(function(){$('licCheck').disabled=false});
+  });
+  $('licForm').addEventListener('submit',function(e){
+    e.preventDefault();var k=$('licKey').value.trim();
+    if(!k){note('licKeyMsg','Enter the key first.',false);return}
+    note('licKeyMsg','Checking the key with the licence server…',true);
+    call('POST','/license/activate',{key:k}).then(function(s){$('licKey').value='';renderLicense(s);note('licKeyMsg','The key is accepted.',true)}).catch(function(e2){licFail('licKeyMsg',e2)});
   });
 
   load();loadSso();
