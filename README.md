@@ -86,8 +86,9 @@ See [docs/architecture.md](docs/architecture.md) and [docs/self-hosting.md](docs
 
 ## The admin program
 
-The admin (`/mnemosyne/admin`: sign-in, LLM, SSO, Audit, Auto, License) is a separate, compiled program. It runs in front of this server and
-starts it. It is delivered as a program only; its source is not published.
+The admin (`/mnemosyne/admin`: sign-in, LLM, SSO, Audit, Auto, License) is a separate program written in Go, delivered as a compiled,
+static binary (no runtime to install). It runs in front of this server and starts it. Only the compiled program is published in `bin/`; its
+source is not, which is why GitHub's language statistics, which count source files, show TypeScript and not Go.
 
 | file | platform |
 |---|---|
