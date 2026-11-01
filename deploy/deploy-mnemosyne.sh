@@ -59,6 +59,8 @@ fi
 # available — unpack that instead of building here. This box is RAM-starved
 # and `npm ci --omit=dev` (below) strips out typescript, so there is no tsc
 # to build with on-box anyway.
+# The old build goes first: a module that was removed from the code must not stay behind on the box.
+rm -rf "$INSTALL_DIR/packages/core/dist" "$INSTALL_DIR/packages/server/dist"
 tar xzf /tmp/mnemosyne-dist.tar.gz -C "$INSTALL_DIR"
 rm -f /tmp/mnemosyne-dist.tar.gz
 
