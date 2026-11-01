@@ -1,9 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.6.1 — 2026-11-01
 
-- The admin (sign-in, LLM, SSO, Audit, Auto, License) is no longer part of this server: it is a separate program that runs in front of it and
+The admin becomes a separate, compiled program; every person gets a profile with personal MCP tokens.
+
+### The admin program
+- The admin (sign-in, LLM, SSO, Audit, Auto, License) is no longer part of this server: it is a separate program written in Go that runs in front of it and
   starts it. This server has no `/admin` any more (it answers 404) and no Auto scheduler of its own; it still reads the settings the admin saves.
+- The program is delivered compiled in `bin/` (Linux x86-64 and ARM64, checksums in `bin/SHA256SUMS`); `docs/self-hosting.md` shows how to run it in front of the
+  server. Its source is not published.
+- The admin has a License tab: the state of the licence, the seats in use (a seat is a person with a GitLab account who uses Mnemosyne, in any role), the
+  last check and the licence key. The licensed domain is the host of `MNEMOSYNE_PUBLIC_URL`, or `MNEMOSYNE_LICENSE_DOMAIN`.
+- The deploy script keeps the unit of the admin program, removes the old build before it unpacks the new one and waits for the health answer before the reindex.
 
 ### Profile and personal MCP tokens
 - The signed-in person's name in the header is now a card with a link to their profile. The profile lists their account details and lets them issue their own MCP token.

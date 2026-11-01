@@ -25,10 +25,10 @@ describe('the version of this release', () => {
 
 describe('the line at the bottom of every page', () => {
   const year = new Date().getFullYear();
-  const line = `${year} &copy; LSE Group Corporation <span aria-hidden="true">|</span>Version 0.6`;
+  const line = `${year} &copy; LSE Group Corporation <span aria-hidden="true">|</span>Version 0.6.1`;
 
-  it('reads "2026 © LSE Group Corporation | Version 0.6", with the copyright sign between the year and the name', () => {
-    expect(siteFooter(2026)).toBe('<div class="site-foot">2026 &copy; LSE Group Corporation <span aria-hidden="true">|</span>Version 0.6</div>');
+  it('reads "2026 © LSE Group Corporation | Version 0.6.1", with the copyright sign between the year and the name', () => {
+    expect(siteFooter(2026)).toBe('<div class="site-foot">2026 &copy; LSE Group Corporation <span aria-hidden="true">|</span>Version 0.6.1</div>');
   });
 
   it('is on the sign-in page and the pages of the documentation area', () => {

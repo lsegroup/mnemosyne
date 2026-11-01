@@ -1,6 +1,6 @@
 {
   "name": "mnemosyne",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "mnemosyne server: embedded SQLite (FTS5 + sqlite-vec) memory index, served over MCP (stdio + HTTP) and REST.",
   "license": "SEE LICENSE IN LICENSE",
   "type": "module",
@@ -19,7 +19,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@mnemosyne/core": "0.6.0",
+    "@mnemosyne/core": "0.6.1",
     "@modelcontextprotocol/sdk": "^1.13.1",
     "better-sqlite3": "^11.7.0",
     "commander": "^12.1.0",
