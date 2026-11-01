@@ -2,7 +2,7 @@
   "name": "mnemosyne",
   "version": "0.6.0",
   "description": "mnemosyne server: embedded SQLite (FTS5 + sqlite-vec) memory index, served over MCP (stdio + HTTP) and REST.",
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

@@ -86,4 +86,6 @@ See [docs/architecture.md](docs/architecture.md) and [docs/self-hosting.md](docs
 
 ## License
 
-MIT © GCD Group
+Proprietary, commercial software. © 2026 GCD Investment Group, sold under the LSE Group Corporation
+brand. Not open source and not free; use requires a licence agreement or a written offer from
+LSE Group Corporation, see [LICENSE](LICENSE) and <https://lumanet.info/mnemosyne>.

@@ -3,7 +3,7 @@
   "displayName": "mnemosyne",
   "description": "Browse and capture team memory nodes; MCP-capable AI extensions connect to the mnemosyne server directly.",
   "version": "0.6.0",
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "private": true,
   "engines": {
     "vscode": "^1.90.0"
