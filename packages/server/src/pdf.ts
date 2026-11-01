@@ -248,7 +248,11 @@ export function buildPdf(input: PdfInput): Promise<Buffer> {
 
   for (const d of input.diagrams ?? []) {
     const v = d.vector;
-    if (v && v.width / v.height >= 1.25) {
+    // a painted picture (png/jpeg) is laid out like a drawing: its own size decides whether the page is turned
+    const raster = d.png ? (doc as unknown as { openImage(src: Buffer): { width: number; height: number } }).openImage(d.png) : null;
+    const dw = v ? v.width : raster?.width;
+    const dh = v ? v.height : raster?.height;
+    if (dw && dh && dw / dh >= 1.25) {
       // A wide drawing: the page is turned a quarter turn counter-clockwise (text reads bottom to top, the top of the picture is at
       // the left edge). Inside the turned frame the heading, the caption and the drawing are laid out like on a landscape page, but
       // the frame is as long as the whole page, so the picture is as large as it can be.
@@ -264,8 +268,9 @@ export function buildPdf(input: PdfInput): Promise<Buffer> {
       doc.moveTo(0, 27).lineTo(frameW, 27).lineWidth(0.6).strokeColor(COLOURS.line).stroke();
       doc.font('Helvetica').fontSize(9).fillColor(COLOURS.muted).text(pdfText(d.caption), 0, 33, { lineBreak: false });
       const top = 54;
-      const s = Math.min(frameW / v.width, (frameH - top) / v.height);
-      v.draw(doc, (frameW - v.width * s) / 2, top, s);
+      const s = Math.min(frameW / dw, (frameH - top) / dh);
+      if (v) v.draw(doc, (frameW - dw * s) / 2, top, s);
+      else if (d.png) doc.image(d.png, (frameW - dw * s) / 2, top, { width: dw * s, height: dh * s });
       doc.restore();
     } else {
       heading(2, d.name);

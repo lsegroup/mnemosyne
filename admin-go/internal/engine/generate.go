@@ -22,11 +22,13 @@ const (
 	Painted Kind = "picture"
 )
 
-// PictureOutcome is the workflow diagram the image model painted inside a Diagram job.
+// PictureOutcome is what the image model painted inside a Diagram job: the overview and every detail picture of the plan.
 type PictureOutcome struct {
 	// Model is the image model (its id, e.g. "muse-image-1.0").
 	Model string
-	// USD is the list price of one picture; zero when the model has no list price.
+	// Count is how many pictures were painted (each is one call).
+	Count int
+	// USD is the list price of all of them; zero when the model has no list price.
 	USD float64
 	// MS is how long the call took.
 	MS int64
@@ -52,6 +54,12 @@ type Generator struct {
 	Notes     *Index
 	Docs      *DocStore
 }
+
+// MaxPictures is the most pictures one diagram job paints (the plan holds at most this many); TypicalPictures is what the estimate counts on.
+const (
+	MaxPictures     = maxPictures
+	TypicalPictures = 3
+)
 
 var reFence = regexp.MustCompile("(?is)^```(?:markdown|md)?\n(.*?)\n```$")
 
@@ -169,10 +177,7 @@ func (g *Generator) Generate(project string, kind Kind, user, glName string, log
 		}
 		in, outTok := out.InputTokens, out.OutputTokens
 		plan := overview.Plan
-		meta, err := g.Docs.Save(DocMeta{Kind: "diagram", Project: project, Model: "Mnemosyne, planned by " + label, By: user, BasedOn: wiki.ID, InputTokens: &in, OutputTokens: &outTok, Ext: "svg", Plan: &plan, Pictures: details}, []byte(RenderSVG(Layout(plan), plan)))
-		if err != nil {
-			return Outcome{}, err
-		}
+		var notes []string
 		tail := ""
 		if len(set.Dropped) > 0 {
 			shown := set.Dropped[:min(3, len(set.Dropped))]
@@ -180,48 +185,107 @@ func (g *Generator) Generate(project string, kind Kind, user, glName string, log
 			if len(set.Dropped) > 3 {
 				more = "; ..."
 			}
-			warning = fmt.Sprintf("The diagrams were drawn, but %d item(s) of the AI's plan could not be used and were left out: %s%s.", len(set.Dropped), strings.Join(shown, "; "), more)
+			notes = append(notes, fmt.Sprintf("%d item(s) of the AI's plan could not be used and were left out: %s%s.", len(set.Dropped), strings.Join(shown, "; "), more))
 			tail = fmt.Sprintf("; left out of the plan: %d", len(set.Dropped))
 		}
 		plural := ""
 		if len(set.Pictures) > 1 {
 			plural = "s"
 		}
-		log(audit.Input{Event: "ai_done", EntityID: meta.ID, Description: fmt.Sprintf("Architecture diagrams drawn by Mnemosyne from a plan written by %s (%d picture%s: %s; %d boxes, %d arrows; %d tokens in, %d out%s)%s", model, len(set.Pictures), plural, strings.Join(names, ", "), boxes, arrows, out.InputTokens, out.OutputTokens, thinking(out.ReasoningTokens), tail)})
-
-		// The image model chosen in Admin -> LLM -> Images paints the workflow diagram as a picture, from the exact plan above (every word is
-		// given to it). The exact diagrams are saved already, so a failure here costs only the picture and never fails (or repeats) the job.
 		ip, im, aerr := g.Providers.Assigned(jobs.Image)
-		if aerr == nil && ip != nil {
-			began := time.Now()
-			pic, perr := GenerateImage(*ip, im, BuildPicturePrompt(plan), 0)
+		if aerr != nil {
+			return Outcome{}, aerr
+		}
+		if ip == nil {
+			// no image model chosen: Mnemosyne draws the exact diagrams from the plan itself
+			meta, err := g.Docs.Save(DocMeta{Kind: "diagram", Project: project, Model: "Mnemosyne, planned by " + label, By: user, BasedOn: wiki.ID, InputTokens: &in, OutputTokens: &outTok, Ext: "svg", Plan: &plan, Pictures: details}, []byte(RenderSVG(Layout(plan), plan)))
+			if err != nil {
+				return Outcome{}, err
+			}
+			removed := g.Docs.PruneDiagrams(project, meta.ID)
+			if len(notes) > 0 {
+				warning = "The diagrams were drawn, but " + strings.Join(notes, " ")
+			}
+			log(audit.Input{Event: "ai_done", EntityID: meta.ID, Description: fmt.Sprintf("Architecture diagrams drawn by Mnemosyne from a plan written by %s (%d picture%s: %s; %d boxes, %d arrows; %d tokens in, %d out%s)%s; %d files of the earlier diagrams deleted", model, len(set.Pictures), plural, strings.Join(names, ", "), boxes, arrows, out.InputTokens, out.OutputTokens, thinking(out.ReasoningTokens), tail, removed)})
+		} else {
+			// The image model paints every picture of the plan, from the plan's exact words. Nothing earlier is touched until the OVERVIEW is
+			// painted (a failure then keeps what the project had); a detail picture that cannot be painted is left out and reported. A failure
+			// here is a plain failure, never an UnreachableError: the plan call was billed and must not be sent again.
 			imgLabel := ip.Label + " / " + im
-			if perr == nil {
-				var pm DocMeta
-				if pm, perr = g.Docs.Save(DocMeta{Kind: "picture", ID: meta.ID, Project: project, Model: imgLabel, By: user, BasedOn: meta.ID, Ext: pic.Ext}, pic.Bytes); perr == nil {
-					usd, _ := ImagePriceUSD(im)
-					picture = &PictureOutcome{Model: im, USD: usd, MS: time.Since(began).Milliseconds()}
-					log(audit.Input{Event: "ai_done", EntityType: "docs_picture", EntityID: pm.ID, Description: fmt.Sprintf("Workflow diagram painted by %s from the plan (%d KB %s)", imgLabel, len(pic.Bytes)/1024, strings.TrimPrefix(pic.Mime, "image/"))})
+			ij := jobs.Effect(jobs.Image, stored[jobs.Image])
+			dflt := jobs.Defs[jobs.Image].Defaults.PicturePrompt
+			id := Stamp(g.Docs.now().UTC())
+			type painted struct {
+				pic Picture
+				img Image
+			}
+			var done []painted
+			var missed []string
+			began := time.Now()
+			for _, p := range set.Pictures {
+				img, perr := GenerateImage(*ip, im, BuildPicturePrompt(p.Plan, ij.PicturePrompt, dflt), 0)
+				if perr != nil {
+					why := perr.Error()
+					var ve *jobs.ValidationError
+					var ue *UnreachableError
+					switch {
+					case errors.As(perr, &ve):
+						why = ve.Msg
+					case errors.As(perr, &ue):
+						why = ue.Msg
+					}
+					if len(done) == 0 {
+						return Outcome{}, jobs.Invalid("The plan was written (%s tokens in, %s out were used), but the image model %s could not paint the overview: %s The earlier diagrams of this project were kept.", commas(out.InputTokens), commas(out.OutputTokens), im, why)
+					}
+					missed = append(missed, p.Name+": "+why)
+					continue
+				}
+				done = append(done, painted{pic: Picture{Name: p.Name, Plan: p.Plan, Ext: img.Ext}, img: img})
+			}
+			var rest []Picture
+			size := 0
+			var paintedNames []string
+			for i, d := range done {
+				size += len(d.img.Bytes)
+				paintedNames = append(paintedNames, d.pic.Name)
+				if i == 0 {
+					continue
+				}
+				if err := g.Docs.SaveExtra(project, "diagram", id, i, d.pic.Ext, d.img.Bytes); err != nil {
+					return Outcome{}, err
+				}
+				rest = append(rest, d.pic)
+			}
+			first := done[0]
+			firstPlan := first.pic.Plan
+			meta, err := g.Docs.Save(DocMeta{Kind: "diagram", ID: id, Project: project, Model: imgLabel + ", planned by " + label, By: user, BasedOn: wiki.ID, InputTokens: &in, OutputTokens: &outTok, Ext: first.pic.Ext, Plan: &firstPlan, Pictures: rest}, first.img.Bytes)
+			if err != nil {
+				return Outcome{}, err
+			}
+			removed := g.Docs.PruneDiagrams(project, meta.ID)
+			usd, _ := ImagePriceUSD(im)
+			picture = &PictureOutcome{Model: im, Count: len(done), USD: usd * float64(len(done)), MS: time.Since(began).Milliseconds()}
+			missedWords := ""
+			if len(missed) > 0 {
+				shown := missed[:min(2, len(missed))]
+				more := ""
+				if len(missed) > 2 {
+					more = "; ..."
+				}
+				notes = append(notes, fmt.Sprintf("%d detail picture(s) could not be painted and are missing: %s%s.", len(missed), strings.Join(shown, "; "), more))
+				missedWords = fmt.Sprintf("; not painted: %d", len(missed))
+				for _, m := range missed {
+					log(audit.Input{Event: "ai_failed", EntityType: "docs_picture", Description: `Picture "` + m + `"`})
 				}
 			}
-			if perr != nil {
-				why := perr.Error()
-				var ve *jobs.ValidationError
-				var ue *UnreachableError
-				switch {
-				case errors.As(perr, &ve):
-					why = ve.Msg
-				case errors.As(perr, &ue):
-					why = ue.Msg
-				default:
-					why = "the picture could not be stored (" + why + ")"
-				}
-				if warning != "" {
-					warning += " "
-				}
-				warning += fmt.Sprintf("The exact diagrams were saved, but the image model %s could not paint the workflow diagram: %s", im, why)
-				log(audit.Input{Event: "ai_failed", EntityType: "docs_picture", Description: fmt.Sprintf("Workflow diagram by %s failed: %s", imgLabel, why)})
+			if len(notes) > 0 {
+				warning = "The workflow diagram was painted, but " + strings.Join(notes, " ")
 			}
+			pl := ""
+			if len(done) > 1 {
+				pl = "s"
+			}
+			log(audit.Input{Event: "ai_done", EntityID: meta.ID, Description: fmt.Sprintf("Workflow diagram painted by %s: %d picture%s (%s; %d KB) from a plan written by %s (%d boxes, %d arrows; %d tokens in, %d out%s)%s%s; %d files of the earlier diagrams deleted", imgLabel, len(done), pl, strings.Join(paintedNames, ", "), size/1024, model, boxes, arrows, out.InputTokens, out.OutputTokens, thinking(out.ReasoningTokens), missedWords, tail, removed)})
 		}
 	}
 	o := Outcome{Model: model, InputTokens: used.InputTokens, OutputTokens: used.OutputTokens, ReasoningTokens: used.ReasoningTokens, Warning: warning, Picture: picture}

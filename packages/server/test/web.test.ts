@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -218,7 +218,7 @@ describe('web portal', () => {
       MNEMOSYNE_GITLAB_URL: gitlabUrl,
       MNEMOSYNE_GITLAB_CLIENT_ID: 'cid',
       MNEMOSYNE_GITLAB_CLIENT_SECRET: 'csecret',
-      MNEMOSYNE_AI_DAILY_LIMIT: '4',
+      MNEMOSYNE_AI_DAILY_LIMIT: '6',
       MNEMOSYNE_ALIAS_HOSTS: 'Old-Name.example.test, other.example.test',
     });
     webCfg = cfg;
@@ -523,7 +523,7 @@ describe('web portal', () => {
   describe('AI documentation (agreement, spending guards, PDF)', () => {
     let llm: Server;
     let llmBase = '';
-    const calls = { chat: 0, image: 0, imagePrompt: '', failImage: false, briefMax: 0, limits: [] as number[], lastChat: null as null | { max_tokens?: number; max_completion_tokens?: number; temperature?: number; top_p?: number; reasoning_effort?: string; messages: { role: string; content: string }[] } };
+    const calls = { chat: 0, image: 0, imagePrompts: [] as string[], failImage: 0, briefMax: 0, limits: [] as number[], lastChat: null as null | { max_tokens?: number; max_completion_tokens?: number; temperature?: number; top_p?: number; reasoning_effort?: string; messages: { role: string; content: string }[] } };
     const dropped = { once: false };
     // what the fake text model answers when asked for a diagram plan (the label holds characters that must be escaped in the SVG)
     const DIAGRAM_PLAN = {
@@ -594,8 +594,8 @@ describe('web portal', () => {
             });
           } else if (req.url === '/v1/images/generations') {
             calls.image++;
-            calls.imagePrompt = (JSON.parse(raw) as { prompt?: string }).prompt ?? '';
-            if (calls.failImage) {
+            calls.imagePrompts.push((JSON.parse(raw) as { prompt?: string }).prompt ?? '');
+            if (calls.failImage === -1 || calls.failImage === calls.image) { // -1: every call; n: only the n-th call of the whole test
               res.writeHead(500, { 'Content-Type': 'application/json' });
               res.end('{}');
             } else reply({ data: [{ b64_json: png.toString('base64') }] });
@@ -686,45 +686,42 @@ describe('web portal', () => {
       expect(page).toMatch(/<nav class="card contents"><strong>Contents<\/strong><ol>[\s\S]*<li><a href="#h-overview">Overview<\/a><ul><li><a href="#h-details">Details<\/a><\/li><\/ul><\/li>[\s\S]*<li><a href="#h-known-issues">Known issues<\/a><\/li>[\s\S]*<li><a href="#h-change-history">Change history<\/a><\/li><\/ol><\/nav>/);
       expect(page).toContain('Regenerate documentation');
 
-      // workflow diagram: the text model writes the plan, Mnemosyne draws it itself (exact words) AND the image model chosen in Admin paints it
-      // as a picture from the same plan, only after agreement
+      // workflow diagram: the text model writes the plan, the image model chosen in Admin paints EVERY picture of it, and the new pictures
+      // replace everything the project had before (owner order 2026-11-01), only after agreement
+      const docs = join(tmp, '.mnemosyne', 'docs', 'alpha');
+      for (const old of ['diagram-20260101T000000Z.svg', 'diagram-20260101T000000Z.json', 'diagram-20260101T000000Z-1.svg', 'picture-20260101T000000Z.webp', 'picture-20260101T000000Z.json']) await writeFile(join(docs, old), '{}');
       const est = await (await api(admin, '/estimate?kind=diagram')).json();
-      expect(est.facts.map((f: string[]) => f[0])).toEqual(expect.arrayContaining(['Text model', 'Image model', 'Estimated cost']));
+      expect(est.facts.map((f: string[]) => f[0])).toEqual(expect.arrayContaining(['Text model', 'Image model', 'Pictures', 'Replaces', 'Estimated cost']));
       expect(est.facts.find((f: string[]) => f[0] === 'Image model')[1]).toBe('Fake AI / image-model');
-      expect(est.what).toContain('paints the workflow diagram as a picture');
+      expect(est.what).toContain('REPLACE every earlier diagram and picture of this project');
+      expect(est.what).toContain('paints every picture of the plan');
       expect((await api(admin, '/generate', 'POST', { kind: 'diagram', token: est.token })).status).toBe(202);
       expect((await waitIdle(admin)).state).toBe('done');
-      expect(calls.image).toBe(1); // the image model IS called: this is the picture the owner ordered
+      expect(calls.image).toBe(2); // the image model IS called, once for the overview and once for the detail picture of the plan
       // it is told every word of the plan, and to use no other
-      expect(calls.imagePrompt).toContain('"Browser"');
-      expect(calls.imagePrompt).toContain('"GitLab SSO"');
-      expect(calls.imagePrompt).toContain('"Browser" -> "Notes <service> & \'index\'"'); // arrows name the boxes by their exact label (a quotation mark inside a label becomes an apostrophe)
-      expect(calls.imagePrompt).toContain('label on the arrow: "HTTPS"');
-      expect(calls.imagePrompt).toContain('spell every word EXACTLY');
+      expect(calls.imagePrompts[0]).toContain('"Browser"');
+      expect(calls.imagePrompts[0]).toContain('"GitLab SSO"');
+      expect(calls.imagePrompts[0]).toContain('"Browser" -> "Notes <service> & \'index\'"'); // arrows name the boxes by their exact label (a quotation mark inside a label becomes an apostrophe)
+      expect(calls.imagePrompts[0]).toContain('label on the arrow: "HTTPS"');
+      expect(calls.imagePrompts[0]).toContain('spell every word EXACTLY');
+      expect(calls.imagePrompts[1]).toContain('"Web portal" -> "GitLab OAuth", label on the arrow: "authorize"'); // the detail picture gets ITS plan
+      // everything the project had before is gone: only the new set is left
+      const left = (await readdir(docs)).filter((n) => n.startsWith('diagram-') || n.startsWith('picture-')).sort();
+      expect(left.every((n) => !n.includes('20260101T000000Z'))).toBe(true);
+      expect(left.filter((n) => n.endsWith('.json')).length).toBe(1);
+      expect(left.length).toBe(3); // the set's description, the overview and the one detail picture
       const after = await (await fetch(`${base}/p/alpha`, { headers: { cookie: admin } })).text();
-      // the painted picture is shown first, in the card, and served with the type of its bytes
-      const painted = /<img src="([^"]+\/picture\/[^"]+)" alt="Workflow diagram of alpha, painted by the image model"/.exec(after)?.[1];
-      expect(painted).toBeTruthy();
-      expect(after).toContain('painted ');
-      expect(after).toContain('by Fake AI / image-model');
-      const pimg = await fetch(`${new URL(base).origin}${painted}`, { headers: { cookie: admin } });
-      expect(pimg.status).toBe(200);
-      expect(pimg.headers.get('content-type')).toBe('image/png');
-      expect(Buffer.from(await pimg.arrayBuffer()).equals(png)).toBe(true);
-      expect((await fetch(`${new URL(base).origin}${painted}`, { redirect: 'manual' })).status).toBe(302); // not signed in
-      const src = /<img src="([^"]+\/diagram\/[^"]+)" alt="Workflow diagram/.exec(after)?.[1];
+      const src = /<img src="([^"]+\/diagram\/\d{8}T\d{6}Z)" alt="Workflow diagram of alpha"/.exec(after)?.[1];
       expect(src).toContain('/p/alpha/diagram/');
-      expect(after).toContain('by Mnemosyne, planned by Fake AI / text-model');
+      expect(after).toContain('by Fake AI / image-model, planned by Fake AI / text-model'); // the stamp names the model that painted it
+      expect(after).not.toContain('Earlier diagrams'); // no older version is kept
       const img = await fetch(`${new URL(base).origin}${src}`, { headers: { cookie: admin } });
-      expect(img.headers.get('content-type')).toBe('image/svg+xml');
-      expect(img.headers.get('content-security-policy')).toContain('sandbox');
-      const svg = await img.text();
-      expect(svg.startsWith('<svg')).toBe(true);
-      expect(svg).toContain('>GitLab SSO<'); // spelled exactly as in the plan
-      expect(svg).toContain('Notes &lt;service&gt; &amp; &quot;index&quot;'); // escaped, never markup
-      expect(svg).not.toContain('<script');
+      expect(img.status).toBe(200);
+      expect(img.headers.get('content-type')).toBe('image/png');
+      expect(Buffer.from(await img.arrayBuffer()).equals(png)).toBe(true); // the picture as the provider sent it
+      expect((await fetch(`${new URL(base).origin}${src}`, { redirect: 'manual' })).status).toBe(302); // not signed in
 
-      // a second, detail picture: thumbnail under the overview in the card, drawn on request, its own page in the PDF
+      // the detail picture the image model painted: thumbnail under the overview in the card, its own page in the PDF
       const detail = /<a class="pic sub" href="([^"]+\/diagram\/\d{8}T\d{6}Z\/1)"/.exec(after)?.[1];
       expect(detail).toBeTruthy();
       expect(after).toContain('Detail pictures · click to enlarge');
@@ -736,13 +733,10 @@ describe('web portal', () => {
       expect(after).toContain('<span>Sign-in and security</span>');
       const dres = await fetch(`${new URL(base).origin}${detail}`, { headers: { cookie: admin } });
       expect(dres.status).toBe(200);
-      expect(dres.headers.get('content-type')).toBe('image/svg+xml');
-      const dsvg = await dres.text();
-      expect(dsvg).toContain('>GitLab OAuth<');
-      expect(dsvg).toContain('Alpha - Sign-in and security'); // the title names the topic
+      expect(dres.headers.get('content-type')).toBe('image/png');
+      expect(Buffer.from(await dres.arrayBuffer()).equals(png)).toBe(true);
       expect((await fetch(`${new URL(base).origin}${detail!.replace(/\/1$/, '/2')}`, { headers: { cookie: admin } })).status).toBe(404); // there is no third picture
       expect((await fetch(`${new URL(base).origin}${detail}`, { redirect: 'manual' })).status).toBe(302); // not signed in
-      expect((await fetch(`${new URL(base).origin}${src}`, { redirect: 'manual' })).status).toBe(302); // not signed in
 
       // layout: article left, infobox card right with the small clickable diagram, rule, then the change history
       // the box comes FIRST inside the article card (a float sits at the top only if it comes first), then the text; the change history follows the card
@@ -915,34 +909,88 @@ describe('web portal', () => {
       expect(pdf.headers.get('content-disposition')).toContain('alpha-documentation-');
       const bytes = Buffer.from(await pdf.arrayBuffer());
       expect(bytes.subarray(0, 5).toString()).toBe('%PDF-');
-      expect((bytes.toString('latin1').match(/\/Type \/Page\b/g) ?? []).length).toBeGreaterThanOrEqual(6); // cover, index, painted workflow diagram, overview, detail picture, content
+      expect((bytes.toString('latin1').match(/\/Type \/Page\b/g) ?? []).length).toBeGreaterThanOrEqual(5); // cover, index, painted overview, painted detail picture, content
       expect(bytes.toString('latin1')).not.toContain('/MediaBox [0 0 841.89 595.28]'); // every page stays portrait; a wide diagram is turned on its page
       const page = await (await fetch(`${base}/p/alpha`, { headers: { cookie: dev } })).text();
       expect(page).toContain('Download PDF');
       expect(page).toContain('Workflow diagram');
     });
 
-    it('keeps the exact diagrams and says why when the image model cannot paint the picture', async () => {
+    it('leaves out a detail picture the image model cannot paint, and says so', async () => {
       const admin = cookiesOf(await signIn('admin-code'));
       const est = await (await api(admin, '/estimate?kind=diagram')).json();
-      calls.failImage = true;
+      calls.failImage = calls.image + 2; // the second call of this run: the detail picture
       try {
         expect((await api(admin, '/generate', 'POST', { kind: 'diagram', token: est.token })).status).toBe(202);
         const st = await waitIdle(admin);
-        expect(st.state).toBe('done'); // the diagrams are saved
-        expect(st.warning).toContain('could not paint the workflow diagram');
-        expect(st.warning).toContain('image-model');
+        expect(st.state).toBe('done'); // the overview was painted and saved
+        expect(st.warning).toContain('1 detail picture(s) could not be painted and are missing');
+        expect(st.warning).toContain('Sign-in and security');
       } finally {
-        calls.failImage = false;
+        calls.failImage = 0;
       }
       const page = await (await fetch(`${base}/p/alpha`, { headers: { cookie: admin } })).text();
-      expect(page).toContain('by Mnemosyne, planned by Fake AI / text-model'); // the new exact diagram
-      expect(page).toContain('alt="Workflow diagram of alpha, painted by the image model"'); // the picture of the earlier run stays until a new one is painted
+      expect(page).toContain('alt="Workflow diagram of alpha"');
+      expect(page).not.toContain('Detail pictures'); // the missing one is not shown, nothing is left of the earlier set either
+    });
+
+    it('keeps the earlier diagrams when the image model cannot even paint the overview', async () => {
+      const admin = cookiesOf(await signIn('admin-code'));
+      const before = await (await fetch(`${base}/p/alpha`, { headers: { cookie: admin } })).text();
+      const was = /<img src="([^"]+\/diagram\/\d{8}T\d{6}Z)" alt="Workflow diagram of alpha"/.exec(before)?.[1];
+      const est = await (await api(admin, '/estimate?kind=diagram')).json();
+      calls.failImage = -1;
+      try {
+        expect((await api(admin, '/generate', 'POST', { kind: 'diagram', token: est.token })).status).toBe(202);
+        const st = await waitIdle(admin);
+        expect(st.state).toBe('error');
+        expect(st.error).toContain('could not paint the overview');
+        expect(st.error).toContain('The earlier diagrams of this project were kept.');
+      } finally {
+        calls.failImage = 0;
+      }
+      const page = await (await fetch(`${base}/p/alpha`, { headers: { cookie: admin } })).text();
+      expect(page).toContain(`<img src="${was}"`); // still the diagram from before
+    });
+
+    it('draws the exact diagrams itself when no image model is chosen, and they replace the painted ones too', async () => {
+      const admin = cookiesOf(await signIn('admin-code'));
+      const store = new ProviderStore(join(tmp, '.mnemosyne', 'providers.enc'), deriveKeys(SECRET).enc);
+      const was = await store.list();
+      await store.setAssignments({ text: was.assignments.text! });
+      try {
+        const est = await (await api(admin, '/estimate?kind=diagram')).json();
+        expect(est.facts.find((f: string[]) => f[0] === 'Image model')[1]).toContain('none chosen');
+        expect(est.what).toContain('Mnemosyne draws the pictures itself');
+        const imagesBefore = calls.image;
+        expect((await api(admin, '/generate', 'POST', { kind: 'diagram', token: est.token })).status).toBe(202);
+        expect((await waitIdle(admin)).state).toBe('done');
+        expect(calls.image).toBe(imagesBefore); // no image model, no image call
+        const after = await (await fetch(`${base}/p/alpha`, { headers: { cookie: admin } })).text();
+        const src = /<img src="([^"]+\/diagram\/\d{8}T\d{6}Z)" alt="Workflow diagram of alpha"/.exec(after)?.[1];
+        expect(after).toContain('by Mnemosyne, planned by Fake AI / text-model');
+        const img = await fetch(`${new URL(base).origin}${src}`, { headers: { cookie: admin } });
+        expect(img.headers.get('content-type')).toBe('image/svg+xml');
+        expect(img.headers.get('content-security-policy')).toContain('sandbox');
+        const svg = await img.text();
+        expect(svg.startsWith('<svg')).toBe(true);
+        expect(svg).toContain('>GitLab SSO<'); // spelled exactly as in the plan
+        expect(svg).toContain('Notes &lt;service&gt; &amp; &quot;index&quot;'); // escaped, never markup
+        expect(svg).not.toContain('<script');
+        const detail = /<a class="pic sub" href="([^"]+\/diagram\/\d{8}T\d{6}Z\/1)"/.exec(after)?.[1];
+        const dsvg = await (await fetch(`${new URL(base).origin}${detail}`, { headers: { cookie: admin } })).text();
+        expect(dsvg).toContain('>GitLab OAuth<');
+        expect(dsvg).toContain('Alpha - Sign-in and security'); // the title names the topic
+        const docs = join(tmp, '.mnemosyne', 'docs', 'alpha');
+        expect((await readdir(docs)).filter((n) => n.startsWith('diagram-') && n.endsWith('.json')).length).toBe(1); // the painted set is gone
+      } finally {
+        await store.setAssignments(was.assignments);
+      }
     });
 
     it('stops at the daily limit and records every agreement in the audit trail', async () => {
       const admin = cookiesOf(await signIn('admin-code'));
-      // three runs so far (wiki, diagram, diagram); the limit is 4
+      // five runs so far (wiki and four diagram runs); the limit is 6
       const e3 = await (await api(admin, '/estimate?kind=wiki')).json();
       expect((await api(admin, '/generate', 'POST', { kind: 'wiki', token: e3.token })).status).toBe(202);
       await waitIdle(admin);
@@ -950,15 +998,15 @@ describe('web portal', () => {
       const blocked = await api(admin, '/generate', 'POST', { kind: 'wiki', token: e4.token });
       expect(blocked.status).toBe(429);
       expect((await blocked.json()).error).toContain('daily limit');
-      expect(calls.chat).toBe(4); // article, two diagram plans, second article; the fifth run never reached the provider
+      expect(calls.chat).toBe(6); // article, four diagram plans, second article; the seventh run never reached the provider
 
       await new Promise((r) => setTimeout(r, 250)); // audit lines are written asynchronously
       const audit = (await readFile(join(tmp, '.mnemosyne', 'audit.jsonl'), 'utf8')).split('\n').filter(Boolean).map((l) => JSON.parse(l));
       const starts = audit.filter((e) => e.event === 'ai_start');
-      expect(starts.length).toBe(4);
+      expect(starts.length).toBe(6);
       expect(starts[0].description).toContain('Agreed to use AI');
       expect(starts[0].description).toContain('Estimated cost');
-      expect(audit.filter((e) => e.event === 'ai_done').length).toBe(5); // article, diagram, painted picture, diagram (its picture failed), article
+      expect(audit.filter((e) => e.event === 'ai_done').length).toBe(5); // article, painted diagram, diagram with a missing detail picture, drawn diagram, article
       expect(audit.some((e) => e.event === 'ai_failed' && e.entityType === 'docs_picture')).toBe(true);
       expect(audit.some((e) => e.event === 'denied' && /daily limit/.test(e.description))).toBe(true);
       expect(audit.some((e) => e.event === 'denied' && /no valid agreement/.test(e.description))).toBe(true);

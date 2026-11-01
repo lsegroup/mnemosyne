@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { MemoryNode } from '@mnemosyne/core';
 import type { DiagramPlan } from './diagram.js';
@@ -6,15 +6,15 @@ import { redact } from './docs.js';
 import type { ImageResult } from './llm-call-image.js';
 
 /**
- * Generated project documentation: a Wikipedia-style document written from a project's notes, the architecture
- * diagrams drawn from a plan, the workflow diagram painted by the image model from the same plan, and a PDF built from all of them. Every artefact is stored with its
+ * Generated project documentation: a Wikipedia-style document written from a project's notes, the workflow
+ * diagram painted by the image model from a plan the text model wrote (or, with no image model chosen, drawn from that plan by Mnemosyne itself), and a PDF built from both. Every artefact is stored with its
  * date stamp, so earlier versions stay available.
  *
  * This file builds prompts and stores results; the actual model calls live in llm-call-chat.ts and
  * llm-call-image.ts (the only places that spend money).
  */
 
-export type DocKind = 'wiki' | 'diagram' | 'picture' | 'pdf';
+export type DocKind = 'wiki' | 'diagram' | 'pdf';
 
 export interface DocMeta {
   kind: DocKind;
@@ -31,14 +31,17 @@ export interface DocMeta {
   noteHashes?: Record<string, string>;
   inputTokens?: number;
   outputTokens?: number;
-  /** The wiki version a diagram or PDF was made from (for a picture: the diagram it was made together with, which has the same id). */
+  /** The wiki version a diagram or PDF was made from. */
   basedOn?: string;
   /** The diagram a PDF embeds, if there was one. */
   diagram?: string;
   /** For a diagram drawn by Mnemosyne itself: the plan it was drawn from (the PDF draws the same plan as vectors). */
   plan?: DiagramPlan;
-  /** The DETAIL pictures of the same diagram set (the overview is `plan` and the stored SVG); drawn on request and in the PDF. */
-  pictures?: { name: string; plan: DiagramPlan }[];
+  /**
+   * The DETAIL pictures of the same diagram set (the overview is `plan` and the stored file). `ext` is set when the image model painted the
+   * picture (stored as `diagram-<id>-<n>.<ext>`); without it the picture is drawn from the plan on request and in the PDF.
+   */
+  pictures?: { name: string; plan: DiagramPlan; ext?: string }[];
   ext: string;
 }
 
@@ -61,6 +64,46 @@ export class DocStore {
     await writeFile(join(dir, `${meta.kind}-${full.id}.${meta.ext}`), content, { mode: 0o640 });
     await writeFile(join(dir, `${meta.kind}-${full.id}.json`), JSON.stringify(full, null, 2), { mode: 0o640 });
     return full;
+  }
+
+  /** Writes the file of one more picture of a diagram set (`diagram-<id>-<n>.<ext>`); the set's own `save` comes last and makes it count. */
+  async saveExtra(project: string, kind: DocKind, id: string, n: number, ext: string, content: Buffer): Promise<void> {
+    const dir = this.dir(project);
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, `${kind}-${id}-${n}.${ext}`), content, { mode: 0o640 });
+  }
+
+  /** The stored file of picture `n` (1 = the first detail picture) of a diagram set that was painted by an image model. */
+  async readExtra(meta: DocMeta, n: number): Promise<Buffer | null> {
+    const ext = meta.pictures?.[n - 1]?.ext;
+    if (!ext || !/^[a-z0-9]{2,5}$/.test(ext)) return null;
+    return readFile(join(this.dir(meta.project), `${meta.kind}-${meta.id}-${n}.${ext}`));
+  }
+
+  /**
+   * A new diagram set replaces every older one of the project: the owner's rule is that pressing "Create workflow diagram" leaves only the
+   * new images (older diagrams, their detail pictures and the pictures an earlier build kept as `picture-*` are deleted). Returns how many
+   * files were removed. Only call it after the new set has been saved completely.
+   */
+  async pruneDiagrams(project: string, keepId: string): Promise<number> {
+    let names: string[] = [];
+    try {
+      names = await readdir(this.dir(project));
+    } catch {
+      return 0;
+    }
+    let removed = 0;
+    for (const n of names) {
+      const old = n.startsWith('picture-') || (n.startsWith('diagram-') && n !== `diagram-${keepId}` && !n.startsWith(`diagram-${keepId}.`) && !n.startsWith(`diagram-${keepId}-`));
+      if (!old) continue;
+      try {
+        await rm(join(this.dir(project), n), { force: true });
+        removed++;
+      } catch {
+        /* a file that cannot be removed stays; the next run tries again */
+      }
+    }
+    return removed;
   }
 
   /** Newest first. */
@@ -235,22 +278,27 @@ export function buildDiagramPlanPrompt(project: string, wiki: string, tpl: Promp
 }
 
 /**
- * What the IMAGE MODEL is told when it paints the workflow diagram (Admin -> LLM -> Images). The text model has already planned the
- * system as data (diagram.ts validates it), so the picture is described box by box and arrow by arrow with the exact words: an image
- * model draws text as pixels and spells badly when it has to invent the words, so it is given every word and told to use no other.
- * Mnemosyne also draws the same plan itself (exact, vector) next to this picture.
+ * What the IMAGE MODEL is told when it paints a picture of the workflow diagram (Admin -> LLM -> Images, "Instruction for the picture"). The text
+ * model has already planned the system as data (diagram.ts validates it), so `{{plan}}` is the picture described box by box and arrow by arrow
+ * with the exact words: an image model draws text as pixels and spells badly when it has to invent the words, so it is given every word and told
+ * to use no other. No colours are named: the administrator decides whether the picture gets any.
  */
-export function buildPicturePrompt(plan: DiagramPlan): string {
+export const DEFAULT_PICTURE_PROMPT = [
+  'Draw a clear workflow / architecture diagram of the software system "{{title}}" as one flat, two-dimensional picture.',
+  'Lines: every arrow and connector is a STRAIGHT line that runs only horizontally or vertically and turns only at right angles; never curved, never diagonal. Boxes are rectangles in a tidy grid, every arrow ends in an arrowhead, nothing overlaps, nothing is cut off, all text is large and easy to read.',
+  'Layout: the columns run from LEFT to RIGHT in the order a request travels, closest to the user first. The boxes of a column stand above each other.',
+  '',
+  '{{plan}}',
+  '',
+  'RULES: spell every word EXACTLY as it is written between the quotation marks above, character for character, and put no other text anywhere in the picture (no title, no caption, no extra words, no numbers that are not given). Draw every box once and every arrow between exactly the two boxes named. Do not add, invent or leave out anything.',
+].join('\n');
+
+/** The boxes and arrows of one picture of the plan, with the exact words in quotation marks: what `{{plan}}` stands for. */
+export function planWords(plan: DiagramPlan): string {
   const q = (t: string) => `"${t.replace(/"/g, "'")}"`;
   const label = new Map<string, string>();
   for (const c of plan.columns) for (const n of c.nodes) label.set(n.id, n.label);
-  const lines = [
-    `Draw a clear, professional workflow / architecture diagram of the software system ${q(plan.title)} as one flat infographic, 16:9, on a dark navy background.`,
-    'Style: rounded boxes with thin teal and violet outlines, thin arrows with arrowheads, all text in crisp white sans-serif, large and easy to read, generous spacing, nothing overlapping, nothing cut off.',
-    'Layout: the columns run from LEFT to RIGHT in the order a request travels, closest to the user first. The boxes of a column stand above each other.',
-    '',
-    'COLUMNS AND BOXES:',
-  ];
+  const lines = ['COLUMNS AND BOXES:'];
   plan.columns.forEach((c, i) => {
     const path = c.nodes.filter((n) => n.lane !== 'control').map((n) => q(n.label));
     const control = c.nodes.filter((n) => n.lane === 'control').map((n) => q(n.label));
@@ -258,8 +306,11 @@ export function buildPicturePrompt(plan: DiagramPlan): string {
   });
   lines.push('', 'ARROWS (each one starts at the first box and its arrowhead points at the second):');
   for (const l of plan.links) lines.push(`${q(label.get(l.from) ?? l.from)} -> ${q(label.get(l.to) ?? l.to)}${l.label ? `, label on the arrow: ${q(l.label)}` : ''}${l.dashed ? ' (dashed)' : ''}`);
-  lines.push('', 'RULES: spell every word EXACTLY as it is written between the quotation marks above, character for character, and put no other text anywhere in the picture (no title, no caption, no extra words, no numbers that are not given). Draw every box once and every arrow between exactly the two boxes named. Do not add, invent or leave out anything.');
   return lines.join('\n');
+}
+
+export function buildPicturePrompt(plan: DiagramPlan, template?: string): string {
+  return fillTemplate(template?.trim() ? template : DEFAULT_PICTURE_PROMPT, { title: plan.title.replace(/"/g, "'"), plan: planWords(plan) });
 }
 
 /** PDFs cannot embed WebP; convert it (or pass PNG/JPEG through). Returns null if conversion is impossible. */

@@ -214,6 +214,44 @@ func (s *DocStore) Save(meta DocMeta, content []byte) (DocMeta, error) {
 	return meta, os.WriteFile(base+".json", []byte(JSONIndent(meta)), 0o640)
 }
 
+// SaveExtra writes the file of one more picture of a diagram set (diagram-<id>-<n>.<ext>); the set's own Save comes last and makes it count.
+func (s *DocStore) SaveExtra(project, kind, id string, n int, ext string, content []byte) error {
+	if err := os.MkdirAll(s.dir(project), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(s.dir(project), fmt.Sprintf("%s-%s-%d.%s", kind, id, n, ext)), content, 0o640)
+}
+
+var reExt = regexp.MustCompile(`^[a-z0-9]{2,5}$`)
+
+// ReadExtra is the stored file of picture n (1 = the first detail picture) of a set the image model painted; nil when there is none.
+func (s *DocStore) ReadExtra(m DocMeta, n int) ([]byte, error) {
+	if n < 1 || n > len(m.Pictures) || !reExt.MatchString(m.Pictures[n-1].Ext) {
+		return nil, nil
+	}
+	return os.ReadFile(filepath.Join(s.dir(m.Project), fmt.Sprintf("%s-%s-%d.%s", m.Kind, m.ID, n, m.Pictures[n-1].Ext)))
+}
+
+// PruneDiagrams deletes every diagram of the project except the set with this id (its detail pictures and the picture-* files an earlier build
+// kept included): a new diagram replaces everything the project had before. Only call it after the new set was saved completely. It returns
+// how many files were removed.
+func (s *DocStore) PruneDiagrams(project, keepID string) int {
+	entries, err := os.ReadDir(s.dir(project))
+	if err != nil {
+		return 0
+	}
+	removed := 0
+	for _, e := range entries {
+		n := e.Name()
+		old := strings.HasPrefix(n, "picture-") ||
+			(strings.HasPrefix(n, "diagram-") && n != "diagram-"+keepID && !strings.HasPrefix(n, "diagram-"+keepID+".") && !strings.HasPrefix(n, "diagram-"+keepID+"-"))
+		if old && os.Remove(filepath.Join(s.dir(project), n)) == nil {
+			removed++
+		}
+	}
+	return removed
+}
+
 // List returns the documents of a kind, newest first.
 func (s *DocStore) List(project, kind string) []DocMeta {
 	entries, err := os.ReadDir(s.dir(project))

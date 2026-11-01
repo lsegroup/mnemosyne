@@ -139,8 +139,8 @@ type autoModel struct {
 	priced bool
 	tj, ij jobs.Effective
 	key    string
-	// pictureUSD is what the image model's picture costs per diagram job: zero when no image model is chosen, nil when the chosen one has no
-	// list price (the cost of a diagram job then cannot be limited).
+	// pictureUSD is what ONE picture of the image model costs: zero when no image model is chosen, nil when the chosen one has no list price
+	// (the cost of a diagram job then cannot be limited). A diagram job paints one picture per picture of the plan.
 	pictureUSD *float64
 }
 
@@ -214,19 +214,20 @@ func (s *Server) autoFacts(project string, m *autoModel) autoFactsInfo {
 		}
 		return nil
 	}
-	// a diagram job is the text call that plans it plus the picture the image model paints (one price per picture)
-	withPicture := func(v *float64) *float64 {
+	// a diagram job is the text call that plans it plus the pictures the image model paints (one price per picture: typically three, at
+	// most five)
+	withPictures := func(v *float64, pictures int) *float64 {
 		if v == nil || m.pictureUSD == nil {
 			return nil
 		}
-		sum := *v + *m.pictureUSD
+		sum := *v + *m.pictureUSD*float64(pictures)
 		return &sum
 	}
 	return autoFactsInfo{state: st.state, est: auto.Estimate{
 		TextTypical:   usd(prompt.InputTokens, min(12_000, m.tj.MaxTokens)),
 		TextWorst:     usd(prompt.InputTokens, m.tj.MaxTokens),
-		ChartsTypical: withPicture(usd(planIn, min(12_000, m.ij.MaxTokens))),
-		ChartsWorst:   withPicture(usd(planIn, m.ij.MaxTokens)),
+		ChartsTypical: withPictures(usd(planIn, min(12_000, m.ij.MaxTokens)), engine.TypicalPictures),
+		ChartsWorst:   withPictures(usd(planIn, m.ij.MaxTokens), engine.MaxPictures),
 	}}
 }
 

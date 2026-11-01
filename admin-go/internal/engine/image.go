@@ -108,11 +108,9 @@ func GenerateImage(p store.Provider, model, prompt string, timeout time.Duration
 	return Image{Bytes: pic, Mime: mime, Ext: ext}, nil
 }
 
-// BuildPicturePrompt is what the IMAGE MODEL is told when it paints the workflow diagram. The text model has already planned the system as
-// data, so the picture is described box by box and arrow by arrow with the exact words: an image model draws text as pixels and spells badly
-// when it has to invent the words, so it is given every word and told to use no other. Port of buildPicturePrompt (docgen.ts); the same
-// plan gives the same words in both.
-func BuildPicturePrompt(plan DiagramPlan) string {
+// PlanWords is the boxes and arrows of one picture of the plan with the exact words in quotation marks: what {{plan}} stands for in the
+// instruction for the picture. Port of planWords (docgen.ts).
+func PlanWords(plan DiagramPlan) string {
 	q := func(t string) string { return `"` + strings.ReplaceAll(t, `"`, "'") + `"` }
 	label := map[string]string{}
 	for _, c := range plan.Columns {
@@ -126,13 +124,7 @@ func BuildPicturePrompt(plan DiagramPlan) string {
 		}
 		return id
 	}
-	lines := []string{
-		fmt.Sprintf("Draw a clear, professional workflow / architecture diagram of the software system %s as one flat infographic, 16:9, on a dark navy background.", q(plan.Title)),
-		"Style: rounded boxes with thin teal and violet outlines, thin arrows with arrowheads, all text in crisp white sans-serif, large and easy to read, generous spacing, nothing overlapping, nothing cut off.",
-		"Layout: the columns run from LEFT to RIGHT in the order a request travels, closest to the user first. The boxes of a column stand above each other.",
-		"",
-		"COLUMNS AND BOXES:",
-	}
+	lines := []string{"COLUMNS AND BOXES:"}
 	for i, c := range plan.Columns {
 		var path, control []string
 		for _, n := range c.Nodes {
@@ -163,6 +155,13 @@ func BuildPicturePrompt(plan DiagramPlan) string {
 		}
 		lines = append(lines, s)
 	}
-	lines = append(lines, "", "RULES: spell every word EXACTLY as it is written between the quotation marks above, character for character, and put no other text anywhere in the picture (no title, no caption, no extra words, no numbers that are not given). Draw every box once and every arrow between exactly the two boxes named. Do not add, invent or leave out anything.")
 	return strings.Join(lines, "\n")
+}
+
+// BuildPicturePrompt is what the IMAGE MODEL is told for one picture: the instruction an administrator wrote (blank = the built-in one) with
+// {{title}} and {{plan}} filled in. The text model has already planned the system as data, so the picture is described box by box and arrow by
+// arrow with the exact words: an image model draws text as pixels and spells badly when it has to invent the words. Port of buildPicturePrompt
+// (docgen.ts); the same plan gives the same words in both.
+func BuildPicturePrompt(plan DiagramPlan, tpl, defaultTpl string) string {
+	return FillTemplate(orDefault(tpl, defaultTpl), map[string]string{"title": strings.ReplaceAll(plan.Title, `"`, "'"), "plan": PlanWords(plan)})
 }

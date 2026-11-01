@@ -21,6 +21,21 @@ describe('the prompt the image model gets for the workflow diagram', () => {
     expect(p).toContain('spell every word EXACTLY');
   });
 
+  // Owner 2026-11-01: "nowhere did I set a colour, and in a diagram the lines are horizontal or vertical, never curved"
+  it('names no colour and no style of its own, and asks for straight horizontal and vertical lines only', () => {
+    const p = buildPicturePrompt(fixture.plan);
+    expect(p).not.toMatch(/\b(navy|dark|light|white|black|teal|violet|purple|blue|red|green|yellow|orange|grey|gray|gradient|glow|neon|colou?r)/i);
+    expect(p).toContain('STRAIGHT line that runs only horizontally or vertically');
+    expect(p).toContain('never curved, never diagonal');
+  });
+
+  it('uses the instruction the administrator wrote, with the title and the plan filled in', () => {
+    const p = buildPicturePrompt(fixture.plan, 'Make "{{title}}" in pastel colours.\n{{plan}}\nBye.');
+    expect(p.startsWith('Make "Shop \'main\'" in pastel colours.\nCOLUMNS AND BOXES:\nColumn 1')).toBe(true);
+    expect(p.endsWith('\nBye.')).toBe(true);
+    expect(buildPicturePrompt(fixture.plan, '   ')).toBe(fixture.prompt); // blank = the built-in instruction
+  });
+
   it('knows the list price of muse-image-1.0 and no other', () => {
     expect(imagePriceUsd('muse-image-1.0')).toBe(0.01);
     expect(imagePriceUsd('some-other-image-model')).toBeNull();

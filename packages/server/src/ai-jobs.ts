@@ -1,4 +1,4 @@
-import { DEFAULT_PLAN_SYSTEM, DEFAULT_PLAN_USER, DEFAULT_WIKI_SYSTEM, DEFAULT_WIKI_USER } from './docgen.js';
+import { DEFAULT_PICTURE_PROMPT, DEFAULT_PLAN_SYSTEM, DEFAULT_PLAN_USER, DEFAULT_WIKI_SYSTEM, DEFAULT_WIKI_USER } from './docgen.js';
 import type { Role } from './provider-store.js';
 
 /**
@@ -28,6 +28,8 @@ export interface JobSettings {
   systemPrompt?: string;
   /** The request itself, with {{placeholders}} that the server fills in. */
   userPrompt?: string;
+  /** Job Images only: what the IMAGE model is told for every picture ({{title}} and {{plan}} are filled in). */
+  picturePrompt?: string;
 }
 
 /** Highest output limit an administrator may set per call (Meta's Muse models accept up to 1 million output tokens). */
@@ -52,7 +54,7 @@ export interface JobDef {
   systemLabel: string;
   userLabel: string;
   placeholders: Placeholder[];
-  defaults: Required<Pick<JobSettings, 'maxTokens' | 'timeoutMinutes' | 'systemPrompt' | 'userPrompt'>> & Pick<JobSettings, 'temperature' | 'topP' | 'reasoningEffort'>;
+  defaults: Required<Pick<JobSettings, 'maxTokens' | 'timeoutMinutes' | 'systemPrompt' | 'userPrompt'>> & Pick<JobSettings, 'temperature' | 'topP' | 'reasoningEffort' | 'picturePrompt'>;
 }
 
 export const JOB_DEFS: Record<Role, JobDef> = {
@@ -75,7 +77,7 @@ export const JOB_DEFS: Record<Role, JobDef> = {
     role: 'image',
     title: 'Images',
     summary:
-      'Creates the workflow diagram. Step 1: the text model (the one chosen for Text) reads the article and writes a PLAN as data using the prompts below - an overview picture and, for a bigger system, detail pictures by topic (at most 5 pictures, each with at most 10 boxes and 14 arrows, columns of boxes and the arrows between them) - and Mnemosyne itself draws every picture from that plan, so every word of these exact diagrams is spelled right and the layout is always the same. Step 2: the image model chosen here paints the workflow diagram as one picture from the same plan; it is given every word of the plan and told to use no other text. That picture is shown first on the project page and gets the first page after the index in the PDF; the exact diagrams stay next to it. Leave the model unset to get only the exact diagrams. Runs when an administrator presses “Create workflow diagram” and agrees to the cost (the image model is billed per picture, about $0.01 for muse-image-1.0). The limit, sampling values and prompts below belong to the text call that writes the plan.',
+      'Creates the workflow diagram. Step 1: the text model (the one chosen for Text) reads the article and writes a PLAN as data using the two prompts below: an overview picture and, for a bigger system, detail pictures by topic (at most 5 pictures, each with at most 10 boxes and 14 arrows, columns of boxes and the arrows between them). Step 2: the image model chosen here paints every picture of the plan with the instruction for the picture below, which is given every word of the plan. The painted pictures ARE the workflow diagram: they are shown on the project page and in the PDF, and each new run DELETES every earlier diagram and picture of the project. With no image model chosen, Mnemosyne draws the pictures itself from the plan (exact words, no image model). Runs when an administrator presses “Create workflow diagram” and agrees to the cost (the image model is billed per picture, about $0.01 for muse-image-1.0). The limit, sampling values and the two prompts for the plan belong to the text call that writes the plan; the instruction for the picture belongs to the image model.',
     usesAi: true,
     systemLabel: 'System prompt for the diagram plan - who the AI is and the rules',
     userLabel: 'Instruction for the diagram plan - what the picture must show (the AI must answer with the JSON plan)',
@@ -83,7 +85,7 @@ export const JOB_DEFS: Record<Role, JobDef> = {
       { name: 'project', meaning: 'the project name', required: false },
       { name: 'article', meaning: 'the generated documentation article (first 60,000 characters)', required: true },
     ],
-    defaults: { maxTokens: 50_000, timeoutMinutes: 20, systemPrompt: DEFAULT_PLAN_SYSTEM, userPrompt: DEFAULT_PLAN_USER },
+    defaults: { maxTokens: 50_000, timeoutMinutes: 20, systemPrompt: DEFAULT_PLAN_SYSTEM, userPrompt: DEFAULT_PLAN_USER, picturePrompt: DEFAULT_PICTURE_PROMPT },
   },
   pdf: {
     role: 'pdf',
@@ -109,6 +111,8 @@ export interface EffectiveJob {
   timeoutMinutes: number;
   systemPrompt: string;
   userPrompt: string;
+  /** Job Images only. */
+  picturePrompt?: string;
 }
 
 /** Stored settings over the defaults; a blank prompt means the default. */
@@ -122,5 +126,6 @@ export function effectiveJob(role: Role, s: JobSettings | undefined): EffectiveJ
     timeoutMinutes: s?.timeoutMinutes ?? d.timeoutMinutes,
     systemPrompt: s?.systemPrompt?.trim() ? s.systemPrompt : d.systemPrompt,
     userPrompt: s?.userPrompt?.trim() ? s.userPrompt : d.userPrompt,
+    picturePrompt: s?.picturePrompt?.trim() ? s.picturePrompt : d.picturePrompt,
   };
 }

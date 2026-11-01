@@ -13,6 +13,7 @@ import (
 // workflow diagram its provider and model are part of it (picture: provider id and model; both empty = no image model), so choosing or
 // changing that model needs a new agreement; without one the key is what it always was.
 func ModelKey(providerID, model string, text, image jobs.Effective, picture ...string) string {
+	image.PicturePrompt = "" // what the image model is told for a picture changes no cost: editing it needs no new agreement
 	parts := []any{providerID, model, text, image}
 	if len(picture) == 2 && picture[1] != "" {
 		parts = append(parts, picture)

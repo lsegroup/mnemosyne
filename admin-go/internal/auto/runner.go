@@ -524,10 +524,10 @@ func (r *Runner) execute(id string) error {
 							x.Usage = &[]Usage{}
 						}
 						addUsage(x.Usage, Usage{Model: out.Model, Kind: kind, Calls: 1, InputTokens: out.InputTokens, OutputTokens: out.OutputTokens, ReasoningTokens: out.ReasoningTokens, USD: cost, MS: took})
-						// the image model's call inside a diagram job is its own line (it used no tokens, it is billed per picture)
+						// the image model's calls inside a diagram job are their own line (they used no tokens, they are billed per picture)
 						if p := out.Picture; p != nil {
 							x.USD = round6(x.USD + p.USD)
-							addUsage(x.Usage, Usage{Model: p.Model, Kind: engine.Painted, Calls: 1, USD: p.USD, MS: p.MS})
+							addUsage(x.Usage, Usage{Model: p.Model, Kind: engine.Painted, Calls: p.Count, USD: p.USD, MS: p.MS})
 						}
 						if out.Warning != "" {
 							x.Warnings = append(x.Warnings, item.Project+": "+out.Warning)

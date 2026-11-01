@@ -56,10 +56,12 @@ type DiagramPlan struct {
 	Dropped []string `json:"dropped"`
 }
 
-// Picture is one picture of a set.
+// Picture is one picture of a set. Ext is set when the image model painted it (stored as diagram-<id>-<n>.<ext>); without it the picture is
+// drawn from the plan.
 type Picture struct {
 	Name string      `json:"name"`
 	Plan DiagramPlan `json:"plan"`
+	Ext  string      `json:"ext,omitempty"`
 }
 
 // DiagramSet is the overview and the detail pictures.

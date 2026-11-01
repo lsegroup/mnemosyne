@@ -221,22 +221,7 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
   </form>
   <form class="job" data-role="image" id="job-image">
     <div class="jobhead"><h4>Images</h4><span class="tag ai">AI call · costs money</span></div>
-    <p class="sub">Writes the project documentation page from all notes of a project (product description, hardware and software requirements, disaster recovery). Runs when an administrator presses “Generate documentation” and agrees to the cost.',
-    usesAi: true,
-    systemLabel: 'System prompt - who the AI is and the rules it must follow',
-    userLabel: 'Instruction - what the AI is asked to write',
-    placeholders: [
-      { name: 'project', meaning: 'the project name (GitLab project name when one matches)', required: false },
-      { name: 'notes_count', meaning: 'how many notes are sent', required: false },
-      { name: 'notes', meaning: 'all notes of the project, newest first, credentials masked', required: true },
-    ],
-    defaults: { maxTokens: 50_000, timeoutMinutes: 20, systemPrompt: DEFAULT_WIKI_SYSTEM, userPrompt: DEFAULT_WIKI_USER },
-  },
-  image: {
-    role: 'image',
-    title: 'Images',
-    summary:
-      'Creates the workflow diagram. Step 1: the text model (the one chosen for Text) reads the article and writes a PLAN as data using the prompts below - an overview picture and, for a bigger system, detail pictures by topic (at most 5 pictures, each with at most 10 boxes and 14 arrows, columns of boxes and the arrows between them) - and Mnemosyne itself draws every picture from that plan, so every word of these exact diagrams is spelled right and the layout is always the same. Step 2: the image model chosen here paints the workflow diagram as one picture from the same plan; it is given every word of the plan and told to use no other text. That picture is shown first on the project page and gets the first page after the index in the PDF; the exact diagrams stay next to it. Leave the model unset to get only the exact diagrams. Runs when an administrator presses “Create workflow diagram” and agrees to the cost (the image model is billed per picture, about $0.01 for muse-image-1.0). The limit, sampling values and prompts below belong to the text call that writes the plan.</p>
+    <p class="sub">Creates the workflow diagram. Step 1: the text model (the one chosen for Text) reads the article and writes a PLAN as data using the two prompts below: an overview picture and, for a bigger system, detail pictures by topic (at most 5 pictures, each with at most 10 boxes and 14 arrows, columns of boxes and the arrows between them). Step 2: the image model chosen here paints every picture of the plan with the instruction for the picture below, which is given every word of the plan. The painted pictures ARE the workflow diagram: they are shown on the project page and in the PDF, and each new run DELETES every earlier diagram and picture of the project. With no image model chosen, Mnemosyne draws the pictures itself from the plan (exact words, no image model). Runs when an administrator presses “Create workflow diagram” and agrees to the cost (the image model is billed per picture, about $0.01 for muse-image-1.0). The limit, sampling values and the two prompts for the plan belong to the text call that writes the plan; the instruction for the picture belongs to the image model.</p>
     <label class="wide">Model<select id="m-image"></select><span class="hint">The image model that paints the workflow diagram, picked from the models your keys can use (step 3). Leave it unset for the exact diagrams only. The settings below are for the text call that plans the diagram.</span></label>
     <div class="nums">
       <label>Max output tokens<input id="maxTokens-image" inputmode="numeric" placeholder="50,000" autocomplete="off"><span class="hint">The most the AI may write in one call. You pay per token written, so this is the cost ceiling of a call; the agreement popup shows the worst case. Big projects and reasoning models need a high limit. Default 50,000, allowed 256 to 1,000,000.</span></label>
@@ -247,6 +232,7 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
     </div>
     <label class="wide">System prompt for the diagram plan - who the AI is and the rules<textarea id="sys-image" rows="6" spellcheck="false"></textarea></label>
     <label class="wide">Instruction for the diagram plan - what the picture must show (the AI must answer with the JSON plan)<textarea id="usr-image" rows="14" spellcheck="false"></textarea><span class="hint">Placeholders the server fills in: <code>{{project}}</code> = the project name · <code>{{article}}</code> = the generated documentation article (first 60,000 characters) <b>(required)</b></span></label>
+    <label class="wide">Instruction for the picture - what the image model is told for every picture<textarea id="pic-image" rows="12" spellcheck="false"></textarea><span class="hint">Placeholders the server fills in: <code>{{title}}</code> = the name of the system · <code>{{plan}}</code> = the boxes and arrows of this picture with their exact words <b>(required)</b>. The built-in text names no colours and no style, only straight horizontal and vertical lines: add colours or a style here if you want them.</span></label>
     <div class="row"><button class="btn primary" type="submit">Save Images settings</button><button class="btn" type="button" data-reset="image">Reset to defaults</button><span id="msg-image" class="msg"></span></div>
   </form>
   <form class="job" data-role="pdf" id="job-pdf">
@@ -485,7 +471,7 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
     var a=j.assignment;if(a)$('m-'+role).value=a.providerId+'::'+a.model;
     var st=j.settings||{},e=j.effective;
     ['maxTokens','temperature','topP','reasoningEffort','timeoutMinutes'].forEach(function(k){$(k+'-'+role).value=st[k]===undefined?'':st[k]});
-    $('sys-'+role).value=e.systemPrompt;$('usr-'+role).value=e.userPrompt;
+    $('sys-'+role).value=e.systemPrompt;$('usr-'+role).value=e.userPrompt;if(role==='image')$('pic-image').value=e.picturePrompt||'';
   }
   function renderRoles(){
     var any=data.providers.some(function(p){return p.models.length});
@@ -499,14 +485,14 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
       var body={},v=$('m-'+role).value;
       if(v){var i=v.indexOf('::');body.model={providerId:v.slice(0,i),model:v.slice(i+2)}}
       ['maxTokens','temperature','topP','reasoningEffort','timeoutMinutes'].forEach(function(k){body[k]=$(k+'-'+role).value.trim()});
-      body.systemPrompt=$('sys-'+role).value;body.userPrompt=$('usr-'+role).value;
+      body.systemPrompt=$('sys-'+role).value;body.userPrompt=$('usr-'+role).value;if(role==='image')body.picturePrompt=$('pic-image').value;
       call('PUT','/llm/jobs/'+role,body).then(function(r){JOBS=r.jobs;data.assignments={};ROLES.forEach(function(x){if(JOBS[x].assignment)data.assignments[x]=JOBS[x].assignment});fillJob(role);note('msg-'+role,'Saved. It applies to the next run.',true)}).catch(function(e){note('msg-'+role,e.message)});
     });
     var rb=document.querySelector('[data-reset="'+role+'"]');
     if(rb)rb.addEventListener('click',function(){
       var d=JOBS[role].def.defaults;
       ['maxTokens','temperature','topP','reasoningEffort','timeoutMinutes'].forEach(function(k){$(k+'-'+role).value=''});
-      $('sys-'+role).value=d.systemPrompt;$('usr-'+role).value=d.userPrompt;
+      $('sys-'+role).value=d.systemPrompt;$('usr-'+role).value=d.userPrompt;if(role==='image')$('pic-image').value=d.picturePrompt||'';
       note('msg-'+role,'Defaults filled in - press Save to keep them.',true);
     });
   });

@@ -57,7 +57,8 @@ const planAnswer = `{"title":"Alpha","diagrams":[{"name":"Overview","columns":[{
 // fakeImages is what the fake provider got asked to paint, and whether it should refuse.
 type fakeImages struct {
 	bodies []map[string]any
-	fail   bool
+	// failFrom: the image calls from this one on (1 = the first of the test) are refused with HTTP 500; 0 = never
+	failFrom int
 }
 
 // fakePNG is the picture the fake image model returns.
@@ -74,7 +75,7 @@ func llmServer(t *testing.T, planText string) (*httptest.Server, *[]map[string]a
 			var body map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			images.bodies = append(images.bodies, body)
-			if images.fail {
+			if images.failFrom > 0 && len(images.bodies) >= images.failFrom {
 				w.WriteHeader(500)
 				return
 			}

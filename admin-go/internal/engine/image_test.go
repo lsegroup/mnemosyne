@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -24,8 +25,29 @@ func TestThePromptOfTheImageModelIsTheNodeServersPrompt(t *testing.T) {
 	if err := json.Unmarshal(golden.Bytes(t, "picture-prompt.json", func() []byte { return nil }), &want); err != nil {
 		t.Fatal(err)
 	}
-	if got := BuildPicturePrompt(want.Plan); got != want.Prompt {
+	dflt := jobs.Defs[jobs.Image].Defaults.PicturePrompt
+	if got := BuildPicturePrompt(want.Plan, "", dflt); got != want.Prompt {
 		t.Errorf("the prompt differs from the Node server's:\n--- Go\n%s\n--- Node\n%s", got, want.Prompt)
+	}
+	if got := BuildPicturePrompt(want.Plan, "  ", dflt); got != want.Prompt {
+		t.Error("a blank instruction must mean the built-in one")
+	}
+	custom := BuildPicturePrompt(want.Plan, "Make \"{{title}}\" in pastel colours.\n{{plan}}\nBye.", dflt)
+	if !strings.HasPrefix(custom, "Make \"Shop 'main'\" in pastel colours.\nCOLUMNS AND BOXES:\nColumn 1") || !strings.HasSuffix(custom, "\nBye.") {
+		t.Errorf("the administrator's instruction is not used:\n%s", custom)
+	}
+}
+
+// Owner 2026-11-01: "nowhere did I set a colour, and in a diagram the lines are horizontal or vertical, never curved".
+func TestTheBuiltInPictureInstructionNamesNoColourAndAsksForStraightLines(t *testing.T) {
+	d := jobs.Defs[jobs.Image].Defaults.PicturePrompt
+	if m := regexp.MustCompile(`(?i)\b(navy|dark|light|white|black|teal|violet|purple|blue|red|green|yellow|orange|grey|gray|gradient|glow|neon|colou?r)`).FindString(d); m != "" {
+		t.Errorf("the built-in instruction names a colour or a style: %q", m)
+	}
+	for _, want := range []string{"STRAIGHT line that runs only horizontally or vertically", "never curved, never diagonal", "{{plan}}", "{{title}}", "spell every word EXACTLY"} {
+		if !strings.Contains(d, want) {
+			t.Errorf("the built-in instruction lacks %q", want)
+		}
 	}
 }
 

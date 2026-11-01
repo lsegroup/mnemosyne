@@ -439,8 +439,6 @@ export interface ProjectHomeView {
   wikiVersions: DocMeta[];
   diagram: DocMeta | null;
   diagramVersions: DocMeta[];
-  /** The workflow diagram the image model painted from the plan, if one was made. */
-  picture: DocMeta | null;
   pdf: DocMeta | null;
   pdfVersions: DocMeta[];
   /** A generation is already running for this project. */
@@ -534,12 +532,8 @@ export function projectHome(v: ProjectHomeView): string {
 
   const card = v.wiki
     ? `<aside class="side"><div class="card"><h3>${esc(v.project)}</h3>${
-        v.picture
-          ? `<a class="pic art" href="${base}/p/${enc}/picture/${esc(v.picture.id)}" target="_blank" rel="noopener"><img src="${base}/p/${enc}/picture/${esc(v.picture.id)}" alt="Workflow diagram of ${esc(v.project)}, painted by the image model"></a><p class="cap">Workflow diagram · click to enlarge<br>painted ${esc(when(v.picture.generatedAt))} by ${esc(v.picture.model)}</p>`
-          : ''
-      }${
         v.diagram
-          ? `<a class="pic" id="pic" href="${base}/p/${enc}/diagram/${esc(v.diagram.id)}" target="_blank" rel="noopener"><img src="${base}/p/${enc}/diagram/${esc(v.diagram.id)}" alt="Workflow diagram of ${esc(v.project)}"></a><p class="cap">${v.picture ? 'Exact diagram (every word as planned)' : 'Workflow diagram'} · click to enlarge<br>created ${esc(when(v.diagram.generatedAt))} by ${esc(v.diagram.model)}</p>${(v.diagram.pictures ?? []).length ? `<div class="subs"><p class="cap">Detail pictures · click to enlarge</p>${(v.diagram.pictures ?? []).map((p, i) => `<a class="pic sub" href="${base}/p/${enc}/diagram/${esc(v.diagram!.id)}/${i + 1}" target="_blank" rel="noopener"><img src="${base}/p/${enc}/diagram/${esc(v.diagram!.id)}/${i + 1}" alt="${esc(p.name)} diagram of ${esc(v.project)}"><span>${esc(p.name)}</span></a>`).join('')}</div>` : ''}${vers(v.diagramVersions, `${base}/p/${enc}/diagram/`, 'diagrams')}`
+          ? `<a class="pic" id="pic" href="${base}/p/${enc}/diagram/${esc(v.diagram.id)}" target="_blank" rel="noopener"><img src="${base}/p/${enc}/diagram/${esc(v.diagram.id)}" alt="Workflow diagram of ${esc(v.project)}"></a><p class="cap">Workflow diagram · click to enlarge<br>created ${esc(when(v.diagram.generatedAt))} by ${esc(v.diagram.model)}</p>${(v.diagram.pictures ?? []).length ? `<div class="subs"><p class="cap">Detail pictures · click to enlarge</p>${(v.diagram.pictures ?? []).map((p, i) => `<a class="pic sub" href="${base}/p/${enc}/diagram/${esc(v.diagram!.id)}/${i + 1}" target="_blank" rel="noopener"><img src="${base}/p/${enc}/diagram/${esc(v.diagram!.id)}/${i + 1}" alt="${esc(p.name)} diagram of ${esc(v.project)}"><span>${esc(p.name)}</span></a>`).join('')}</div>` : ''}${vers(v.diagramVersions, `${base}/p/${enc}/diagram/`, 'diagrams')}`
           : `<div class="noimg">Workflow diagram<br>not created yet${v.isAdmin ? '<br>Use “Create workflow diagram” above.' : ''}</div>`
       }<dl><dt>Documentation</dt><dd>${esc(when(v.wiki.meta.generatedAt))}</dd><dt>Written by</dt><dd>${esc(v.wiki.meta.model)}</dd><dt>Source notes</dt><dd>${v.wiki.meta.noteCount ?? '?'} notes</dd><dt>Latest note</dt><dd>${esc(v.history[0]?.date ?? 'unknown')} UTC</dd>${v.glUrl ? `<dt>GitLab project</dt><dd><a href="${esc(v.glUrl)}" rel="noopener noreferrer">${esc(v.glUrl.replace(/^https?:\/\//, ''))}</a></dd>` : ''}</dl></div>${contents}</aside>`
     : '';

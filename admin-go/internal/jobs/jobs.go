@@ -55,6 +55,8 @@ type Settings struct {
 	TimeoutMinutes  *int     `json:"timeoutMinutes,omitempty"`
 	SystemPrompt    string   `json:"systemPrompt,omitempty"`
 	UserPrompt      string   `json:"userPrompt,omitempty"`
+	// PicturePrompt is for the job Images only: what the image model is told for every picture ({{title}} and {{plan}} are filled in).
+	PicturePrompt string `json:"picturePrompt,omitempty"`
 }
 
 // IsEmpty reports whether nothing is set.
@@ -79,6 +81,7 @@ type Defaults struct {
 	Temperature     *float64 `json:"temperature,omitempty"`
 	TopP            *float64 `json:"topP,omitempty"`
 	ReasoningEffort string   `json:"reasoningEffort,omitempty"`
+	PicturePrompt   string   `json:"picturePrompt,omitempty"`
 }
 
 // Def is the definition of one job.
@@ -123,6 +126,7 @@ type Effective struct {
 	TimeoutMinutes  int      `json:"timeoutMinutes"`
 	SystemPrompt    string   `json:"systemPrompt"`
 	UserPrompt      string   `json:"userPrompt"`
+	PicturePrompt   string   `json:"picturePrompt,omitempty"`
 }
 
 // Effect works out what a job really uses; a blank prompt means the default.
@@ -136,6 +140,7 @@ func Effect(role Role, s Settings) Effective {
 		TimeoutMinutes:  d.TimeoutMinutes,
 		SystemPrompt:    d.SystemPrompt,
 		UserPrompt:      d.UserPrompt,
+		PicturePrompt:   d.PicturePrompt,
 	}
 	if s.MaxTokens != nil {
 		e.MaxTokens = *s.MaxTokens
@@ -157,6 +162,9 @@ func Effect(role Role, s Settings) Effective {
 	}
 	if strings.TrimSpace(s.UserPrompt) != "" {
 		e.UserPrompt = s.UserPrompt
+	}
+	if strings.TrimSpace(s.PicturePrompt) != "" {
+		e.PicturePrompt = s.PicturePrompt
 	}
 	return e
 }
@@ -251,13 +259,20 @@ func Validate(role Role, input map[string]any) (Settings, error) {
 		out.TimeoutMinutes = &v
 	}
 
-	for _, f := range []struct {
+	prompts := []struct {
 		key, label, dflt string
 		set              func(string)
 	}{
 		{"systemPrompt", "System prompt", def.Defaults.SystemPrompt, func(t string) { out.SystemPrompt = t }},
 		{"userPrompt", "Instruction", def.Defaults.UserPrompt, func(t string) { out.UserPrompt = t }},
-	} {
+	}
+	if def.Defaults.PicturePrompt != "" { // the job Images also tells the image model what to paint
+		prompts = append(prompts, struct {
+			key, label, dflt string
+			set              func(string)
+		}{"picturePrompt", "Instruction for the picture", def.Defaults.PicturePrompt, func(t string) { out.PicturePrompt = t }})
+	}
+	for _, f := range prompts {
 		v, present := input[f.key]
 		if !present || v == nil {
 			continue
@@ -290,6 +305,16 @@ func Validate(role Role, input map[string]any) (Settings, error) {
 		for _, m := range placeholderRe.FindAllStringSubmatch(out.UserPrompt, -1) {
 			if !known[m[1]] {
 				return out, Invalid("Unknown placeholder {{%s}} (known: %s)", m[1], strings.Join(names, ", "))
+			}
+		}
+	}
+	if out.PicturePrompt != "" {
+		if !strings.Contains(out.PicturePrompt, "{{plan}}") {
+			return out, Invalid("The instruction for the picture must contain {{plan}} - it is replaced by the boxes and arrows of the picture, with their exact words")
+		}
+		for _, m := range placeholderRe.FindAllStringSubmatch(out.PicturePrompt, -1) {
+			if m[1] != "plan" && m[1] != "title" {
+				return out, Invalid("Unknown placeholder {{%s}} in the instruction for the picture (known: {{title}}, {{plan}})", m[1])
 			}
 		}
 	}
