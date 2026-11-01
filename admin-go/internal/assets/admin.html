@@ -155,7 +155,7 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
   <form method="post" action="@@BASE@@/admin/auth/logout"><button class="btn small" type="submit">Sign out</button></form></div>
 </header>
 <div class="layout">
-  <nav class="side" aria-label="Admin sections"><a href="#llm" data-tab="llm" class="active">LLM</a><a href="#auto" data-tab="auto">Auto</a><a href="#usage" data-tab="usage">LLM usage</a><a href="#sso" data-tab="sso">SSO</a><a href="#audit" data-tab="audit">Audit</a><a href="#license" data-tab="license">License</a></nav>
+  <nav class="side" aria-label="Admin sections"><a href="#llm" data-tab="llm" class="active">LLM</a><a href="#usage" data-tab="usage">LLM usage</a><a href="#auto" data-tab="auto">LLM auto</a><a href="#sso" data-tab="sso">SSO</a><a href="#audit" data-tab="audit">Audit</a><a href="#license" data-tab="license">License</a></nav>
   <main>
     <section id="tab-llm" class="tab">
       <h2>LLM</h2>
@@ -255,7 +255,7 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
     </section>
 
     <section id="tab-auto" class="tab" hidden>
-      <h2>Auto</h2>
+      <h2>LLM auto</h2>
       <p class="lead">Let Mnemosyne update the documentation by itself at a time when nobody is working. Only projects whose notes changed since their last article are touched; everything else is left alone.</p>
       <div class="notice error" id="autoPaused" hidden></div>
 
@@ -431,7 +431,7 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
   }
   // --- tabs (left menu) ---
   function showTab(){
-    var TABS=['llm','auto','usage','sso','audit','license'];
+    var TABS=['llm','usage','auto','sso','audit','license'];
     var t=(location.hash||'#llm').slice(1);if(TABS.indexOf(t)<0)t='llm';
     TABS.forEach(function(n){$('tab-'+n).hidden=(n!==t)});
     if(t==='audit')loadAudit();

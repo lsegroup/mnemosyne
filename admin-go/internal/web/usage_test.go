@@ -116,7 +116,8 @@ func TestTheUsageTabReplacesTheRunLogOfTheAutoTab(t *testing.T) {
 	h := newHarness(t, withLocal(nil))
 	cookie, _ := h.localCookie("Admin", "correct horse")
 	page := h.do(call{path: "/admin/", cookie: cookie}).body
-	has(t, page, `<a href="#usage" data-tab="usage">LLM usage</a>`)
+	// the menu, in this order (owner 2026-11-01)
+	has(t, page, `<a href="#llm" data-tab="llm" class="active">LLM</a><a href="#usage" data-tab="usage">LLM usage</a><a href="#auto" data-tab="auto">LLM auto</a><a href="#sso" data-tab="sso">SSO</a><a href="#audit" data-tab="audit">Audit</a><a href="#license" data-tab="license">License</a>`)
 	has(t, page, `<section id="tab-usage"`)
 	has(t, page, "Cost per month")
 	has(t, page, `id="usageRows"`)
