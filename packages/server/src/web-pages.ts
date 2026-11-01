@@ -4,6 +4,7 @@ import { esc } from './html.js';
 import type { DocMeta, HistoryEntry } from './docgen.js';
 import { JOB_DEFS, MAX_OUTPUT_TOKENS, REASONING_EFFORTS } from './ai-jobs.js';
 import { shownVersion } from './version.js';
+import type { TokenInfo } from './token-store.js';
 export { esc };
 
 const CSS = `
@@ -213,7 +214,8 @@ const BACKDROP_SVG = (() => {
 export interface AdminView {
   basePath: string;
   nonce: string;
-  user: { name: string; username: string };
+  /** `local`: signed in with the built-in admin account, which has no GitLab profile. */
+  user: { name: string; username: string; local?: boolean };
   /** Callback URLs to register in GitLab (Admin → Applications), one per line. */
   redirectUris: string[];
 }
@@ -225,6 +227,38 @@ const ICON_GRID = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3"
 const topBtn = (href: string, label: string, icon: string, title: string) => `<a class="topbtn" href="${href}" title="${esc(title)}">${icon}<span>${esc(label)}</span></a>`;
 const TOPBTN_CSS = '.topbtn{display:inline-flex;align-items:center;gap:7px;padding:7px 13px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);color:var(--text);font-size:14px;text-decoration:none;white-space:nowrap}.topbtn:hover{border-color:var(--accent);color:#fff}.topbtn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}';
 
+const initials = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => [...w][0]!.toUpperCase())
+    .join('') || '?';
+
+/** The signed-in person in the header. A click opens a card (no script needed: a details element) with a link to their profile. */
+const userMenu = (base: string, user: { name: string; username: string }, role: string, profile: boolean) => `<details class="usermenu">
+    <summary title="Your account"><span class="avatar" aria-hidden="true">${esc(initials(user.name))}</span><span class="uname">${esc(user.name)} <span>@${esc(user.username)}</span></span></summary>
+    <div class="usercard">
+      <div class="uc-head"><span class="avatar big" aria-hidden="true">${esc(initials(user.name))}</span><div><strong>${esc(user.name)}</strong><span class="at">@${esc(user.username)}</span></div></div>
+      <span class="upill">${esc(role)}</span>
+      ${profile ? `<a class="btn primary" href="${base}/profile">Profile</a>` : '<p class="uc-note">This built-in account has no GitLab profile, so it cannot hold an MCP token.</p>'}
+    </div>
+  </details>`;
+const USERMENU_CSS = `.usermenu{position:relative}
+.usermenu summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:9px;padding:4px 10px 4px 5px;border:1px solid transparent;border-radius:10px;color:var(--text)}
+.usermenu summary::-webkit-details-marker{display:none}
+.usermenu summary:hover,.usermenu[open] summary{border-color:var(--line);background:var(--panel2)}
+.usermenu summary:after{content:"";width:6px;height:6px;margin:-3px 0 0 2px;border-right:1.6px solid var(--muted);border-bottom:1.6px solid var(--muted);transform:rotate(45deg)}
+.usermenu[open] summary:after{margin-top:3px;transform:rotate(225deg)}
+.uname span{color:var(--muted)}
+.avatar{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;letter-spacing:.3px}
+.avatar.big{width:46px;height:46px;font-size:17px;flex:none}
+.usercard{position:absolute;right:0;top:calc(100% + 8px);z-index:30;width:300px;max-width:calc(100vw - 32px);padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--panel);box-shadow:0 14px 36px rgba(0,0,0,.5);color:var(--text)}
+.uc-head{display:flex;align-items:center;gap:12px;margin-bottom:10px}.uc-head strong{display:block;font-size:15px}.uc-head .at{color:var(--muted);font-size:13px}
+.upill{display:inline-block;padding:2px 10px;border-radius:99px;border:1px solid var(--line);color:var(--muted);font-size:12px}
+.usercard .btn{display:flex;justify-content:center;width:100%;margin-top:14px}.usercard .btn.primary{color:#fff}
+.uc-note{margin:12px 0 0;color:var(--muted);font-size:13px}`;
+
 const ADMIN_CSS = `
 :root{--bg:#0d0e13;--panel:#161922;--panel2:#12141b;--line:#262a36;--text:#e6e9ef;--muted:#8b90a0;--accent:#7a66e0;--accent-h:#9482ee;--title:#8473de;--teal:#3cc4cc}
 html,body{background:var(--bg)}
@@ -235,6 +269,7 @@ body{background:radial-gradient(ellipse 50% 40% at 12% 0%,rgba(120,58,182,.20),t
 .brand .muted{font:500 14px/1 system-ui,sans-serif;letter-spacing:0;color:var(--teal)}
 .top .right{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:14px}.top form{margin:0}
 ${TOPBTN_CSS}
+${USERMENU_CSS}
 .layout{display:grid;grid-template-columns:210px minmax(0,1fr);gap:28px;max-width:1640px;margin:0 auto;padding:28px 24px 60px}
 .side{display:flex;flex-direction:column;gap:6px;position:sticky;top:20px;align-self:start}
 .side a{display:block;padding:10px 14px;border-radius:9px;border:1px solid transparent;color:var(--muted);text-decoration:none;font-weight:600}
@@ -383,7 +418,7 @@ export function adminPage(v: AdminView): string {
     'Mnemosyne admin',
     `<header class="top">
   <span class="brand">Mnemosyne <span class="muted">admin</span></span>
-  <div class="right">${topBtn(`${base}/`, 'Projects', ICON_GRID, 'Back to the projects and their documentation')}<span>${esc(v.user.name)} <span>@${esc(v.user.username)}</span></span>
+  <div class="right">${topBtn(`${base}/`, 'Projects', ICON_GRID, 'Back to the projects and their documentation')}${userMenu(base, v.user, v.user.local ? 'Built-in admin account' : 'GitLab administrator', !v.user.local)}
   <form method="post" action="${base}/admin/auth/logout"><button class="btn small" type="submit">Sign out</button></form></div>
 </header>
 <div class="layout">
@@ -1051,6 +1086,7 @@ a{color:var(--teal)}
 .brand{font:600 24px/1 "Palatino Linotype","Book Antiqua",Palatino,Georgia,"Times New Roman",serif;letter-spacing:.4px;color:var(--title);text-decoration:none}
 .top .right{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:14px}.top form{margin:0}
 ${TOPBTN_CSS}
+${USERMENU_CSS}
 main.docs{max-width:1180px;margin:0 auto;padding:30px 24px 70px;display:flex;flex-direction:column;gap:18px}
 h1{margin:0;font:600 34px/1.15 "Palatino Linotype","Book Antiqua",Palatino,Georgia,"Times New Roman",serif;letter-spacing:.3px;color:var(--title)}
 h2{margin:6px 0 0;font-size:19px;font-weight:600;color:var(--teal)}
@@ -1102,7 +1138,7 @@ function docsShell(title: string, basePath: string, user: DocsUser, body: string
   return shell(
     title,
     `<header class="top"><a class="brand" href="${base}/">Mnemosyne</a>
-  <div class="right">${user.admin ? topBtn(`${base}/admin/`, 'Admin', ICON_WRENCH, 'Open the admin area') : ''}<span>${esc(user.name)} <span>@${esc(user.username)}</span></span>
+  <div class="right">${user.admin ? topBtn(`${base}/admin/`, 'Admin', ICON_WRENCH, 'Open the admin area') : ''}${userMenu(base, user, user.admin ? 'GitLab administrator' : 'Member', true)}
   <form method="post" action="${base}/auth/logout"><button class="btn small" type="submit">Sign out</button></form></div></header>
 <main class="docs">${body}</main>`,
     DOCS_CSS,
@@ -1359,9 +1395,184 @@ ${article}
 function docsShellBody(basePath: string, user: DocsUser, body: string): string {
   const base = esc(basePath);
   return `<header class="top"><a class="brand" href="${base}/">Mnemosyne</a>
-  <div class="right">${user.admin ? topBtn(`${base}/admin/`, 'Admin', ICON_WRENCH, 'Open the admin area') : ''}<span>${esc(user.name)} <span>@${esc(user.username)}</span></span>
+  <div class="right">${user.admin ? topBtn(`${base}/admin/`, 'Admin', ICON_WRENCH, 'Open the admin area') : ''}${userMenu(base, user, user.admin ? 'GitLab administrator' : 'Member', true)}
   <form method="post" action="${base}/auth/logout"><button class="btn small" type="submit">Sign out</button></form></div></header>
 <main class="docs">${body}</main>`;
+}
+
+// ============================================================================
+// Profile: who the signed-in person is, and their personal MCP tokens.
+// ============================================================================
+
+export interface ProfileView {
+  basePath: string;
+  nonce: string;
+  user: DocsUser;
+  details: {
+    /** Empty when GitLab did not share it. */
+    email: string;
+    admin: boolean;
+    /** GitLab projects the person belongs to; null when GitLab did not share the list. */
+    projects: number | null;
+    /** Epoch ms of the last check against GitLab. */
+    verifiedAt: number;
+    /** Epoch ms the sign-in cookie runs out. */
+    signedInUntil: number;
+    gitlabProfile: string | null;
+  };
+  /** The address MCP clients connect to. */
+  mcpUrl: string;
+  tokens: TokenInfo[] | null;
+  /** The longest a token may live. */
+  maxDays: number;
+}
+
+const PROFILE_CSS = `
+.pcard{padding:22px 26px;border:1px solid var(--line);border-radius:14px;background:var(--panel);box-shadow:0 14px 40px rgba(0,0,0,.22)}
+.pcard h2{margin:0 0 12px}
+.pcard p{margin:0 0 12px;color:#a3a8b8}
+.pcard code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.92em;color:#c7cbe0;background:#0f1117;border:1px solid var(--line);border-radius:5px;padding:0 5px}
+.pcard dl.refs{gap:8px 18px}
+.pwho{display:flex;align-items:center;gap:16px;margin-bottom:16px}.pwho .avatar{width:56px;height:56px;font-size:21px}
+.pwho strong{display:block;font-size:18px}.pwho span.at{color:var(--muted)}
+.tokform{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin:4px 0 16px}
+.tokform label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
+.tokform input,.tokform select{padding:9px 12px;border-radius:8px;border:1px solid var(--line);background:#0f1117;color:var(--text);font:inherit}
+.tokform input{width:280px;max-width:100%}.tokform input:focus,.tokform select:focus{outline:none;border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}.btn.primary:hover{background:var(--accent-h)}.btn:disabled{opacity:.5;cursor:not-allowed}
+.toterr{color:#ffb4b4;font-size:14px;margin:0 0 10px}
+.newtok{margin:0 0 18px;padding:16px 18px;border:1px solid #6b5420;border-radius:12px;background:#1a1710}
+.newtok h3{margin:0 0 6px;color:#f0c36a}.newtok .row{display:flex;gap:8px;align-items:center;margin:8px 0}
+.newtok input{flex:1;min-width:0;padding:9px 12px;border-radius:8px;border:1px solid var(--line);background:#0f1117;color:var(--text);font:13px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.newtok pre{margin:6px 0 0;padding:10px 12px;overflow-x:auto;background:#0f1117;border:1px solid var(--line);border-radius:8px;font:12.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#c7cbe0;white-space:pre-wrap;word-break:break-all}
+.tablewrap table.tok{border-collapse:collapse;width:100%;font-size:14px}
+table.tok th,table.tok td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+table.tok th{color:var(--teal);font-weight:600;white-space:nowrap}table.tok td.act{text-align:right}
+.hintline{font-size:13px;color:var(--muted)}`;
+
+export function profilePage(v: ProfileView): string {
+  const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+  const stamp = (ms: number) => `${new Date(ms).toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+  const d = v.details;
+  const status = (s: TokenInfo['status']) => (s === 'active' ? 'working' : s === 'revoked' ? 'broken' : '');
+  const row = (t: TokenInfo) =>
+    `<tr><td>${esc(t.name)}</td><td><code>mnm_${esc(t.hint)}…</code></td><td>${day(t.createdAt)}</td><td>${day(t.expiresAt)}</td><td>${t.lastUsedAt ? `${stamp(t.lastUsedAt)}${t.lastIp ? ` · ${esc(t.lastIp)}` : ''}` : 'never'}</td><td><span class="badge ${status(t.status)}">${t.status}</span></td><td class="act">${t.status === 'active' ? `<button class="btn small" type="button" data-revoke="${esc(t.id)}" data-name="${esc(t.name)}">Revoke</button>` : ''}</td></tr>`;
+  const plain = v.mcpUrl.startsWith('http://');
+  const tokens = v.tokens;
+  const days = [v.maxDays, 60, 30, 7, 1].filter((n, i, all) => n <= v.maxDays && all.indexOf(n) === i);
+  const tokenSection = tokens
+    ? `<section class="pcard">
+  <h2>MCP access</h2>
+  <p>A personal token lets an MCP client (Claude Code, Cline, Continue, ...) work on this server as <strong>you</strong>. A token is valid for at most <strong>${v.maxDays} days</strong>, then you issue a new one, like a password you rotate. You can revoke it at any time.</p>
+  <p>MCP address: <code>${esc(v.mcpUrl)}</code></p>
+  ${plain ? '<p class="notice">This address is plain http. Anything sent over it, including a token, can be read on the network. Use https where you can.</p>' : ''}
+  <div class="newtok" id="newBox" hidden>
+    <h3>Your new token</h3>
+    <p style="margin:0">Copy it now. It is shown <strong>only once</strong> and cannot be shown again. Valid until <strong id="newUntil"></strong>.</p>
+    <div class="row"><input id="newTok" type="text" readonly aria-label="Your new MCP token"><button class="btn small" type="button" id="copyTok">Copy token</button></div>
+    <p style="margin:10px 0 0">Claude Code:</p><pre id="newCmd"></pre>
+    <p style="margin:10px 0 0">Other clients (JSON):</p><pre id="newJson"></pre>
+    <div class="row"><button class="btn small" type="button" id="doneTok">I have copied it</button></div>
+  </div>
+  <form class="tokform" id="tokForm">
+    <label>Name<input id="tokName" maxlength="60" placeholder="Claude Code on my laptop" autocomplete="off" required></label>
+    <label>Valid for<select id="tokDays">${days.map((n, i) => `<option value="${n}"${i === 0 ? ' selected' : ''}>${n} day${n === 1 ? '' : 's'}${n === v.maxDays ? ' (maximum)' : ''}</option>`).join('')}</select></label>
+    <button class="btn primary" type="submit" id="tokGo">Create token</button>
+  </form>
+  <p class="toterr" id="tokErr" hidden></p>
+  <div class="tablewrap"><table class="tok"><thead><tr><th>Name</th><th>Token</th><th>Created</th><th>Expires</th><th>Last used</th><th>Status</th><th></th></tr></thead>
+  <tbody id="tokBody">${tokens.map(row).join('')}</tbody></table></div>
+  <p class="hintline" id="tokEmpty"${tokens.length ? ' hidden' : ''}>You have no tokens yet.</p>
+</section>`
+    : '<section class="pcard"><h2>MCP access</h2><p>Personal tokens are not available on this server.</p></section>';
+  const body = `<h1>Your profile</h1>
+<section class="pcard">
+  <h2>Account</h2>
+  <div class="pwho"><span class="avatar" aria-hidden="true">${esc(initials(v.user.name))}</span><div><strong>${esc(v.user.name)}</strong><span class="at">@${esc(v.user.username)}</span></div></div>
+  <dl class="refs">
+    <dt>Name</dt><dd>${esc(v.user.name)}</dd>
+    <dt>Username</dt><dd>@${esc(v.user.username)}</dd>
+    <dt>E-mail</dt><dd>${d.email ? esc(d.email) : '<span class="muted">GitLab did not share it</span>'}</dd>
+    <dt>Role</dt><dd>${d.admin ? 'GitLab administrator' : 'Member'}</dd>
+    <dt>GitLab projects</dt><dd>${d.projects === null ? '<span class="muted">GitLab did not share the list</span>' : d.projects}</dd>
+    <dt>Checked with GitLab</dt><dd>${stamp(d.verifiedAt)}</dd>
+    <dt>Signed in until</dt><dd>${stamp(d.signedInUntil)}</dd>
+    ${d.gitlabProfile ? `<dt>GitLab profile</dt><dd><a href="${esc(d.gitlabProfile)}" rel="noopener noreferrer">${esc(d.gitlabProfile)}</a></dd>` : ''}
+  </dl>
+</section>
+${tokenSection}
+${tokens ? `<script nonce="${esc(v.nonce)}">${PROFILE_JS(`${v.basePath}/profile/api/tokens`, v.mcpUrl)}</script>` : ''}`;
+  return shell('Your profile · Mnemosyne', docsShellBody(v.basePath, v.user, body), DOCS_CSS + PROFILE_CSS);
+}
+
+/** Embeds a value in a script as a JS string literal that cannot end the script element. */
+const jsString = (s: string) => JSON.stringify(s).replace(/</g, '\\u003c');
+
+function PROFILE_JS(api: string, mcpUrl: string): string {
+  return `
+(function(){
+  var api=${jsString(api)},mcp=${jsString(mcpUrl)};
+  var H={'Content-Type':'application/json','X-Requested-With':'mnemosyne-docs'};
+  var $=function(id){return document.getElementById(id)};
+  function day(ms){return new Date(ms).toISOString().slice(0,10)}
+  function stamp(ms){return new Date(ms).toISOString().slice(0,16).replace('T',' ')+' UTC'}
+  function cell(tr,text,cls){var td=document.createElement('td');td.textContent=text;if(cls)td.className=cls;tr.appendChild(td);return td}
+  function fail(msg){var e=$('tokErr');e.textContent=msg;e.hidden=!msg}
+  function copy(text,btn){
+    var done=function(){var old=btn.textContent;btn.textContent='Copied';setTimeout(function(){btn.textContent=old},1500)};
+    if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(text).then(done,function(){fail('Could not copy; select the text and copy it by hand.')});return}
+    var f=$('newTok');f.focus();f.select();try{document.execCommand('copy');done()}catch(e){fail('Could not copy; select the text and copy it by hand.')}
+  }
+  function render(list){
+    var body=$('tokBody');body.textContent='';
+    $('tokEmpty').hidden=list.length>0;
+    list.forEach(function(t){
+      var tr=document.createElement('tr');
+      cell(tr,t.name);
+      var c=cell(tr,'');var code=document.createElement('code');code.textContent='mnm_'+t.hint+'\\u2026';c.appendChild(code);
+      cell(tr,day(t.createdAt));cell(tr,day(t.expiresAt));
+      cell(tr,t.lastUsedAt?stamp(t.lastUsedAt)+(t.lastIp?' \\u00b7 '+t.lastIp:''):'never');
+      var s=cell(tr,'');var b=document.createElement('span');b.className='badge '+(t.status==='active'?'working':t.status==='revoked'?'broken':'');b.textContent=t.status;s.appendChild(b);
+      var a=cell(tr,'','act');
+      if(t.status==='active'){var r=document.createElement('button');r.type='button';r.className='btn small';r.textContent='Revoke';r.dataset.revoke=t.id;r.dataset.name=t.name;a.appendChild(r)}
+      body.appendChild(tr);
+    });
+  }
+  function call(url,method,body){
+    return fetch(url,{method:method,headers:H,credentials:'same-origin',body:body?JSON.stringify(body):undefined})
+      .then(function(r){return r.json().catch(function(){return {}}).then(function(j){return {ok:r.ok,j:j}})});
+  }
+  function revoke(id,name){
+    if(!window.confirm('Revoke "'+name+'"? Every MCP client that uses it stops working.'))return;
+    fail('');
+    call(api+'/'+encodeURIComponent(id)+'/revoke','POST').then(function(x){
+      if(!x.ok){fail(x.j.error||'Could not revoke the token.');return}
+      render(x.j.tokens);
+    }).catch(function(){fail('The server could not be reached.')});
+  }
+  function show(token,info){
+    var cmd='claude mcp add --transport http mnemosyne '+mcp+' --header "Authorization: Bearer '+token+'"';
+    var json=JSON.stringify({mcpServers:{mnemosyne:{type:'http',url:mcp,headers:{Authorization:'Bearer '+token}}}},null,2);
+    $('newTok').value=token;$('newCmd').textContent=cmd;$('newJson').textContent=json;$('newUntil').textContent=day(info.expiresAt);
+    $('newBox').hidden=false;$('newTok').focus();$('newTok').select();
+  }
+  function hide(){$('newTok').value='';$('newCmd').textContent='';$('newJson').textContent='';$('newBox').hidden=true}
+  $('copyTok').addEventListener('click',function(){copy($('newTok').value,$('copyTok'))});
+  $('doneTok').addEventListener('click',hide);
+  $('tokForm').addEventListener('submit',function(e){
+    e.preventDefault();fail('');
+    var go=$('tokGo');go.disabled=true;
+    call(api,'POST',{name:$('tokName').value,days:Number($('tokDays').value)}).then(function(x){
+      go.disabled=false;
+      if(!x.ok){fail(x.j.error||'Could not create the token.');return}
+      $('tokName').value='';render(x.j.tokens);show(x.j.token,x.j.info);
+    }).catch(function(){go.disabled=false;fail('The server could not be reached.')});
+  });
+  $('tokBody').addEventListener('click',function(e){
+    var b=e.target.closest?e.target.closest('button[data-revoke]'):null;
+    if(b)revoke(b.dataset.revoke,b.dataset.name);
+  });
+})();`;
 }
 
 function HOME_JS(api: string, busy: string | null): string {

@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { dirname } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { Router, urlencoded, type NextFunction, type Request, type Response } from 'express';
 import type { MnemosyneConfig } from './config.js';
@@ -7,7 +8,9 @@ import { ProviderStore, ProviderUnreachableError, ProviderValidationError, ROLES
 import { fetchModels } from './llm-models.js';
 import { AuditLog, clientIp, diffLines, type AuditInput } from './audit.js';
 import { SettingsStore, SettingsValidationError, applyPortalInput, type GitLabSettings, type PortalSettings } from './settings-store.js';
-import { adminPage, docsNotFound, homePage, loginPage, nodePage, notesPage, projectHome, type ProjectCard } from './web-pages.js';
+import { adminPage, docsNotFound, homePage, loginPage, nodePage, notesPage, profilePage, projectHome, type ProjectCard } from './web-pages.js';
+import { MAX_TOKEN_DAYS, TokenError, TokenStore } from './token-store.js';
+import { aiLockFile, aiLockHeldBy, holdAiLock, releaseAiLock } from './ai-lock.js';
 import { JOB_DEFS, effectiveJob, validateJobSettings, type JobSettings } from './ai-jobs.js';
 import { MemberStore, type MemberEntry } from './member-store.js';
 import { NodeIndex, fetchMemberships, matchProject, redact, slug, type GitLabProject } from './docs.js';
@@ -79,6 +82,8 @@ export interface WebPortal {
   providers: ProviderStore | null;
   /** The Auto scheduler (Admin -> Auto); null while the portal is not configured. */
   auto: AutoRunner | null;
+  /** The personal MCP tokens people issue in their profile; null while the portal is not configured. */
+  tokens: TokenStore | null;
 }
 
 /** An admin API answer with its own status (the others are 400 for bad input). */
@@ -189,6 +194,9 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     if (!typed || typed === canonical.hostname.toLowerCase() || !ownNames.has(typed)) return next();
     res.redirect(302, `${canonical.origin}${req.originalUrl}`);
   });
+
+  // The admin is served by a separate program in front of this server (MNEMOSYNE_ADMIN_EXTERNAL): this server does not know /admin at all.
+  if (cfg.web.adminExternal) router.use('/admin', (_req, res) => void res.status(404).type('text/plain').send('The admin is served elsewhere.'));
 
   // --- the "Mnemosyne Wiki" badge that gitlab-links puts on every GitLab project (public, no sign-in: GitLab's pages load it) ---
   const badge = Buffer.from(
@@ -392,6 +400,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   const memberStore = keys ? new MemberStore(cfg.web.membersFile, keys.enc) : null;
   const members: Map<string, MemberEntry> = memberStore ? memberStore.load() : new Map();
   const persistMembers = () => void memberStore?.save(members);
+  const tokens = keys ? new TokenStore(cfg.web.tokensFile, keys.enc) : null;
   const docsSession = (req: Request) => {
     const s = sessionFrom(req, SESSION_COOKIE);
     const m = s ? members.get(s.u) : undefined;
@@ -536,6 +545,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   // to start without it. A daily cap and "one AI job at a time" bound the spending.
   // --------------------------------------------------------------------------
   const docStore = keys ? new DocStore(cfg.web.docsDir) : null;
+  const aiLockPath = aiLockFile(dirname(cfg.web.autoFile));
   const jobs = new Map<string, { kind: string; state: 'running' | 'done' | 'error'; startedAt: number; error?: string; warning?: string }>();
   const usedConsents = new Map<string, number>();
   const CONSENT_TTL_S = 600;
@@ -582,6 +592,83 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     return true;
   };
   const fail400 = (res: Response, error: string, status = 400) => res.status(status).json({ error });
+
+  // --------------------------------------------------------------------------
+  // Profile: the signed-in person's details and their personal MCP tokens. A token tells the server WHICH person an MCP
+  // client acts for. It is issued here, shown once, valid for at most MAX_TOKEN_DAYS days, and can be revoked at any time.
+  // --------------------------------------------------------------------------
+  router.get('/profile', async (req, res) => {
+    const ds = await freshSession(req);
+    if (!ds) {
+      res.redirect(`${basePath}/`);
+      return;
+    }
+    const nonce = randomBytes(16).toString('base64');
+    const glUrl = (await effective()).gitlab.url;
+    pageHeaders(res, nonce);
+    res.send(
+      profilePage({
+        basePath,
+        nonce,
+        user: { name: ds.s.n, username: ds.s.u, admin: ds.m.admin },
+        details: {
+          email: ds.s.e,
+          admin: ds.m.admin,
+          projects: ds.m.projects ? ds.m.projects.length : null,
+          verifiedAt: ds.m.at,
+          signedInUntil: ds.s.exp * 1000,
+          gitlabProfile: glUrl ? `${glUrl}/${encodeURIComponent(ds.s.u)}` : null,
+        },
+        mcpUrl: `${cfg.web.publicUrl ?? ''}${basePath}/mcp`,
+        tokens: tokens ? tokens.list(ds.s.u) : null,
+        maxDays: MAX_TOKEN_DAYS,
+      }),
+    );
+  });
+
+  /** The signed-in person for a profile API call; answers and returns null when there is none. */
+  const profileUser = async (req: Request, res: Response) => {
+    noStore(res);
+    if (!docsApiOk(req, res)) return null;
+    const ds = await freshSession(req);
+    if (!ds || !tokens) {
+      fail400(res, 'not signed in', 401);
+      return null;
+    }
+    return ds;
+  };
+
+  router.post('/profile/api/tokens', async (req, res) => {
+    const ds = await profileUser(req, res);
+    if (!ds) return;
+    try {
+      const made = await tokens!.issue(ds.s.u, { name: req.body?.name, days: req.body?.days });
+      void rec(req, {
+        event: 'token_issue',
+        entityType: 'mcp_token',
+        entityId: made.info.id,
+        entityName: made.info.name,
+        user: ds.s.u,
+        description: `Issued a personal MCP token, valid until ${new Date(made.info.expiresAt).toISOString().slice(0, 10)}`,
+      });
+      res.status(201).json({ token: made.token, info: made.info, tokens: tokens!.list(ds.s.u) });
+    } catch (err) {
+      if (err instanceof TokenError) fail400(res, err.message);
+      else fail400(res, 'The token could not be issued.', 500);
+    }
+  });
+
+  router.post('/profile/api/tokens/:id/revoke', async (req, res) => {
+    const ds = await profileUser(req, res);
+    if (!ds) return;
+    const id = String(req.params.id);
+    if (!(await tokens!.revoke(ds.s.u, id))) {
+      fail400(res, 'There is no active token of yours with this id.', 404);
+      return;
+    }
+    void rec(req, { event: 'token_revoke', entityType: 'mcp_token', entityId: id, user: ds.s.u, description: 'Revoked a personal MCP token' });
+    res.json({ tokens: tokens!.list(ds.s.u) });
+  });
 
   router.get('/p/:project', async (req, res) => {
     const g = await gate(req, res);
@@ -812,6 +899,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   const runJob = async (project: string, kind: 'wiki' | 'diagram', user: string, ip: string, glName: string | null) => {
     const started = Date.now();
     jobs.set(project, { kind, state: 'running', startedAt: started });
+    holdAiLock(aiLockPath, 'person'); // the admin program's Auto scheduler waits while a person's job runs
     const log = (e: AuditInput) => audit?.log({ ip, user, entityType: `docs_${kind}`, entityName: project, ...e });
     try {
       const r = await generate(project, kind, user, glName, log);
@@ -820,6 +908,8 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       const msg = failureMessage(err, kind, project);
       jobs.set(project, { kind, state: 'error', startedAt: started, error: msg });
       void log({ event: 'ai_failed', description: msg });
+    } finally {
+      releaseAiLock(aiLockPath, 'person');
     }
   };
 
@@ -836,8 +926,10 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       return void fail400(res, 'The agreement has expired or does not match. Please start again and agree to the estimate.', 403);
     }
     // 2) spending guards
-    const aiBusy = () => Boolean(autoRunner?.active) || aiRunning();
-    if (aiBusy()) return void fail400(res, autoRunner?.active ? 'An automatic documentation update is running (Admin → Auto). Please wait for it to finish.' : 'An AI generation is already running. Please wait for it to finish.', 409);
+    // an automatic run is either ours or the admin program's (which says so in the lock file)
+    const autoActive = () => Boolean(autoRunner?.active) || aiLockHeldBy(aiLockPath, 'auto');
+    const aiBusy = () => autoActive() || aiRunning();
+    if (aiBusy()) return void fail400(res, autoActive() ? 'An automatic documentation update is running (Admin → Auto). Please wait for it to finish.' : 'An AI generation is already running. Please wait for it to finish.', 409);
     const dayStart = new Date().toISOString().slice(0, 10) + 'T00:00:00.000Z';
     if ((await audit!.countSince(dayStart, 'ai_start')) >= cfg.web.aiDailyLimit) {
       void rec(req, { event: 'denied', entityType: `docs_${kind}`, entityName: g.project, user: g.ds.s.u, description: `AI generation refused: daily limit of ${cfg.web.aiDailyLimit} runs reached` });
@@ -922,8 +1014,9 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
 
   const aiRunning = () => [...jobs.values()].some((j) => j.state === 'running');
 
+  // With the admin program in front (MNEMOSYNE_ADMIN_EXTERNAL) the Auto scheduler lives there: two schedulers on one file would run everything twice.
   const autoRunner =
-    keys && autoStore && docStore && nodeIndex
+    keys && autoStore && docStore && nodeIndex && !cfg.web.adminExternal
       ? new AutoRunner({
           store: autoStore,
           keyFor: async (c) => {
@@ -1207,7 +1300,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       adminPage({
         basePath,
         nonce,
-        user: { name: s.n, username: s.u },
+        user: { name: s.n, username: s.u, local: s.l === true },
         redirectUris: [here('/auth/callback'), here('/admin/auth/callback')],
       }),
     );
@@ -1539,5 +1632,5 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
     }),
   );
 
-  return { router, providers, auto: autoRunner };
+  return { router, providers, auto: autoRunner, tokens };
 }

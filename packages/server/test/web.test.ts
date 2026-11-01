@@ -426,6 +426,118 @@ describe('web portal', () => {
     expect((await fetch(`${base}/p/alpha`, { redirect: 'manual' })).status).toBe(302);
   });
 
+  it('shows the signed-in person as a card with a link to their profile, on every page and in the admin area', async () => {
+    const dev = cookiesOf(await signIn('dev-code'));
+    const home = await (await fetch(`${base}/`, { headers: { cookie: dev } })).text();
+    expect(home).toContain('<details class="usermenu">'); // a click on the name opens the card, no script needed
+    expect(home).toContain('<strong>Some Dev</strong>');
+    expect(home).toContain('@dev');
+    expect(home).toContain('<span class="upill">Member</span>');
+    expect(home).toContain(`<a class="btn primary" href="${new URL(base).pathname}/profile">Profile</a>`);
+    expect(await (await fetch(`${base}/p/alpha`, { headers: { cookie: dev } })).text()).toContain('class="usermenu"');
+
+    const admin = cookiesOf(await signIn('admin-code'));
+    expect(await (await fetch(`${base}/`, { headers: { cookie: admin } })).text()).toContain('<span class="upill">GitLab administrator</span>');
+    const area = await (await fetch(`${base}/admin/`, { headers: { cookie: cookiesOf(await signIn('admin-code', '/admin')) } })).text();
+    expect(area).toContain('class="usermenu"');
+    expect(area).toContain('/profile">Profile</a>');
+
+    // the built-in admin account is no GitLab account, so it has no profile and cannot hold a token
+    const local = adminPage({ basePath: '/mnemosyne', nonce: 'n', user: { name: 'Admin', username: 'admin', local: true }, redirectUris: [] });
+    expect(local).toContain('Built-in admin account');
+    expect(local).not.toContain('/profile');
+    expect(local).toContain('cannot hold an MCP token');
+  });
+
+  it('has a profile page for the signed-in person only, with their details and nothing of anybody else', async () => {
+    expect((await fetch(`${base}/profile`, { redirect: 'manual' })).status).toBe(302); // not signed in: back to the login page
+
+    const dev = cookiesOf(await signIn('dev-code'));
+    const res = await fetch(`${base}/profile`, { headers: { cookie: dev } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-security-policy')).toContain("script-src 'nonce-");
+    const html = await res.text();
+    expect(html).toContain('<h1>Your profile</h1>');
+    for (const detail of ['Some Dev', '@dev', 'dev@example.com', 'Member', 'GitLab projects', 'Checked with GitLab', 'Signed in until']) expect(html, detail).toContain(detail);
+    expect(html).toMatch(/<dt>GitLab projects<\/dt><dd>2<\/dd>/); // dev belongs to two GitLab projects
+    expect(html).toContain('/dev</a>'); // link to the GitLab profile
+    expect(html).not.toContain('store@lumanet.info');
+    expect(html).toContain('at most <strong>90 days</strong>');
+    expect(html).toContain('<option value="90" selected>90 days (maximum)</option>');
+    expect(html).not.toMatch(/<option value="(91|180|365)"/);
+    expect(html).toContain('http://127.0.0.1'); // the MCP address ...
+    expect(html).toContain('This address is plain http'); // ... and a warning, because it is not https
+
+    const script = /<script nonce="[^"]+">([\s\S]*?)<\/script>/.exec(html)?.[1] ?? '';
+    expect(script).toContain('/profile/api/tokens');
+    expect(() => new Script(script)).not.toThrow(); // the page script is valid JavaScript
+
+    const admin = await (await fetch(`${base}/profile`, { headers: { cookie: cookiesOf(await signIn('admin-code')) } })).text();
+    expect(admin).toContain('GitLab administrator');
+    expect(admin).toContain('store@lumanet.info');
+    expect(admin).not.toContain('dev@example.com');
+  });
+
+  it('lets a person issue, list and revoke their own MCP tokens: valid for at most 90 days, shown once, never audited in clear', async () => {
+    const dev = cookiesOf(await signIn('dev-code'));
+    const other = cookiesOf(await signIn('admin-code'));
+    const api = `${base}/profile/api/tokens`;
+    const origin = new URL(base).origin;
+    const post = (url: string, cookie: string, body?: object, marked = true) =>
+      fetch(url, { method: 'POST', headers: { cookie, 'content-type': 'application/json', origin, ...(marked ? { 'x-requested-with': 'mnemosyne-docs' } : {}) }, body: JSON.stringify(body ?? {}) });
+
+    // the same-origin marker is required, and so is a sign-in
+    expect((await post(api, dev, { name: 'x' }, false)).status).toBe(403);
+    expect((await post(api, '', { name: 'x' })).status).toBe(401);
+
+    const made = await post(api, dev, { name: 'Claude Code on my laptop' });
+    expect(made.status).toBe(201);
+    const body = (await made.json()) as { token: string; info: { id: string; name: string; hint: string; createdAt: number; expiresAt: number; status: string }; tokens: { id: string }[] };
+    expect(body.token).toMatch(/^mnm_[A-Za-z0-9_-]{40,}$/);
+    expect(body.info).toMatchObject({ name: 'Claude Code on my laptop', status: 'active' });
+    expect(Math.round((body.info.expiresAt - body.info.createdAt) / 86_400_000)).toBe(90);
+    expect(made.headers.get('cache-control')).toBe('no-store');
+
+    // too long or nameless: refused with the reason
+    expect(await (await post(api, dev, { name: 'long', days: 91 })).json()).toEqual({ error: 'A token is valid for 1 to 90 days.' });
+    expect(((await (await post(api, dev, { name: ' ' })).json()) as { error: string }).error).toMatch(/Give the token a name/);
+    const week = (await (await post(api, dev, { name: 'one week', days: 7 })).json()) as { info: { createdAt: number; expiresAt: number } };
+    expect(Math.round((week.info.expiresAt - week.info.createdAt) / 86_400_000)).toBe(7);
+
+    // the profile lists the token by name and first characters, never the token
+    const page = await (await fetch(`${base}/profile`, { headers: { cookie: dev } })).text();
+    expect(page).toContain('Claude Code on my laptop');
+    expect(page).toContain(`mnm_${body.info.hint}`);
+    expect(page).not.toContain(body.token);
+    expect(page).toContain(`data-revoke="${body.info.id}"`);
+    // somebody else's profile does not list it
+    const others = await (await fetch(`${base}/profile`, { headers: { cookie: other } })).text();
+    expect(others).not.toContain(body.info.id);
+    expect(others).not.toContain(`mnm_${body.info.hint}`);
+
+    // only the owner can revoke it
+    expect((await post(`${api}/${body.info.id}/revoke`, other)).status).toBe(404);
+    const revoked = await post(`${api}/${body.info.id}/revoke`, dev);
+    expect(revoked.status).toBe(200);
+    expect(((await revoked.json()) as { tokens: { id: string; status: string }[] }).tokens.find((t) => t.id === body.info.id)?.status).toBe('revoked');
+    expect((await post(`${api}/${body.info.id}/revoke`, dev)).status).toBe(404); // already revoked
+
+    // the audit trail knows who issued and revoked, and never holds the token (its writes are queued: wait for the last one)
+    let audit = '';
+    for (let i = 0; i < 40 && !audit.includes('token_revoke'); i++) {
+      audit = await readFile(webCfg.web.auditFile, 'utf8').catch(() => '');
+      if (!audit.includes('token_revoke')) await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(audit).not.toContain(body.token);
+    const events = audit.split('\n').filter(Boolean).map((l) => JSON.parse(l) as { event: string; user: string; entityName?: string });
+    expect(events.some((e) => e.event === 'token_issue' && e.user === 'dev' && e.entityName === 'Claude Code on my laptop')).toBe(true);
+    expect(events.some((e) => e.event === 'token_revoke' && e.user === 'dev')).toBe(true);
+    // and the sealed file on disk holds neither the token nor a readable name
+    const sealed = await readFile(webCfg.web.tokensFile, 'utf8');
+    expect(sealed).not.toContain(body.token);
+    expect(sealed.startsWith('v1.')).toBe(true);
+  });
+
   it('renders source notes (administrators only) safely: no script, no javascript: links, credentials masked', async () => {
     const cookie = cookiesOf(await signIn('admin-code'));
     const html = await (await fetch(`${base}/p/alpha/alpha-first`, { headers: { cookie } })).text();

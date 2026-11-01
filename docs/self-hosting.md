@@ -46,6 +46,25 @@ Serves `http://127.0.0.1:40000/mnemosyne`:
   `link-code`, `neighbors`, `reindex`, `ask`
 - `/mnemosyne/health` is the only unauthenticated route
 
+### Personal MCP tokens
+
+Every person who signs in to the portal with GitLab can issue their own MCP token: open the card at the
+top right (their name), choose **Profile**, and create a token under **MCP access**. The token is shown
+once. It is valid for at most 90 days (1 to 90, default 90), so it is rotated like a password, and it can
+be revoked in the same place. A person can hold five active tokens; they count as one person.
+
+An MCP client presents it as a header: `Authorization: Bearer mnm_...`. For Claude Code:
+`claude mcp add --transport http mnemosyne https://host:40000/mnemosyne/mcp --header "Authorization: Bearer mnm_..."`.
+
+| var | default | effect |
+|---|---|---|
+| `MNEMOSYNE_BEARER_TOKEN` | unset | one shared token that is always accepted (identifies nobody) |
+| `MNEMOSYNE_REQUIRE_TOKEN` | `false` | refuse MCP and REST calls without a valid shared or personal token. Off: a call with no token is let through when no shared token is set; a personal token that IS presented is always checked |
+| `MNEMOSYNE_TOKENS_FILE` | next to the index | sealed file holding the hashes of the tokens (never the tokens) |
+
+Tokens need the web portal (`MNEMOSYNE_SECRET`, `MNEMOSYNE_PUBLIC_URL`). Send them over https: a token on
+plain http can be read on the network, and the profile page says so when the address is http.
+
 ### One endpoint, many services
 
 `MNEMOSYNE_BASE_PATH` exists so a single `:40000` MCP endpoint carries several services

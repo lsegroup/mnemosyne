@@ -1,5 +1,5 @@
 import express, { Router, type NextFunction, type Request, type Response } from 'express';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { MnemosyneConfig } from './config.js';
@@ -9,12 +9,39 @@ import { createMcpServer } from './mcp.js';
 import { answer } from './ask.js';
 import { resolveLLM } from './embedding.js';
 import { createWebPortal } from './web.js';
+import { TOKEN_PREFIX, type TokenStore } from './token-store.js';
+import { clientIp } from './audit.js';
 
-function bearer(token: string) {
+const sameSecret = (a: string, b: string) => {
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual(x, y);
+};
+
+/**
+ * Who may call MCP and REST. The shared token (if one is set) always works. A personal token (`mnm_...`, issued by a person
+ * in their profile) is checked whenever it is presented, so an expired or revoked one is refused with a clear reason, never
+ * waved through. A call without any token is refused when `required` (a shared token is set, or MNEMOSYNE_REQUIRE_TOKEN).
+ */
+function mcpAuth(opts: { shared?: string; required: boolean; tokens: TokenStore | null }) {
   return (req: Request, res: Response, next: NextFunction) => {
     const header = req.header('authorization') ?? '';
     const supplied = header.startsWith('Bearer ') ? header.slice(7) : '';
-    if (supplied !== token) {
+    if (opts.shared && supplied && sameSecret(supplied, opts.shared)) {
+      next();
+      return;
+    }
+    if (supplied.startsWith(TOKEN_PREFIX) && opts.tokens) {
+      const checked = opts.tokens.check(supplied, clientIp(req));
+      if (checked.ok) {
+        res.locals.seat = checked.user;
+        next();
+        return;
+      }
+      res.status(401).json({ error: checked.reason === 'unknown' ? 'unauthorized' : `token ${checked.reason}` });
+      return;
+    }
+    if (opts.required) {
       res.status(401).json({ error: 'unauthorized' });
       return;
     }
@@ -47,10 +74,15 @@ export function createHttpApp(cfg: MnemosyneConfig, svc: MnemosyneService) {
   // Web portal: public login screen + GitLab-authenticated admin. Has its own
   // auth, so it sits in front of the MCP/REST bearer check below and leaves how
   // MCP clients connect untouched.
-  api.use(createWebPortal(cfg).router);
+  const portal = createWebPortal(cfg);
+  api.use(portal.router);
 
-  if (cfg.http.bearerToken) {
-    api.use(bearer(cfg.http.bearerToken));
+  const required = Boolean(cfg.http.bearerToken) || cfg.http.requireToken;
+  if (cfg.http.requireToken && !cfg.http.bearerToken && !portal.tokens) {
+    console.warn('MNEMOSYNE_REQUIRE_TOKEN is set but the web portal is not configured: nobody can issue a token, every MCP and REST call is refused.');
+  }
+  if (required || portal.tokens) {
+    api.use(mcpAuth({ shared: cfg.http.bearerToken, required, tokens: portal.tokens }));
   }
 
   // --- REST: one route per tool, plus a couple of conveniences ----------

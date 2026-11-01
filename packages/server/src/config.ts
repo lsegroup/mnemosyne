@@ -47,6 +47,12 @@ export interface MnemosyneConfig {
     basePath: string;
     /** optional shared bearer token; when unset, HTTP mode runs unauthenticated */
     bearerToken?: string;
+    /**
+     * Refuse MCP and REST calls that carry no valid token, even when no shared token is set: then only the personal tokens
+     * people issue in their profile (and the shared token, if there is one) are accepted. Off = a call without any token
+     * is let through when no shared token is set, as before; a personal token that is presented is always checked.
+     */
+    requireToken: boolean;
   };
 
   /**
@@ -73,6 +79,8 @@ export interface MnemosyneConfig {
     settingsFile: string;
     /** Sealed file remembering signed-in users' GitLab memberships and refresh tokens across restarts. */
     membersFile: string;
+    /** Sealed file holding the hashes of the personal MCP tokens people issue in their profile (never the tokens themselves). */
+    tokensFile: string;
     /** Append-only audit trail (JSON lines) of sign-ins and admin changes. */
     auditFile: string;
     /** Generated project documentation (articles, diagrams, PDFs), kept with their date stamps. */
@@ -81,6 +89,11 @@ export interface MnemosyneConfig {
     autoFile: string;
     /** Spending guard: most AI generation runs a PERSON may start per UTC day, across all projects (automatic runs have their own dollar limit). */
     aiDailyLimit: number;
+    /**
+     * The admin (`/admin`, its API and the Auto scheduler) is served by a separate program in front of this server. This server then
+     * answers 404 for `/admin` and does not start its own Auto scheduler.
+     */
+    adminExternal: boolean;
     /**
      * Built-in admin account so the portal can be configured before (or without) GitLab SSO.
      * Give either a `passwordHash` (`hashPassword()` output) or a plain `password`.
@@ -141,6 +154,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, repoOverride?: 
       port: int(env.MNEMOSYNE_HTTP_PORT, 40000),
       basePath: normalizeBasePath(env.MNEMOSYNE_BASE_PATH ?? '/mnemosyne'),
       bearerToken: env.MNEMOSYNE_BEARER_TOKEN,
+      requireToken: bool(env.MNEMOSYNE_REQUIRE_TOKEN, false),
     },
     web: {
       secret: env.MNEMOSYNE_SECRET,
@@ -154,10 +168,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, repoOverride?: 
       providersFile: resolve(env.MNEMOSYNE_PROVIDERS_FILE ?? `${dirname(dbPath)}/providers.enc`),
       settingsFile: resolve(env.MNEMOSYNE_SETTINGS_FILE ?? `${dirname(dbPath)}/settings.enc`),
       membersFile: resolve(env.MNEMOSYNE_MEMBERS_FILE ?? `${dirname(dbPath)}/members.enc`),
+      tokensFile: resolve(env.MNEMOSYNE_TOKENS_FILE ?? `${dirname(dbPath)}/tokens.enc`),
       auditFile: resolve(env.MNEMOSYNE_AUDIT_FILE ?? `${dirname(dbPath)}/audit.jsonl`),
       docsDir: resolve(env.MNEMOSYNE_DOCS_DIR ?? `${dirname(dbPath)}/docs`),
       autoFile: resolve(env.MNEMOSYNE_AUTO_FILE ?? `${dirname(dbPath)}/auto.json`),
       aiDailyLimit: int(env.MNEMOSYNE_AI_DAILY_LIMIT, 20),
+      adminExternal: bool(env.MNEMOSYNE_ADMIN_EXTERNAL, false),
       localAdmin: {
         user: env.MNEMOSYNE_LOCAL_ADMIN_USER,
         passwordHash: env.MNEMOSYNE_LOCAL_ADMIN_PASSWORD_HASH,

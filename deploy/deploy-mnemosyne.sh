@@ -94,8 +94,15 @@ EOF
 rm -f "$PORTAL_ENV"
 sudo chmod 600 /etc/mnemosyne.env
 
-sed -e "s#__INSTALL_DIR__#${INSTALL_DIR}#g" -e "s#__RUN_USER__#${RUN_USER}#g" \
-  "$INSTALL_DIR/deploy/mnemosyne.service" | sudo tee "/etc/systemd/system/${SERVICE_NAME}.service" > /dev/null
+UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+# A separate front-door program can be installed on this box (/usr/local/bin/mnemosyne-admin, with a unit of its own that starts this
+# server as its child). That unit is then the right one: writing the plain unit over it would silently switch the front door off.
+if sudo grep -q '^ExecStart=/usr/local/bin/mnemosyne-admin' "$UNIT_FILE" 2>/dev/null; then
+  echo "==> ${UNIT_FILE} runs the front-door program: keeping it"
+else
+  sed -e "s#__INSTALL_DIR__#${INSTALL_DIR}#g" -e "s#__RUN_USER__#${RUN_USER}#g" \
+    "$INSTALL_DIR/deploy/mnemosyne.service" | sudo tee "$UNIT_FILE" > /dev/null
+fi
 
 sudo systemctl daemon-reload
 sudo systemctl enable "$SERVICE_NAME"
@@ -112,6 +119,11 @@ sudo systemctl is-active --quiet "$SERVICE_NAME" || { echo "✗ ${SERVICE_NAME} 
 # at the wrong dimension out from under the already-running service on every
 # deploy. Hitting the service's own endpoint means there is exactly one
 # source of truth for embedder config, permanently, not two that can drift.
+# Behind the front-door program this server starts a moment after the service does: wait for the health answer first.
+for _ in $(seq 1 30); do
+  curl -sf "http://127.0.0.1:${HTTP_PORT}/mnemosyne/health" > /dev/null && break
+  sleep 1
+done
 curl -sf -X POST "http://127.0.0.1:${HTTP_PORT}/mnemosyne/reindex" \
   -H "Content-Type: application/json" -d '{}' && echo
 

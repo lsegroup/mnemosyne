@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Profile and personal MCP tokens
+- The signed-in person's name in the header is now a card with a link to their profile. The profile lists their account details and lets them issue their own MCP token.
+- A token is valid for at most 90 days (1 to 90, default 90), is shown once, can be revoked at any time, and only a hash of it is stored. A person can hold five active tokens; they are still one person.
+- MCP and REST accept `Authorization: Bearer <token>` with a personal token. A presented token is always checked, so an expired or revoked one is refused with the reason. `MNEMOSYNE_REQUIRE_TOKEN=1` refuses calls without a valid token; without it a call with no token is let through as before.
+- Issuing and revoking a token is written to the audit trail (never the token itself).
+
 ## 0.6.0 — 2026-10-31
 
 First release. Mnemosyne is a self-hosted AI team memory: a git-backed graph of memory notes that any MCP-capable AI can read and write, plus a web portal that turns the notes of a project into documentation.
