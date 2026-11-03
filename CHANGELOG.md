@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Release zip with an installer
+- `release/mnemosyne_<version>.zip` (built by `deploy/make-release.sh`): the built server, the admin program for linux/amd64 and linux/arm64, `install.sh` for a Linux server with systemd, the docs and checksums. `install.sh` writes the settings file once, so an upgrade (unpack the new zip, run it again) keeps settings and data.
+
 ### Open source, free edition and licensed edition
 - Mnemosyne is open source under the Apache License 2.0 (`LICENSE`, `NOTICE`), including the Go admin program: its source is in `admin-go/` (Go module `github.com/lsegroup/mnemosyne/admin-go`) and published with the rest of the repository.
 - **Free edition** (no licence key): up to 5 people - the first to sign in to the documentation portal take the seats, the 6th is refused and signed out -, the Audit tab shows the last 10 records (no paging, no search), administrators sign in to the admin area with the built-in account (no GitLab sign-in for the admin area, no SSO set-up). It never contacts a licence server.

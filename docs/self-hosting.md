@@ -7,7 +7,22 @@
   data-only repo — set `MNEMOSYNE_REPO` to its path.
 - Nothing else. Embeddings and chat are optional.
 
-## Install
+## Install from the release zip (Linux server, recommended)
+
+`release/mnemosyne_<version>.zip` holds everything: the built server, the admin program for linux/amd64 and linux/arm64, `install.sh`, the
+docs and `bin/SHA256SUMS`. On a server with Node.js 20+, npm, git and curl:
+
+```bash
+unzip mnemosyne_0.6.1.zip && cd mnemosyne_0.6.1
+sudo ./install.sh --public-url https://mnemosyne.example.com --listen 127.0.0.1:40001     # ./install.sh --help lists every option
+```
+
+It checks the binaries against the checksums, installs the server in `/opt/mnemosyne` and the admin program in `/usr/local/bin`, creates the
+notes repository in `/var/lib/mnemosyne`, writes `/etc/mnemosyne.env` once (random secret, built-in admin account; the password is printed at the end),
+installs and starts the systemd unit and waits for the health answer. To upgrade, unpack the newer release and run `install.sh` again: the settings file
+and the data are never touched. `deploy/make-release.sh` builds the zip from a checkout.
+
+## Install from source
 
 ```bash
 git clone <your mnemosyne fork>

@@ -84,6 +84,11 @@ Non-MCP client: `POST /mnemosyne/search` to pull nodes into the prompt,
 
 See [docs/architecture.md](docs/architecture.md) and [docs/self-hosting.md](docs/self-hosting.md).
 
+## Install on a Linux server
+
+Download `release/mnemosyne_<version>.zip` (one zip per release, with `install.sh`), unzip it and run `sudo ./install.sh`; see
+`docs/self-hosting.md`. It needs Node.js 20+, git and curl, and installs a systemd service that starts the server and the admin program.
+
 ## The admin program
 
 The admin (`/mnemosyne/admin`: sign-in, LLM, LLM usage, LLM auto, SSO, Audit, License) is a separate program written in Go; its source is in
