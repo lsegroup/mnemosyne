@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /**
  * LLM CALL — chat completion.  *** COSTS MONEY ***
  *

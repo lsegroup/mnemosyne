@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package auto
 
 import (
@@ -245,30 +247,59 @@ func TestAnUnreachableProviderIsWaitedForAndTheSameCallIsSentAgain(t *testing.T)
 	run := r.state().Runs[0]
 	is(t, run.Status, "completed", "status")
 	is(t, attempts, 3, "the same call was sent three times")
-	is(t, r.clock.Sub(start), 2*time.Minute+30*time.Second, "two minutes of waiting, then the call")
+	is(t, r.clock.Sub(start), 3*time.Minute+30*time.Second, "one and two minutes of waiting (growing pauses), then the call")
 	is(t, (*run.Usage)[0].MS, int64(30_000), "waiting is not in the time of the call")
-	if !r.logged("auto_run", "Could not reach the provider (no such host) while working on alpha; the run waits one minute and tries again, for at most 15 minutes") {
+	if !r.logged("auto_run", "Could not reach the provider (no such host) while working on alpha; the run waits and tries again with growing pauses (1, 2, 4 and 8 minutes), for at most 15 minutes") {
 		t.Errorf("the wait is audited: %+v", r.logs)
 	}
-	if !r.logged("auto_run", "The provider is reachable again after 2 minute(s); the run goes on") {
+	if !r.logged("auto_run", "The provider is reachable again after 3 minute(s); the run goes on") {
 		t.Errorf("the return is audited: %+v", r.logs)
 	}
 }
 
-func TestAProviderThatStaysAwayStopsTheRunAfterFifteenMinutes(t *testing.T) {
+// One bad stretch gives up on ONE project only: the run goes on with the next one (two Oct 31 runs lost 25 and 80 projects to EAI_AGAIN).
+func TestAProviderThatStaysAwayGivesUpOnTheProjectAndTheRunGoesOn(t *testing.T) {
 	r := newRig(t)
 	r.changed("alpha")
 	r.changed("beta")
 	r.setup([]string{"alpha", "beta"}, true, false, 5)
+	r.generate = func(project string, kind Kind) (engine.Outcome, error) {
+		if project == "beta" { // the provider is back for the second project
+			r.clock = r.clock.Add(30 * time.Second)
+			return engine.Outcome{Model: "m", InputTokens: 5, OutputTokens: 5, USD: fptr(0.01)}, nil
+		}
+		return engine.Outcome{}, &engine.UnreachableError{Msg: "Could not reach the provider (no such host)."}
+	}
+	start := r.clock
+	r.runner.Tick()
+	run := r.state().Runs[0]
+	is(t, run.Status, "completed", "the run is not abandoned")
+	is(t, strings.Join(run.Updated, ","), "beta", "the second project was done")
+	is(t, len(run.Failed), 1, "one project given up on")
+	is(t, run.Failed[0].Project, "alpha", "which")
+	is(t, run.Failed[0].Error, "article: Could not reach the provider (no such host) for 15 minutes, so this project was given up on and is still due at the next run", "why")
+	is(t, len(r.calls), 6, "the first try and one more after pauses of 1, 2, 4 and 8 minutes, then beta")
+	is(t, r.clock.Sub(start), 15*time.Minute+30*time.Second, "15 minutes of growing pauses, then beta")
+	is(t, len(run.NotReached), 0, "nothing is left unreached")
+}
+
+// If the provider stays away for MaxGiveUps projects in a row it is really down: the run stops and lists the rest as not reached.
+func TestAProviderThatIsReallyDownStopsTheRunAfterThreeProjects(t *testing.T) {
+	r := newRig(t)
+	for _, p := range []string{"alpha", "beta", "gamma", "delta"} {
+		r.changed(p)
+	}
+	r.setup([]string{"alpha", "beta", "gamma", "delta"}, true, false, 5)
 	r.generate = func(string, Kind) (engine.Outcome, error) {
 		return engine.Outcome{}, &engine.UnreachableError{Msg: "Could not reach the provider (connection refused)."}
 	}
 	r.runner.Tick()
 	run := r.state().Runs[0]
 	is(t, run.Status, "stopped", "status")
-	is(t, run.Note, "Could not reach the provider (connection refused) for 15 minutes, so the run was stopped. Nothing was lost: what was not done is listed as not reached and is still due at the next run.", "note")
-	is(t, strings.Join(run.NotReached, ","), "alpha,beta", "nothing was done")
-	is(t, len(r.calls), 16, "the first try and one more after every minute")
+	is(t, run.Note, "The provider could not be reached for 3 projects in a row (each tried for 15 minutes), so the run was stopped. Nothing was lost: what was not done is listed as not reached and is still due at the next run.", "note")
+	is(t, len(run.Failed), 3, "three projects given up on")
+	is(t, strings.Join(run.NotReached, ","), "delta", "the rest was not reached")
+	is(t, len(r.calls), 15, "five tries for each of the three projects")
 }
 
 func TestSwitchingOffDuringARunStopsBeforeTheNextCall(t *testing.T) {

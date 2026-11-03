@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Reciprocal Rank Fusion: combine several ranked id lists into one, without
  * needing the underlying scores to be on the same scale. Used to merge FTS

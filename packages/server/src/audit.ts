@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { appendFile, mkdir, readFile, rename, stat, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { Request } from 'express';

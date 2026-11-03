@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Writes the data the Go admin takes from the Node build (the AI job definitions with their built-in prompts, the version line, the
 // Helvetica metrics and the PDF text table) into internal/assets, for the Go server to embed.
 //

@@ -129,7 +129,7 @@ runs run in the **admin program** (`internal/engine`). The two engines are ports
 
 The code is Apache-2.0; the limits are applied by the admin program (`internal/web/license.go`).
 
-- **Free** (no licence key, or a key that cannot be confirmed): `FreeSeats = 5` people, the Audit API returns the last `FreeAuditRecords = 10` records whatever
+- **Free** (no licence key, or a key that cannot be confirmed): `FreeSeats = 4` people (5 or more seats need a licence), the Audit API returns the last `FreeAuditRecords = 10` records whatever
   is asked, the admin area signs in with the built-in account only (GitLab sign-in for the admin area and the SSO set-up are refused), and the licence server
   is never contacted.
 - **Licensed** (a key confirmed by the licence server, or within its renewal period): as many people as the licence has seats, the whole audit history, GitLab
@@ -166,10 +166,12 @@ What keeps the spending bounded, in order of importance:
 4. **One AI job at a time** (`ai-busy.json`, shared with the server), and a person's button is refused while a run is going. The kill switch and the pause are looked
    at before every single call. A run missed by more than 12 hours is skipped.
 
-**When the provider cannot be reached** (its name does not resolve, the connection is refused or reset; `UnreachableError`) the run waits one minute and sends the
-same call again, for at most 15 minutes in total, and then stops with the rest listed as *not reached* (they stay due). Such a call never arrived and is not billed.
-An answer that arrived but is bad, a timeout and a refusal are never retried. A diagram job whose text call was billed but whose overview picture cannot be painted
-is a plain failure (never retried: that would bill the plan call again) and the earlier diagrams of the project are kept.
+**When the provider cannot be reached** (its name does not resolve, the connection is refused or reset; `UnreachableError`) every call is first sent again up to three more times with exponential
+backoff (1.5 s, 3 s, 6 s; the same for an answer 429, 500, 502, 503 or 504, which is not billed). If it still fails, the run waits and sends the same call again after growing pauses of 1, 2, 4 and
+8 minutes (`OutageSteps`, 15 minutes in all). A project that still cannot be reached is **given up on and the run goes on with the next project**; the given-up project is listed as failed and
+stays due for the next run. After `MaxGiveUps = 3` projects in a row the provider is taken to be down: the run stops and lists the rest as *not reached*. An answer that arrived but is bad, a refusal
+(400, 401, 403) and a timeout are never retried (a timed-out request may have been billed). A diagram job whose text call was billed but whose overview picture cannot be painted is a plain failure
+(never retried: that would bill the plan call again) and the earlier diagrams of the project are kept.
 
 Every automatic job is written to the cost center (`usage.jsonl`, see below) and to the audit trail (`auto_start` / `ai_done` / `auto_agree` ...). The schedule, the
 agreement, the live run and the last 30 runs live in `MNEMOSYNE_AUTO_FILE` (default `.mnemosyne/auto.json`); the Auto tab shows the live progress and the last run, the
@@ -177,12 +179,13 @@ details are in LLM usage. A run is persisted after every call, so a restart ends
 
 ## Fixed addresses (Admin -> LLM, step 2)
 
-When the DNS in front of an AI provider is unstable (a real run lost 25 projects to `EAI_AGAIN` on 2026-10-31), an administrator can pin a host name to an IP address.
-Every connection Mnemosyne itself makes to the provider — the AI calls and the model list — then uses that address and does not ask DNS at all (`internal/llm` in the admin
-program, `packages/server/src/host-pins.ts` in the server). Only the *lookup* is replaced; the TLS certificate is still checked against the host name, so a wrong address
-cannot be used to listen in. Nothing else changes: not `/etc/hosts`, not the system resolver, not other connections of the portal. The list is kept in the sealed
-`providers.enc` (`hosts`) and is in force at once when saved (audit: `llm_hosts`). *Check* opens a TLS connection to `ip:443` as that host name and reports whether the
-certificate is valid for it; it sends no request and costs nothing. Rules: host names only, IPv4 or IPv6, one address per host, at most 20.
+When the DNS in front of an AI provider is unstable (a real run lost 25 projects to `EAI_AGAIN` on 2026-10-31), an administrator can pin a host name to an IP address. The pin is a **fallback, not a
+replacement**: Mnemosyne asks DNS first (the lookup gets 5 seconds, the addresses it returns 10 seconds); only when the lookup fails or none of the addresses can be connected to does the connection go to the
+pinned address (`internal/llm`, `dial`; `packages/server/src/host-pins.ts` does the same for the server). A host that resolves is never redirected, so a pin that has gone stale cannot break a working provider.
+The certificate is still checked against the host name; nothing else changes (not `/etc/hosts`, not other connections of the portal). The list is kept in the sealed `providers.enc` (`hosts`) and is in force at
+once when saved (audit: `llm_hosts`). The LLM tab shows for every pin when it was last **verified** (*Check* opens a TLS connection to `ip:443` as that host name and reports whether the certificate is
+valid for it; it sends no request and costs nothing) and when it last **had to stand in** because DNS failed (since the program started). Rules: host names only, IPv4 or IPv6, one address per host, at
+most 20.
 
 ## Reasoning effort (Admin -> LLM, step 4)
 

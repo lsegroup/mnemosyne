@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 export { loadConfig, type MnemosyneConfig } from './config.js';
 export { MnemosyneService } from './service.js';
 export type { CreateNodeInput, UpdateNodePatch, WriteResult } from './service.js';

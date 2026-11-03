@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package assets holds what the Go binary serves that comes from the browser side of Mnemosyne: the admin page and the admin sign-in
 // page (HTML, CSS and JavaScript, with @@PLACEHOLDERS@@ the server fills in) and the AI job definitions. They are rendered from the
 // Node code by tools/extract-assets.mjs and embedded, so the binary needs no files next to it.

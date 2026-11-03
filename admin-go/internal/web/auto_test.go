@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package web
 
 import (
@@ -57,7 +59,7 @@ const planAnswer = `{"title":"Alpha","diagrams":[{"name":"Overview","columns":[{
 // fakeImages is what the fake provider got asked to paint, and whether it should refuse.
 type fakeImages struct {
 	bodies []map[string]any
-	// failFrom: the image calls from this one on (1 = the first of the test) are refused with HTTP 500; 0 = never
+	// failFrom: the image calls from this one on (1 = the first of the test) are refused with HTTP 400; 0 = never
 	failFrom int
 }
 
@@ -76,7 +78,7 @@ func llmServer(t *testing.T, planText string) (*httptest.Server, *[]map[string]a
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			images.bodies = append(images.bodies, body)
 			if images.failFrom > 0 && len(images.bodies) >= images.failFrom {
-				w.WriteHeader(500)
+				w.WriteHeader(400) // a refusal of the request itself: not retried (a 5xx would be, with pauses)
 				return
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"b64_json": base64.StdEncoding.EncodeToString(fakePNG)}}})

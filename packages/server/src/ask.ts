@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import type { LLM } from '@mnemosyne/core';
 import type { MnemosyneService } from './service.js';
 

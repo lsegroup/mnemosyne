@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import type { ChatMessage, ChatOptions, Embedder, LLM } from '@mnemosyne/core';
 
 interface OpenAIEmbedConfig {

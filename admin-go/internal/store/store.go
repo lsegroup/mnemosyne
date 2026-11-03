@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package store holds what the admin keeps on disk: the LLM providers with their keys and the model chosen per job, and the portal
 // settings (GitLab SSO). Both are sealed files (AES-256-GCM, key derived from the operator secret) in exactly the format the Node server
 // reads and writes, so the two can share them and nobody loses a setting when the admin moves to Go.

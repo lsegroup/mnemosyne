@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { open, seal } from './secrets.js';

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { HashEmbedder, type Embedder, type LLM } from '@mnemosyne/core';
 import type { MnemosyneConfig } from './config.js';
 import { OpenAICompatibleEmbedder, OpenAICompatibleLLM } from './adapters/openai.js';

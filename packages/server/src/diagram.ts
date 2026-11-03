@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import PDFDocument from 'pdfkit';
 import { redact } from './docs.js';
 import { pdfText } from './pdf.js';

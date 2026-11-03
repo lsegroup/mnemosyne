@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
 import { NodeRepo } from './repo.js';
 import type { MemoryNode } from '@mnemosyne/core';

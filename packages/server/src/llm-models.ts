@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Asks an LLM provider which models its API key may use (`GET …/models`).
  * Calls: the provider's model-LIST endpoint only. No inference, no tokens, no cost.

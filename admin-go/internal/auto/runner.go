@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package auto
 
 import (
@@ -375,10 +377,10 @@ func (r *Runner) waitIdle() bool {
 	return !r.d.Busy()
 }
 
-// waitOutage is one minute of waiting for the provider, in 5-second steps so the switch is noticed quickly. It returns why the run
-// must stop, or "".
-func (r *Runner) waitOutage() string {
-	for i := 0; i < int(OutageWait/(5*time.Second)); i++ {
+// waitOutage is a pause of d while the provider cannot be reached, in 5-second steps so the switch is noticed quickly. It returns why the
+// run must stop, or "".
+func (r *Runner) waitOutage(d time.Duration) string {
+	for i := 0; i < int(d/(5*time.Second)); i++ {
 		r.d.Sleep(5 * time.Second)
 		if s := r.stopReason(); s != "" {
 			return s
@@ -413,6 +415,7 @@ func addUsage(list *[]Usage, e Usage) {
 // execute drives the run. The caller has set executing; it is cleared when the run is over, however it ends.
 func (r *Runner) execute(id string) error {
 	defer r.setExecuting(false)
+	giveUps := 0 // projects in a row that the provider could not be reached for
 	for {
 		st, err := r.d.Store.Get()
 		if err != nil {
@@ -452,6 +455,7 @@ func (r *Runner) execute(id string) error {
 		}
 
 		failure := ""
+		gaveUp := false
 		did := 0
 		// stopHere ends the run in the middle of a project: what was saved of it counts as updated, the rest is listed as not reached.
 		stopHere := func(status, note string) error {
@@ -503,6 +507,7 @@ func (r *Runner) execute(id string) error {
 			}
 			r.d.Log(audit.Input{Event: "auto_start", EntityType: "docs_" + string(kind), EntityName: item.Project, User: "auto", Description: fmt.Sprintf("Automatic update (agreed by %s): %s for %s; at most %s; run so far %s of %s", cfg.Agreement.By, what, item.Project, USD(*worst), USD(spent), USD(cfg.LimitUSD))})
 			waited := time.Duration(0)
+			tries := 0
 			for {
 				began := r.d.Now()
 				out, err := r.d.Generate(item.Project, kind, cfg.Agreement.By)
@@ -555,21 +560,26 @@ func (r *Runner) execute(id string) error {
 				}
 				// The connection itself failed, so nothing reached the provider and nothing was billed: wait and send the same call again.
 				why := trimDot(unreachable.Msg)
-				if waited >= OutageMax {
-					return stopHere("stopped", fmt.Sprintf("%s for %d minutes, so the run was stopped. Nothing was lost: what was not done is listed as not reached and is still due at the next run.", why, int(OutageMax.Minutes())))
+				if tries >= len(OutageSteps) {
+					// this project is given up on, the run goes on with the next one (the provider may be back for it)
+					gaveUp = true
+					failure = fmt.Sprintf("%s: %s for %d minutes, so this project was given up on and is still due at the next run", what, why, int(OutageMax.Minutes()))
+					break
 				}
-				if waited == 0 {
-					r.d.Log(audit.Input{Event: "auto_run", EntityType: "auto", EntityName: "Automatic update", User: "auto", Description: fmt.Sprintf("%s while working on %s; the run waits one minute and tries again, for at most %d minutes", why, item.Project, int(OutageMax.Minutes()))})
+				step := OutageSteps[tries]
+				if tries == 0 {
+					r.d.Log(audit.Input{Event: "auto_run", EntityType: "auto", EntityName: "Automatic update", User: "auto", Description: fmt.Sprintf("%s while working on %s; the run waits and tries again with growing pauses (1, 2, 4 and 8 minutes), for at most %d minutes", why, item.Project, int(OutageMax.Minutes()))})
 				}
-				waited += OutageWait
+				tries++
+				waited += step
 				if err := r.mutate(id, func(x *Run) {
 					if x.Current != nil {
-						x.Current.Waiting = fmt.Sprintf("%s: waiting one minute (retry %d of %d)", why, int(waited/OutageWait), int(OutageMax/OutageWait))
+						x.Current.Waiting = fmt.Sprintf("%s: waiting %d minute(s) (retry %d of %d)", why, int(step.Minutes()), tries, len(OutageSteps))
 					}
 				}); err != nil {
 					return err
 				}
-				if s := r.waitOutage(); s != "" {
+				if s := r.waitOutage(step); s != "" {
 					return stopHere("stopped", s)
 				}
 			}
@@ -591,6 +601,11 @@ func (r *Runner) execute(id string) error {
 			}
 		}); err != nil {
 			return err
+		}
+		if !gaveUp {
+			giveUps = 0
+		} else if giveUps++; giveUps >= MaxGiveUps {
+			return r.finish(id, "stopped", fmt.Sprintf("The provider could not be reached for %d projects in a row (each tried for %d minutes), so the run was stopped. Nothing was lost: what was not done is listed as not reached and is still due at the next run.", MaxGiveUps, int(OutageMax.Minutes())))
 		}
 	}
 }

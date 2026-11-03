@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { dirname, resolve } from 'node:path';
 
 export interface MnemosyneConfig {

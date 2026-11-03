@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package aibusy lets the Go admin and the Node server agree that only ONE AI job runs at a time, although they are two processes: a
 // small file next to the other portal state says who is working ("auto" = an automatic run, "person" = a job a person started on a
 // project page). A lock that is older than a few hours is forgotten, so a crash never blocks the AI for good.

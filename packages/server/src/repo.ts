@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import { parseMarkdown, toMarkdown, type MemoryNode } from '@mnemosyne/core';

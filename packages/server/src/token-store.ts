@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { rename, writeFile } from 'node:fs/promises';

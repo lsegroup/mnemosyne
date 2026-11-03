@@ -14,7 +14,7 @@ hard dependency.
 - `packages/vscode-extension` — thin human UI (tree view, "Capture memory", CodeLens).
   The AI path is MCP, not this extension.
 - `admin-go` — the admin program in Go (open source, same repo): the front door that starts the server as its child, serves `/mnemosyne/admin`
-  (LLM, LLM usage, LLM auto, SSO, Audit, License), runs the automatic documentation updates, applies the free/licensed edition (5 seats, last 10 audit
+  (LLM, LLM usage, LLM auto, SSO, Audit, License), runs the automatic documentation updates, applies the free/licensed edition (4 free seats, last 10 audit
   records, no admin GitLab sign-in without a licence). Module `github.com/lsegroup/mnemosyne/admin-go`; `make test`, `make build`.
 - `bin/` compiled admin program, `release/` one zip per release with `install.sh`, `deploy/make-release.sh` builds it.
 - `nodes/` — the markdown corpus (source of truth). `docs/` — architecture & self-hosting.
@@ -33,7 +33,7 @@ hard dependency.
 - The project is **Apache-2.0 and open source**. Never put internal host names, addresses or credentials into the repo: the GitHub mirror refuses to publish them.
 - Two engines write AI documents: the server (jobs started by a button) and `admin-go/internal/engine` (automatic runs). They are ports of each other; a change to
   prompts, diagrams or document formats goes into both, with a shared fixture or a Node-generated golden file in the tests.
-- The licence limits (5 seats, 10 audit records, admin SSO) live in `admin-go/internal/web/license.go`; keep the License/Audit/SSO tabs and `docs/` in step with them.
+- The licence limits (4 free seats, 10 audit records, admin SSO) live in `admin-go/internal/web/license.go`; keep the License/Audit/SSO tabs and `docs/` in step with them.
 
 ## Build / test
 

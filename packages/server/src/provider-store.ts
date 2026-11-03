@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import type { JobsFile, JobSettings } from './ai-jobs.js';
 import type { HostPin } from './host-pins.js';
 import { randomUUID } from 'node:crypto';

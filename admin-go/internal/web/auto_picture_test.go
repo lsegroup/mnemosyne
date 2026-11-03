@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package web
 
 import (
@@ -151,7 +153,7 @@ func TestADetailPictureTheImageModelRefusesIsLeftOutAndReported(t *testing.T) {
 	eq(t, run["status"], any("completed"), "the run is complete")
 	eq(t, len(run["failed"].([]any)), 0, "nothing failed")
 	warnings := strings.Join(toStrings(run["warnings"]), " | ")
-	has(t, warnings, "The workflow diagram was painted, but 1 detail picture(s) could not be painted and are missing: Sign-in and security: The provider answered HTTP 500 for image generation.")
+	has(t, warnings, "The workflow diagram was painted, but 1 detail picture(s) could not be painted and are missing: Sign-in and security: The provider answered HTTP 400 for image generation.")
 	usage := run["usage"].([]any)
 	eq(t, usage[2].(map[string]any)["calls"], any(float64(1)), "only the picture that was painted is billed")
 	eq(t, run["usd"], any(0.0116), "text $0.0016 and one picture")

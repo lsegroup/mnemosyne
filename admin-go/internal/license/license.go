@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package license is the licence of this installation. It works like the other LSE products: 30 days free from the first start, then a
 // licence key is needed. It asks the licence server, which answers with a SIGNED attestation (Ed25519). Only the public key is in this
 // program, so a copy of it cannot invent an answer; the answer names this installation and the request it belongs to, so it cannot be

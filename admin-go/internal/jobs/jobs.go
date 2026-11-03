@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package jobs holds the AI jobs an administrator can set up (Admin -> LLM, step 4): what each job is for, the built-in defaults
 // (limits and prompts), the stored settings, and the validation of the admin form. Port of ai-jobs.ts; the definitions themselves are
 // rendered from the Node code (tools/extract-assets.mjs), so the texts and prompts are identical.

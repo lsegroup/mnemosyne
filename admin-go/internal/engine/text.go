@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package engine writes the project documentation: it reads the notes, builds the prompts, makes the one AI call per job, draws the
 // architecture diagrams itself and stores the results. It is the Go port of docs.ts, docgen.ts, diagram.ts and llm-call-chat.ts and must
 // behave exactly like them: the stored articles, their fingerprints and the pictures are shared with the Node server.

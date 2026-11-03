@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package web
 
 import (
@@ -102,29 +104,29 @@ func (h *harness) person(t *testing.T, user string) map[string]string {
 	return map[string]string{"Cookie": sessionCookie + "=" + token, "Accept": "text/html"}
 }
 
-// ---- the free edition: five people ------------------------------------------------------------------------------------------
+// ---- the free edition: four people ------------------------------------------------------------------------------------------
 
-func TestTheFreeEditionHasFiveSeatsAndRefusesTheSixthPerson(t *testing.T) {
+func TestTheFreeEditionHasFourSeatsAndRefusesTheFifthPerson(t *testing.T) {
 	r := newLicenceRig(t)
-	for _, u := range []string{"alice", "bob", "carol", "dave", "erin"} {
+	for _, u := range []string{"alice", "bob", "carol", "dave"} {
 		got := r.do(call{path: "/p/alpha", headers: r.person(t, u)})
 		eq(t, got.status, 200, u+" has a seat")
 	}
-	eq(t, r.srv.seats.Count(), 5, "five seats taken")
+	eq(t, r.srv.seats.Count(), 4, "four seats taken")
 
-	// the sixth person is refused (and signed out of the portal); the page says why
+	// the fifth person is refused (and signed out of the portal); the page says why
 	page := r.do(call{path: "/p/alpha", headers: r.person(t, "frank")})
-	eq(t, page.status, 402, "the sixth person")
-	has(t, page.body, "All 5 seats of this installation are taken")
-	has(t, page.body, "free for up to 5 people")
+	eq(t, page.status, 402, "the fifth person")
+	has(t, page.body, "All 4 seats of this installation are taken")
+	has(t, page.body, "free for up to 4 people")
 	has(t, page.header.Get("Set-Cookie"), sessionCookie+"=")
 	has(t, page.header.Get("Set-Cookie"), "Max-Age=0")
 	api := r.do(call{method: "POST", path: "/mcp", body: "{}", headers: map[string]string{"Cookie": r.person(t, "frank")["Cookie"]}})
 	eq(t, api.status, 402, "MCP of that person")
 	eq(t, api.json(t)["error"], "seats_exhausted", "error code")
-	eq(t, r.srv.seats.Count(), 5, "no sixth seat")
+	eq(t, r.srv.seats.Count(), 4, "no fifth seat")
 
-	// the five keep working, anonymous requests and the health answer are never touched
+	// the four keep working, anonymous requests and the health answer are never touched
 	eq(t, r.do(call{path: "/p/alpha", headers: r.person(t, "alice")}).status, 200, "alice still works")
 	eq(t, r.do(call{path: "/login"}).status, 200, "the sign-in page")
 	eq(t, r.do(call{path: "/health"}).status, 200, "health")
@@ -136,7 +138,7 @@ func TestTheFreeEditionHasFiveSeatsAndRefusesTheSixthPerson(t *testing.T) {
 	}
 	cookie, _ := r.localCookie("Admin", "correct horse")
 	trail := r.api(cookie, "GET", "/audit", "").body
-	eq(t, strings.Count(trail, "Sign-in refused: all 5 seats are taken"), 1, "one audit entry")
+	eq(t, strings.Count(trail, "Sign-in refused: all 4 seats are taken"), 1, "one audit entry")
 
 	// a seat can be freed
 	r.srv.seats.Release("bob")
@@ -146,15 +148,15 @@ func TestTheFreeEditionHasFiveSeatsAndRefusesTheSixthPerson(t *testing.T) {
 func TestALicenceLiftsTheLimitToItsSeats(t *testing.T) {
 	r := newLicenceRig(t)
 	cookie, _ := r.localCookie("Admin", "correct horse")
-	for _, u := range []string{"a", "b", "c", "d", "e"} {
+	for _, u := range []string{"a", "b", "c", "d"} {
 		r.do(call{path: "/p/alpha", headers: r.person(t, u)})
 	}
-	eq(t, r.do(call{path: "/p/alpha", headers: r.person(t, "f")}).status, 402, "refused without a licence")
+	eq(t, r.do(call{path: "/p/alpha", headers: r.person(t, "e")}).status, 402, "refused without a licence")
 
 	st := r.api(cookie, "GET", "/license", "").json(t)
 	eq(t, st["edition"], "free", "edition")
-	eq(t, st["seatLimit"], any(float64(5)), "limit")
-	eq(t, st["seatsUsed"], any(float64(5)), "seats used")
+	eq(t, st["seatLimit"], any(float64(4)), "limit")
+	eq(t, st["seatsUsed"], any(float64(4)), "seats used")
 	eq(t, st["hasKey"], false, "no key")
 	eq(t, len(r.ls.requests), 0, "the licence server is not asked without a key")
 
@@ -162,7 +164,7 @@ func TestALicenceLiftsTheLimitToItsSeats(t *testing.T) {
 	eq(t, bad.status, 400, "wrong key")
 	eq(t, bad.json(t)["error"], "Invalid license key.", "the licence server's words")
 	eq(t, r.api(cookie, "POST", "/license/activate", `{"key":"x"}`).status, 400, "not a key")
-	eq(t, r.do(call{path: "/p/alpha", headers: r.person(t, "f")}).status, 402, "still refused")
+	eq(t, r.do(call{path: "/p/alpha", headers: r.person(t, "e")}).status, 402, "still refused")
 
 	good := r.api(cookie, "POST", "/license/activate", `{"key":"LSE-GOODKEY-123456"}`)
 	eq(t, good.status, 200, "good key: "+good.body)
@@ -175,10 +177,10 @@ func TestALicenceLiftsTheLimitToItsSeats(t *testing.T) {
 		t.Error("the key itself must never be sent back")
 	}
 	asked := r.ls.last()
-	eq(t, asked["seats_used"], any(float64(5)), "the seats in use are reported with every contact")
+	eq(t, asked["seats_used"], any(float64(4)), "the seats in use are reported with every contact")
 	eq(t, asked["product"], "mnemosyne", "product")
 
-	eq(t, r.do(call{path: "/p/alpha", headers: r.person(t, "f")}).status, 200, "the sixth person works now")
+	eq(t, r.do(call{path: "/p/alpha", headers: r.person(t, "e")}).status, 200, "the fifth person works now")
 	chk := r.api(cookie, "POST", "/license/check", "")
 	eq(t, chk.status, 200, "check")
 	eq(t, chk.json(t)["edition"], "licensed", "edition after the check")
@@ -196,7 +198,7 @@ func TestALicenceThatRunsOutFallsBackToTheFreeEditionAndNeverLocks(t *testing.T)
 	r.ls.srv.Close()
 	r.advance(8 * 24 * time.Hour)
 	eq(t, r.srv.edition().Licensed, false, "the free edition again")
-	eq(t, r.do(call{path: "/p/alpha", headers: r.person(t, "alice")}).status, 200, "the portal still works for the first five")
+	eq(t, r.do(call{path: "/p/alpha", headers: r.person(t, "alice")}).status, 200, "the portal still works for the first four")
 	st := r.api(cookie, "GET", "/license", "").json(t)
 	eq(t, st["edition"], "free", "edition")
 	eq(t, st["hasKey"], true, "the key is still there")
@@ -303,7 +305,7 @@ func TestTheLicensedDomainIsTheHostOfThePublicURLUnlessOneIsSet(t *testing.T) {
 	}
 }
 
-// The seat register must have a file of its own, or the five seats would be forgotten at every restart.
+// The seat register must have a file of its own, or the four seats would be forgotten at every restart.
 func TestTheSeatRegisterIsKeptInAFileNextToTheOtherData(t *testing.T) {
 	dir := t.TempDir()
 	cfg, err := config.Load(func(k string) string { return "" }, dir)

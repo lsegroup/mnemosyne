@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package web is the Go admin: everything behind /mnemosyne/admin (sign-in, the admin page and its JSON API) and, in front of the
 // Node server, the reverse proxy for everything else. Same cookies, same keys and same sealed files as the Node server, so a person
 // signed in before the move stays signed in and no setting is lost.

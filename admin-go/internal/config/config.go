@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package config reads the same environment the Node server reads (same variable names, same defaults), so the Go admin
 // can be started with the environment file the service already has. A few variables are new and only belong to Go.
 package config
@@ -53,7 +55,7 @@ type Config struct {
 
 	// The licence: its sealed state file, the licence server, and a key given in the environment (taken up once, when none is stored).
 	LicenseFile string
-	// SeatsFile is the register of the people who hold a seat (the first to sign in, up to 5 without a licence).
+	// SeatsFile is the register of the people who hold a seat (the first to sign in, up to 4 without a licence).
 	SeatsFile     string
 	LicenseServer string
 	LicenseKey    string

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /**
  * Optional chat-completion interface for the features that genuinely need a model:
  * `mnemosyne extract` (commits -> candidate nodes), node dedupe/merge, and the

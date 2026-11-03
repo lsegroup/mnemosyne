@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { z, type ZodRawShape } from 'zod';
 import { LINK_RELS, NODE_STATUSES, NODE_TYPES } from '@mnemosyne/core';
 import type { MnemosyneService } from './service.js';

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /** Brand assets for the web portal, embedded so they ship inside dist/ (tsc does not copy files). */
 
 /** Mnemosyne logo, WebP with alpha, 320x308. */

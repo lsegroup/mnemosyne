@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import type { MemoryNode } from '@mnemosyne/core';
 
 export interface SearchResultRow {

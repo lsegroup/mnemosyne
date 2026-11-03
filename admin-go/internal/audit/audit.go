@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package audit is the append-only audit trail of the portal (JSON lines): who signed in or failed to, and every change made in the
 // admin page. Same file, same line format and same rotation as the Node server, so both can write to it.
 package audit

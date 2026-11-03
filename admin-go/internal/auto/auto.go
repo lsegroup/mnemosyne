@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package auto is the scheduled documentation update (Admin -> Auto). *** IT CAN SPEND MONEY, BUT ONLY WHAT AN ADMINISTRATOR AGREED TO ***
 //
 // It makes no model call itself: it decides WHEN a run starts and WHICH projects need work, and asks the injected generator to run ONE AI
@@ -32,10 +34,16 @@ const (
 	RunHistory   = 30
 	MaxLate      = 12 * time.Hour
 	MaxAttempts  = 2
-	OutageWait   = time.Minute
 	OutageMax    = 15 * time.Minute
 	tickInterval = 30 * time.Second
+	// MaxGiveUps: when the provider could not be reached for this many projects in a row (each one tried for OutageMax), the run stops and
+	// lists the rest as not reached; one failed lookup or one bad stretch gives up on one project only, never on the whole run.
+	MaxGiveUps = 3
 )
+
+// OutageSteps are the pauses between the tries while the provider cannot be reached, each twice as long as the one before (exponential
+// backoff); their sum is OutageMax. A call that never reached the provider is not billed, so sending it again is safe.
+var OutageSteps = []time.Duration{time.Minute, 2 * time.Minute, 4 * time.Minute, 8 * time.Minute}
 
 // Kind is what one AI call writes.
 type Kind = engine.Kind

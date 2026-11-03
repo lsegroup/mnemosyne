@@ -125,7 +125,7 @@ proxy through the existing web server rather than opening a port.
 
 ## Run — the admin program in front of the server
 
-The admin (`/mnemosyne/admin`) is the Go program in `admin-go/`: take the compiled one in `bin/` (checksums in `bin/SHA256SUMS`) or build it yourself with `cd admin-go && make build` (Go 1.27). It is free for up to 5 people; without a licence key the Audit tab shows the last 10 records and administrators sign in with the built-in account (`MNEMOSYNE_LOCAL_ADMIN_USER` and `MNEMOSYNE_LOCAL_ADMIN_PASSWORD`, or `..._PASSWORD_HASH`). A licence key (Admin -> License) lifts the limits. The licence server is only asked once a key has been entered. It becomes the front door:
+The admin (`/mnemosyne/admin`) is the Go program in `admin-go/`: take the compiled one in `bin/` (checksums in `bin/SHA256SUMS`) or build it yourself with `cd admin-go && make build` (Go 1.27). It is free for up to 4 people (5 or more seats need a licence); without a licence key the Audit tab shows the last 10 records and administrators sign in with the built-in account (`MNEMOSYNE_LOCAL_ADMIN_USER` and `MNEMOSYNE_LOCAL_ADMIN_PASSWORD`, or `..._PASSWORD_HASH`). A licence key (Admin -> License) lifts the limits. The licence server is only asked once a key has been entered. It becomes the front door:
 it listens where the server listened (`127.0.0.1:40001`), serves `/mnemosyne/admin` itself, starts the server on `127.0.0.1:40002` and passes
 everything else on to it. A reverse proxy in front keeps sending `/mnemosyne/` to `127.0.0.1:40001`, so nothing changes for people or MCP clients.
 It reads the same environment file as the server. Install it and swap the unit:
@@ -181,7 +181,7 @@ It reads the same environment file as the server. The ones that matter:
 
 ## GitLab sign-in for the documentation portal
 
-People sign in to the portal with GitLab; the first 5 take the seats of the free edition. Create a GitLab application (Admin → Applications) with scope `read_user`,
+People sign in to the portal with GitLab; the first 4 take the seats of the free edition. Create a GitLab application (Admin → Applications) with scope `read_user`,
 tick *Trusted*, and register **both** redirect URIs: `<PUBLIC_URL>/mnemosyne/auth/callback` (the portal) and `<PUBLIC_URL>/mnemosyne/admin/auth/callback` (the admin, licensed
 edition). Put the URL, application id and secret in the environment file (`MNEMOSYNE_GITLAB_*`) and restart; with a licence they can also be entered under Admin → SSO.
 A person then sees the documentation of the GitLab projects they belong to (GitLab administrators see all). The notes projects are matched to GitLab projects by name.
@@ -205,7 +205,7 @@ Use https: personal MCP tokens and the sign-in cookie must not travel over plain
 
 ## Free and licensed
 
-Free: up to 5 people, the Audit tab shows the last 10 records, administrators sign in with the built-in account. A licence key (Admin → License) lifts the limits (see the
+Free: up to 4 people (5 or more seats need a licence), the Audit tab shows the last 10 records, administrators sign in with the built-in account. A licence key (Admin → License) lifts the limits (see the
 README). The free edition never contacts a licence server. If a licence cannot be confirmed (for example the licence server is unreachable for longer than the last confirmation
 lasts) the installation works as the free edition until it can; nothing locks.
 

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Licence history and the hackathon
+- The licence changed twice during the hackathon, and this entry says so plainly: the repository started on 2026-09-07 under the **MIT** licence (commit `31cdd2d`); on 2026-10-31 it was replaced by a **proprietary** notice (`acced84`); on 2026-11-03 it became **Apache-2.0**, with the Go admin program published (`admin-go/`). Releases 0.6.0 and 0.6.1 were published while the notice was proprietary and delivered the admin only as a compiled binary.
+- Hackathon scope (see the README): the Git tag `pre-hackathon` marks the last commit before the kickoff on 2026-10-26 12:00 PM ET; the compare link `pre-hackathon...main` shows everything since.
+- Free up to **4** seats, a licence from 5 seats; the audit history beyond the last 10 records and GitLab sign-in for the admin area are licensed. The price is a yearly licence per seat, under $10 per seat per month.
+
+### Reliability of the automatic runs
+- A provider that cannot be reached (DNS failures such as `EAI_AGAIN`, refused or reset connections) or answers HTTP 429 or 5xx is now asked again with exponential backoff: 1.5 s, 3 s and 6 s per call, and 1, 2, 4 and 8 minutes per project in an automatic run. A project that still cannot be reached is given up on and the run goes on with the next one; the run stops only after three projects in a row (before, it stopped after 15 minutes and abandoned everything that was left: on 2026-10-31 two runs lost 25 and 80 projects that way). Timeouts are not retried, because the request may have been billed.
+- A fixed address (host to IP) is now a fallback: DNS is asked first, the pinned address is only used when the connection fails. The LLM tab shows when an address was last verified and when it last had to stand in for DNS.
+
 ### Documentation
 - README, architecture, self-hosting, `.env.example` and the repo guide were rewritten for what exists now: the Go admin program, the free and licensed edition, LLM usage, LLM auto, the painted workflow diagram, the install zip, GitLab sign-in, reverse proxy, upgrade and backups.
 
@@ -10,7 +19,7 @@
 
 ### Open source, free edition and licensed edition
 - Mnemosyne is open source under the Apache License 2.0 (`LICENSE`, `NOTICE`), including the Go admin program: its source is in `admin-go/` (Go module `github.com/lsegroup/mnemosyne/admin-go`) and published with the rest of the repository.
-- **Free edition** (no licence key): up to 5 people - the first to sign in to the documentation portal take the seats, the 6th is refused and signed out -, the Audit tab shows the last 10 records (no paging, no search), administrators sign in to the admin area with the built-in account (no GitLab sign-in for the admin area, no SSO set-up). It never contacts a licence server.
+- **Free edition** (no licence key): up to 4 people (5 or more seats need a licence) - the first to sign in to the documentation portal take the seats, the 5th is refused and signed out -, the Audit tab shows the last 10 records (no paging, no search), administrators sign in to the admin area with the built-in account (no GitLab sign-in for the admin area, no SSO set-up). It never contacts a licence server.
 - **Licensed edition** (a key entered under License and confirmed by the licence server): as many people as the licence has seats, the whole Audit history with paging and search, GitLab sign-in for the admin area. A licence that runs out or cannot be confirmed falls back to the free edition; nothing locks any more and there is no trial.
 - The License tab shows the edition, the people in use against the limit and what the edition includes.
 

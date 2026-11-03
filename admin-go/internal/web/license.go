@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package web
 
 import (
@@ -24,8 +26,8 @@ import (
 //	          in to the admin area with the built-in account (no GitLab SSO for the admin area, no SSO tab)
 //	licensed  as many people as the licence has seats, the whole Audit history, GitLab SSO for the admin area
 const (
-	// FreeSeats is how many people use the free edition.
-	FreeSeats = 5
+	// FreeSeats is how many people use the free edition: up to 4; the 5th seat needs a licence.
+	FreeSeats = 4
 	// FreeAuditRecords is how many audit records the free edition shows.
 	FreeAuditRecords = 10
 )

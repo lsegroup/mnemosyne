@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package secrets is the Go side of the data formats the Node server of Mnemosyne already writes and reads:
 // the keys derived from the operator secret, the sealed files (provider keys, portal settings, members), the signed
 // session cookies and the scrypt password hash of the built-in admin account. Everything here must stay byte-compatible

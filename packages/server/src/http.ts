@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import express, { Router, type NextFunction, type Request, type Response } from 'express';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';

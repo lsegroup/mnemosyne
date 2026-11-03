@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package llm talks to the AI providers: the connection code (with the fixed addresses of Admin -> LLM, step 2), the model list, and
 // (see chat.go) the AI calls themselves.
 package llm
@@ -24,6 +26,17 @@ import (
 
 // MaxPins is the most fixed addresses an administrator may set.
 const MaxPins = 20
+
+// dnsTimeout is how long the lookup of a host that has a fixed address may take before the fixed address is tried (a variable so a test can shorten it).
+var dnsTimeout = 5 * time.Second
+
+// primaryTimeout is how long the addresses DNS gave may be tried for a host that has a fixed address, before the fixed address is tried.
+var primaryTimeout = 10 * time.Second
+
+// lookupIP asks DNS (replaced in tests to make the lookup fail the way a real EAI_AGAIN does).
+var lookupIP = func(ctx context.Context, host string) ([]net.IPAddr, error) {
+	return net.DefaultResolver.LookupIPAddr(ctx, host)
+}
 
 func normalizeHost(h string) string {
 	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(h)), ".")
@@ -97,6 +110,16 @@ var (
 	pins  = map[string]string{}
 )
 
+// fallbackUsed remembers when a fixed address was last needed (DNS failed and the pin was used), per host.
+var fallbackUsed = map[string]time.Time{}
+
+// PinFallbackAt is when the fixed address of host was last used because DNS failed; zero when it was not needed since this program started.
+func PinFallbackAt(host string) time.Time {
+	pinMu.RLock()
+	defer pinMu.RUnlock()
+	return fallbackUsed[normalizeHost(host)]
+}
+
 // SetPins puts the list in force at once, for the next connection.
 func SetPins(list []store.HostPin) {
 	m := make(map[string]string, len(list))
@@ -114,15 +137,43 @@ func pinned(host string) string {
 	return pins[normalizeHost(host)]
 }
 
-// dial connects, asking DNS for everything except a pinned host. Only the lookup is replaced: the certificate is still checked
-// against the host name.
+// dial connects the normal way: DNS first. A fixed address is only the FALLBACK: when the normal connection fails (typically the lookup,
+// EAI_AGAIN) and the host has a pin, the pinned IP is tried and the use is remembered. DNS is never replaced for a host that resolves: a pin
+// that has gone stale cannot break a working provider. The certificate is checked against the host name either way.
 func dial(ctx context.Context, network, addr string) (net.Conn, error) {
-	if host, port, err := net.SplitHostPort(addr); err == nil {
-		if ip := pinned(host); ip != "" {
-			addr = net.JoinHostPort(ip, port)
-		}
+	d := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+	host, port, splitErr := net.SplitHostPort(addr)
+	if splitErr != nil {
+		return d.DialContext(ctx, network, addr)
 	}
-	return (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext(ctx, network, addr)
+	pin := pinned(host)
+	if pin == "" || net.ParseIP(host) != nil {
+		return d.DialContext(ctx, network, addr) // nothing to fall back on
+	}
+	// DNS gets a limited time of its own: a lookup that hangs must not use up the whole call before the fallback is tried
+	lctx, cancel := context.WithTimeout(ctx, dnsTimeout)
+	ips, err := lookupIP(lctx, host)
+	cancel()
+	var conn net.Conn
+	if err == nil {
+		pctx, pcancel := context.WithTimeout(ctx, primaryTimeout)
+		for _, ip := range ips {
+			if conn, err = d.DialContext(pctx, network, net.JoinHostPort(ip.String(), port)); err == nil {
+				pcancel()
+				return conn, nil
+			}
+		}
+		pcancel()
+	}
+	// DNS failed (or none of its addresses could be connected to): the pin stands in
+	conn, pinErr := d.DialContext(ctx, network, net.JoinHostPort(pin, port))
+	if pinErr != nil {
+		return nil, err // report the first failure: that is what the provider's own address said
+	}
+	pinMu.Lock()
+	fallbackUsed[normalizeHost(host)] = time.Now()
+	pinMu.Unlock()
+	return conn, nil
 }
 
 // Client is an HTTP client for provider calls: the fixed addresses apply, and one call may take at most timeout.

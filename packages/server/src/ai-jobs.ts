@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { DEFAULT_PICTURE_PROMPT, DEFAULT_PLAN_SYSTEM, DEFAULT_PLAN_USER, DEFAULT_WIKI_SYSTEM, DEFAULT_WIKI_USER } from './docgen.js';
 import type { Role } from './provider-store.js';
 

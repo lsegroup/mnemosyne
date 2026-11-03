@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package supervisor starts the Node server of Mnemosyne as a child of the Go admin and keeps it running: when it dies it is started
 // again (with a growing pause), and when the Go program ends the child ends with it. Without the Go program there is no Mnemosyne.
 package supervisor

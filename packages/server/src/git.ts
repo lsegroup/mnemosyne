@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { simpleGit, type SimpleGit } from 'simple-git';
 import type { MnemosyneConfig } from './config.js';
 

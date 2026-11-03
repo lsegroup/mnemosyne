@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package golden keeps the answers of the old Node implementation that the Go tests compare with. The Node repository no longer
 // contains the admin and the Auto scheduler (they are Go now), so what that Node code answered is recorded once, from the last Node
 // build that still had them, and kept in testdata/golden. To record again (only when the Go behaviour is changed on purpose):

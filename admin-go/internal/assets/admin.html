@@ -186,7 +186,7 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
 
       <div class="step" id="step2">
         <h3><span class="num">2</span> Fixed addresses <span class="muted">(optional)</span></h3>
-        <p class="sub">Pin a host name to an IP address when the provider's DNS is unstable. Mnemosyne then connects to that address for its AI calls and model lists and does not ask DNS at all. The certificate is still checked against the host name. Nothing else on the server is changed. If the provider moves to a new address, its calls fail until the address here is changed, so use “Check” after typing it.</p>
+        <p class="sub">Pin a host name to an IP address as a <b>fallback</b> for when the provider's DNS is unstable. Mnemosyne asks DNS first; only when the connection fails (for example EAI_AGAIN, a lookup that did not answer) does it use the address here for that call, and it shows below when that last happened. The certificate is still checked against the host name. Nothing else on the server is changed. If the provider moves to a new address the fallback stops working, so use “Check” after typing it: it shows when the address was last verified.</p>
         <table class="hosts"><thead><tr><th>Host name</th><th>IP address</th><th>Check result</th><th></th></tr></thead>
           <tbody id="hostRows"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody></table>
         <datalist id="hostSuggest"></datalist>
@@ -388,7 +388,7 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
 
     <section id="tab-license" class="tab" hidden>
       <h2>License</h2>
-      <p class="lead" id="licLead">Mnemosyne is open source (Apache-2.0) and free for up to 5 people. A licence key lifts the limit and adds the whole Audit history and GitLab sign-in for the admin area. A seat is a person with a GitLab account who uses Mnemosyne, in any role: the first people to sign in take the seats.</p>
+      <p class="lead" id="licLead">Mnemosyne is open source (Apache-2.0) and free for up to 4 people (5 or more seats need a licence). A licence key lifts the limit and adds the whole Audit history and GitLab sign-in for the admin area. A seat is a person with a GitLab account who uses Mnemosyne, in any role: the first people to sign in take the seats.</p>
       <div class="step">
         <h3>Status</h3>
         <dl class="facts" id="licFacts"><dt>Status</dt><dd>Loading…</dd></dl>
@@ -551,10 +551,15 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
     var a=cell(tr,'');var hi=document.createElement('input');hi.setAttribute('list','hostSuggest');hi.placeholder='api.meta.ai';hi.maxLength=253;hi.value=h.host||'';hi.autocomplete='off';a.appendChild(hi);
     var b=cell(tr,'');var ii=document.createElement('input');ii.placeholder='57.144.64.141';ii.maxLength=45;ii.value=h.ip||'';ii.autocomplete='off';b.appendChild(ii);
     var res=cell(tr,'','hostres');
+    // what is known about this address: when it was last verified, and when it last had to stand in for DNS
+    if(h.host){
+      var st=(h.verifiedAt?'Verified '+ago(h.verifiedAt)+'.':'Not verified yet - use Check.')+' Fallback only: DNS is asked first.'+(h.fallbackAt?' Last used because DNS failed: '+ago(h.fallbackAt)+'.':'');
+      res.textContent=st;
+    }
     var act=cell(tr,'','actions');
     act.appendChild(btn('Check','',function(){
       res.className='hostres';res.textContent='Connecting…';
-      call('POST','/llm/hosts/check',{host:hi.value,ip:ii.value}).then(function(r){res.className='hostres '+(r.ok?'ok':'err');res.textContent=(r.ok?'OK · ':'Failed · ')+r.ms+' ms · '+r.detail})
+      call('POST','/llm/hosts/check',{host:hi.value,ip:ii.value}).then(function(r){res.className='hostres '+(r.ok?'ok':'err');res.textContent=(r.ok?'OK · ':'Failed · ')+r.ms+' ms · '+r.detail;if(r.ok)loadHosts()})
         .catch(function(e){res.className='hostres err';res.textContent=e.message});
     }));
     act.appendChild(btn('Remove','danger',function(){tr.remove();if(!$('hostRows').querySelector('tr[data-row]'))hostRowsEmpty()}));

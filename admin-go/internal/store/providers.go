@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package store
 
 import (
@@ -54,6 +56,8 @@ type Assignments map[jobs.Role]Assignment
 type HostPin struct {
 	Host string `json:"host"`
 	IP   string `json:"ip"`
+	// VerifiedAt is when a check last connected to IP as Host with a valid certificate (unix ms; 0 = never).
+	VerifiedAt int64 `json:"verifiedAt,omitempty"`
 }
 
 type providersDoc struct {

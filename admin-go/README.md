@@ -7,7 +7,7 @@ itself. It reads and writes the same files and cookies as the Node server, so no
 
 Two editions, one code base (Apache-2.0):
 
-- **free** - up to 5 people (the first to sign in take the seats; the 6th is refused), the Audit tab shows the last 10 records (no paging, no search),
+- **free** - up to 4 people (the first to sign in take the seats; the 5th is refused), the Audit tab shows the last 10 records (no paging, no search),
   administrators sign in with the built-in account (no GitLab sign-in for the admin area, no SSO set-up). It never contacts a licence server.
 - **licensed** - a licence key (Admin -> License) confirmed by the licence server: as many people as the licence has seats, the whole Audit history
   with paging and search, GitLab sign-in for the admin area. A licence that runs out falls back to the free edition; nothing ever locks.

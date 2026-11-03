@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import type { MemoryNode } from './schema.js';
 
 export type SearchMode = 'hybrid' | 'text' | 'semantic';

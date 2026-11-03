@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package engine
 
 import (
@@ -87,6 +89,9 @@ func TestOnePictureIsAskedForAndTheTypeIsReadFromTheBytes(t *testing.T) {
 }
 
 func TestAnImageCallFailsWithAPlainMessage(t *testing.T) {
+	oldSleep := sleep
+	sleep = func(time.Duration) {} // the retries of 429 and 5xx pause; the test does not wait
+	defer func() { sleep = oldSleep }()
 	for name, tc := range map[string]struct {
 		status int
 		body   string
@@ -134,5 +139,47 @@ func TestOnlyMuseImageHasAListPrice(t *testing.T) {
 	}
 	if m, _ := SniffImage([]byte{0xff, 0xd8, 0xff, 0xe0}); m != "image/jpeg" {
 		t.Errorf("jpeg: %s", m)
+	}
+}
+
+// A provider that is overloaded or failing for a moment (429, 502, 503) is asked again after growing pauses; nothing was billed for those answers.
+func TestAFailingProviderIsAskedAgainWithGrowingPauses(t *testing.T) {
+	var pauses []time.Duration
+	old := sleep
+	sleep = func(d time.Duration) { pauses = append(pauses, d) }
+	defer func() { sleep = old }()
+
+	calls := 0
+	p := imageProvider(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		switch calls {
+		case 1:
+			w.WriteHeader(503)
+		case 2:
+			w.WriteHeader(429)
+		default:
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"b64_json": base64.StdEncoding.EncodeToString(onePixelPNG)}}})
+		}
+	})
+	if _, err := GenerateImage(p, "muse-image-1.0", "x", 5*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 3 || len(pauses) != 2 || pauses[0] != 1500*time.Millisecond || pauses[1] != 3*time.Second {
+		t.Errorf("calls %d, pauses %v", calls, pauses)
+	}
+
+	// still failing after four tries: the last answer is reported as it is
+	calls, pauses = 0, nil
+	p = imageProvider(t, func(w http.ResponseWriter, r *http.Request) { calls++; w.WriteHeader(502) })
+	_, err := GenerateImage(p, "muse-image-1.0", "x", 5*time.Second)
+	if err == nil || !strings.Contains(err.Error(), "HTTP 502") || calls != 4 || len(pauses) != 3 || pauses[2] != 6*time.Second {
+		t.Errorf("err %v, calls %d, pauses %v", err, calls, pauses)
+	}
+
+	// a refusal of the request itself (400, 401) is not retried
+	calls = 0
+	p = imageProvider(t, func(w http.ResponseWriter, r *http.Request) { calls++; w.WriteHeader(401) })
+	if _, err := GenerateImage(p, "muse-image-1.0", "x", 5*time.Second); err == nil || calls != 1 {
+		t.Errorf("a 401 was retried: calls %d", calls)
 	}
 }

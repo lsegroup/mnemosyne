@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Command mnemosyne-admin is the Go admin of Mnemosyne: it serves /mnemosyne/admin itself and passes everything else on to the Node
 // server behind it. Configure it with the same environment the Node server uses (see internal/config).
 package main

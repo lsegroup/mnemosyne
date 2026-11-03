@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /** HTML for the web portal. Dark theme, no external assets, no inline handlers. */
 
 import { esc } from './html.js';

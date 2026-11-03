@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package usage is the central cost center of the AI calls: one JSON line for every AI job that ran (who started it, for which project, what
 // each model used, what it cost). The Node server writes the jobs people start with a button, this program writes the automatic ones; both
 // append to the same file (one line per write), and the admin page "LLM usage" reads it.

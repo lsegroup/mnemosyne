@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package engine
 
 import (
@@ -71,10 +73,24 @@ func networkDetail(err error) string {
 	return err.Error()
 }
 
-// postWithRetry sends the request, up to twice more when the connection itself fails, with a short pause. A timeout is not retried.
+// retryStatus is an answer that says the provider (not the request) has a problem right now: overloaded (429) or failing (500, 502, 503, 504).
+// Such an answer is not billed, so the same request is sent again after a pause.
+func retryStatus(code int) bool {
+	return code == http.StatusTooManyRequests || code == http.StatusInternalServerError || code == http.StatusBadGateway ||
+		code == http.StatusServiceUnavailable || code == http.StatusGatewayTimeout
+}
+
+// retryPause is the pause before try number n+1 (n = 0, 1, 2): 1.5 s, 3 s, 6 s - exponential backoff.
+func retryPause(n int) time.Duration { return time.Duration(1500*(1<<n)) * time.Millisecond }
+
+// sendTries is how many times a request is sent in all.
+const sendTries = 4
+
+// postWithRetry sends the request, up to three more times with exponential backoff when the connection itself fails (DNS, refused, reset) or the
+// provider answers 429 or 5xx. A timeout is not retried: the request may have reached the provider and been billed.
 func postWithRetry(url string, headers map[string]string, body []byte, timeout time.Duration, what string) (*http.Response, error) {
 	detail := ""
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := 0; attempt < sendTries; attempt++ {
 		req, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 		for k, v := range headers {
 			req.Header.Set(k, v)
@@ -84,14 +100,19 @@ func postWithRetry(url string, headers map[string]string, body []byte, timeout t
 		client.Transport.(*http.Transport).DisableKeepAlives = true
 		res, err := client.Do(req)
 		if err == nil {
+			if retryStatus(res.StatusCode) && attempt < sendTries-1 {
+				res.Body.Close()
+				sleep(retryPause(attempt))
+				continue
+			}
 			return res, nil
 		}
 		detail = networkDetail(err)
 		if detail == "timed out" {
 			break
 		}
-		if attempt < 2 {
-			sleep(time.Duration(1500*(attempt+1)) * time.Millisecond)
+		if attempt < sendTries-1 {
+			sleep(retryPause(attempt))
 		}
 	}
 	msg := fmt.Sprintf("Could not reach %s (%s).", what, detail)

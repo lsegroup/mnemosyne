@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package web
 
 import (
@@ -283,7 +285,18 @@ func (s *Server) hostsView() (any, error) {
 			names = append(names, u.Hostname())
 		}
 	}
-	return map[string]any{"hosts": hosts, "providerHosts": names}, nil
+	rows := make([]map[string]any, 0, len(hosts))
+	for _, h := range hosts {
+		row := map[string]any{"host": h.Host, "ip": h.IP}
+		if h.VerifiedAt > 0 {
+			row["verifiedAt"] = h.VerifiedAt
+		}
+		if t := llm.PinFallbackAt(h.Host); !t.IsZero() {
+			row["fallbackAt"] = t.UnixMilli()
+		}
+		rows = append(rows, row)
+	}
+	return map[string]any{"hosts": rows, "providerHosts": names}, nil
 }
 
 func (s *Server) getHosts(_ http.ResponseWriter, _ *http.Request, _ string) (any, error) {
@@ -310,6 +323,13 @@ func (s *Server) putHosts(_ http.ResponseWriter, r *http.Request, who string) (a
 	before, err := s.providers.Hosts()
 	if err != nil {
 		return nil, err
+	}
+	for i := range next { // a pin that did not change keeps the time it was last verified
+		for _, b := range before {
+			if b.Host == next[i].Host && b.IP == next[i].IP {
+				next[i].VerifiedAt = b.VerifiedAt
+			}
+		}
 	}
 	if err := s.providers.SetHosts(next); err != nil {
 		return nil, err
@@ -344,6 +364,19 @@ func (s *Server) checkHost(_ http.ResponseWriter, r *http.Request, who string) (
 		verdict = "OK"
 	}
 	s.rec(r, audit.Input{Event: "check", EntityType: "llm_hosts", EntityName: pin.Host, User: who, Description: fmt.Sprintf("%s → %s: %s (%s)", pin.Host, pin.IP, verdict, res.Detail)})
+	if res.OK { // remember when this address was last proven good
+		if hosts, err := s.providers.Hosts(); err == nil {
+			changed := false
+			for i := range hosts {
+				if hosts[i].Host == pin.Host && hosts[i].IP == pin.IP {
+					hosts[i].VerifiedAt, changed = s.now().UnixMilli(), true
+				}
+			}
+			if changed && s.providers.SetHosts(hosts) == nil {
+				llm.SetPins(hosts)
+			}
+		}
+	}
 	return res, nil
 }
 
