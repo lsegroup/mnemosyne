@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Documentation
+- README, architecture, self-hosting, `.env.example` and the repo guide were rewritten for what exists now: the Go admin program, the free and licensed edition, LLM usage, LLM auto, the painted workflow diagram, the install zip, GitLab sign-in, reverse proxy, upgrade and backups.
+
 ### Release zip with an installer
 - `release/mnemosyne_<version>.zip` (built by `deploy/make-release.sh`): the built server, the admin program for linux/amd64 and linux/arm64, `install.sh` for a Linux server with systemd, the docs and checksums. `install.sh` writes the settings file once, so an upgrade (unpack the new zip, run it again) keeps settings and data.
 

@@ -2,10 +2,11 @@
 
 ## Requirements
 
-- Node.js ≥ 20.
-- A git repository to hold the corpus (`nodes/`). It can be this repo, or a separate
+- Linux with systemd (amd64 or arm64) for the release zip; the server alone also runs anywhere Node runs.
+- Node.js ≥ 20, npm, git and curl.
+- A git repository to hold the corpus (`nodes/`): the installer creates one in `/var/lib/mnemosyne`; with a source install it can be this repo or a separate
   data-only repo — set `MNEMOSYNE_REPO` to its path.
-- Nothing else. Embeddings and chat are optional.
+- Nothing else. Embeddings and chat are optional; AI documentation needs an AI provider (Admin → LLM).
 
 ## Install from the release zip (Linux server, recommended)
 
@@ -160,6 +161,58 @@ WantedBy=multi-user.target
 
 `sudo systemctl daemon-reload && sudo systemctl restart mnemosyne`, then open `/mnemosyne/admin/`. The admin needs `MNEMOSYNE_SECRET` and
 `MNEMOSYNE_PUBLIC_URL` in the environment file. `MNEMOSYNE_HTTP_PORT` in that file is overridden for the server it starts.
+(The release zip's `install.sh` does all of this for you.)
+
+### Settings of the admin program
+
+It reads the same environment file as the server. The ones that matter:
+
+| var | default | effect |
+|---|---|---|
+| `MNEMOSYNE_SECRET` | none (required) | at least 16 characters; signs cookies and seals the stored API keys, tokens and licence. **Back it up and never change it** |
+| `MNEMOSYNE_PUBLIC_URL` | none (required) | the address people type, no path (`https://mnemosyne.example.com[:port]`); cookies and the GitLab redirect use it |
+| `MNEMOSYNE_ADMIN_LISTEN` | `127.0.0.1:40001` | where the front door listens |
+| `MNEMOSYNE_UPSTREAM` / `MNEMOSYNE_NODE_CMD` / `MNEMOSYNE_NODE_DIR` | `http://127.0.0.1:40002` / none / none | the server it starts as its child, and where |
+| `MNEMOSYNE_LOCAL_ADMIN_USER` / `_PASSWORD` or `_PASSWORD_HASH` | `admin` / none | the built-in admin account (there is no default password); the free edition's only admin sign-in |
+| `MNEMOSYNE_GITLAB_URL`, `_CLIENT_ID`, `_CLIENT_SECRET` | none | the GitLab application, see below |
+| `MNEMOSYNE_LICENSE_KEY` | none | a licence key, taken up once when none is stored (or enter it under Admin → License) |
+| `MNEMOSYNE_USAGE_FILE`, `MNEMOSYNE_SEATS_FILE`, `MNEMOSYNE_AUTO_FILE`, `MNEMOSYNE_AUDIT_FILE` | `.mnemosyne/usage.jsonl`, `seats.enc`, `auto.json`, `audit.jsonl` | where the cost center, the seat register, the Auto setup and the audit trail live (in the notes repository's `.mnemosyne/`, never committed) |
+| `MNEMOSYNE_LICENSE_DOMAIN` | the host of the public URL | the domain a licence is bound to |
+
+## GitLab sign-in for the documentation portal
+
+People sign in to the portal with GitLab; the first 5 take the seats of the free edition. Create a GitLab application (Admin → Applications) with scope `read_user`,
+tick *Trusted*, and register **both** redirect URIs: `<PUBLIC_URL>/mnemosyne/auth/callback` (the portal) and `<PUBLIC_URL>/mnemosyne/admin/auth/callback` (the admin, licensed
+edition). Put the URL, application id and secret in the environment file (`MNEMOSYNE_GITLAB_*`) and restart; with a licence they can also be entered under Admin → SSO.
+A person then sees the documentation of the GitLab projects they belong to (GitLab administrators see all). The notes projects are matched to GitLab projects by name.
+
+## Reverse proxy with TLS
+
+Let your web server send `/mnemosyne/` to the admin program (`127.0.0.1:40001`), for example with nginx:
+
+```nginx
+location /mnemosyne/ {
+  proxy_pass http://127.0.0.1:40001/mnemosyne/;
+  proxy_http_version 1.1;                 # Streamable HTTP needs keep-alive
+  proxy_set_header Connection "";
+  proxy_set_header Host $host;
+  proxy_set_header X-Forwarded-For $remote_addr;
+  proxy_buffering off;                    # don't buffer the MCP event stream
+}
+```
+
+Use https: personal MCP tokens and the sign-in cookie must not travel over plain http.
+
+## Free and licensed
+
+Free: up to 5 people, the Audit tab shows the last 10 records, administrators sign in with the built-in account. A licence key (Admin → License) lifts the limits (see the
+README). The free edition never contacts a licence server. If a licence cannot be confirmed (for example the licence server is unreachable for longer than the last confirmation
+lasts) the installation works as the free edition until it can; nothing locks.
+
+## Upgrade and uninstall
+
+Upgrade with the release zip: unpack the newer one and run `sudo ./install.sh` again; `/etc/mnemosyne.env` and the data are never touched, the previous unit is kept next to the new
+one as `mnemosyne.service.before-<version>`. Roll the admin program back by copying the previous binary into `/usr/local/bin` and restarting. Uninstall: see `README.txt` in the zip.
 
 ## Run — per user (stdio)
 
@@ -202,4 +255,7 @@ With push off, review and push commits yourself (or open a merge request from th
 
 ## Backups
 
-Back up the git repo. The SQLite file needs no backup — `reindex` regenerates it.
+- The notes git repository (`MNEMOSYNE_REPO`): the source of truth. Push it to a remote, or copy it.
+- `MNEMOSYNE_SECRET` (in `/etc/mnemosyne.env`) and the sealed files in `<repo>/.mnemosyne/` — `providers.enc` (AI providers and keys), `settings.enc`, `members.enc`, `tokens.enc`,
+  `license.enc`, `seats.enc` — plus `docs/` (generated articles, diagrams, PDFs), `audit.jsonl`, `usage.jsonl` and `auto.json`. The sealed files cannot be read without the secret.
+- The SQLite file (`index.db`) needs no backup — `reindex` regenerates it.

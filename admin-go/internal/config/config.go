@@ -162,6 +162,7 @@ func Load(get func(string) string, cwd string) (Config, error) {
 		AIDailyLimit:  intOf(get("MNEMOSYNE_AI_DAILY_LIMIT"), 20),
 
 		LicenseFile:   file("MNEMOSYNE_LICENSE_FILE", "license.enc"),
+		SeatsFile:     file("MNEMOSYNE_SEATS_FILE", "seats.enc"),
 		LicenseServer: strings.TrimRight(get("MNEMOSYNE_LICENSE_SERVER"), "/"),
 		LicenseKey:    strings.TrimSpace(get("MNEMOSYNE_LICENSE_KEY")),
 		LicenseDomain: licenseDomain(get("MNEMOSYNE_LICENSE_DOMAIN")),

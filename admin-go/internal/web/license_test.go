@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/lsegroup/mnemosyne/admin-go/internal/audit"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/config"
 	"github.com/lsegroup/mnemosyne/admin-go/internal/license"
 	"github.com/lsegroup/mnemosyne/admin-go/internal/secrets"
 	"github.com/lsegroup/mnemosyne/admin-go/internal/store"
@@ -298,5 +300,29 @@ func TestTheLicensedDomainIsTheHostOfThePublicURLUnlessOneIsSet(t *testing.T) {
 		o.free = true
 		h := newHarness(t, o)
 		eq(t, h.srv.lic.Status().Domain, "lumanet.info", "domain set as "+written)
+	}
+}
+
+// The seat register must have a file of its own, or the five seats would be forgotten at every restart.
+func TestTheSeatRegisterIsKeptInAFileNextToTheOtherData(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := config.Load(func(k string) string { return "" }, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eq(t, cfg.SeatsFile, filepath.Join(dir, ".mnemosyne", "seats.enc"), "default place: next to the other sealed files")
+	cfg, _ = config.Load(func(k string) string {
+		if k == "MNEMOSYNE_SEATS_FILE" {
+			return filepath.Join(dir, "other.enc")
+		}
+		return ""
+	}, dir)
+	eq(t, cfg.SeatsFile, filepath.Join(dir, "other.enc"), "set in the environment")
+
+	// and a running server really writes it
+	r := newLicenceRig(t)
+	r.do(call{path: "/p/alpha", headers: r.person(t, "alice")})
+	if _, err := os.Stat(r.srv.cfg.SeatsFile); err != nil {
+		t.Errorf("the register was not written: %v", err)
 	}
 }
