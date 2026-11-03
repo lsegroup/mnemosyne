@@ -143,6 +143,11 @@ func (s *Server) gate(next http.Handler) http.Handler {
 					s.overSeats(w, r, sess.U)
 					return
 				}
+				s.refusedMu.Lock()
+				if len(s.refused) > 0 {
+					delete(s.refused, strings.ToLower(sess.U)) // a person who has a seat is no longer a refused one
+				}
+				s.refusedMu.Unlock()
 			}
 		}
 		next.ServeHTTP(w, r)
@@ -163,15 +168,17 @@ func (s *Server) overSeats(w http.ResponseWriter, r *http.Request, user string) 
 
 // refusedOnce writes one audit entry per person per hour for a refused sign-in.
 func (s *Server) refusedOnce(user string, limit int) {
+	user = strings.ToLower(user)
 	s.refusedMu.Lock()
 	defer s.refusedMu.Unlock()
 	if s.refused == nil {
-		s.refused = map[string]time.Time{}
+		s.refused, s.refusedAudited = map[string]time.Time{}, map[string]time.Time{}
 	}
-	if t, ok := s.refused[user]; ok && s.now().Sub(t) < time.Hour {
+	s.refused[user] = s.now() // the Users tab shows the last time
+	if t, ok := s.refusedAudited[user]; ok && s.now().Sub(t) < time.Hour {
 		return
 	}
-	s.refused[user] = s.now()
+	s.refusedAudited[user] = s.now()
 	s.audit.Write(audit.Input{Event: "denied", EntityType: "license", EntityName: license.Product, User: user, Description: fmt.Sprintf("Sign-in refused: all %d seats are taken", limit)})
 }
 

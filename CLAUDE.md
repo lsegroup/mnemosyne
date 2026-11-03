@@ -14,7 +14,7 @@ hard dependency.
 - `packages/vscode-extension` — thin human UI (tree view, "Capture memory", CodeLens).
   The AI path is MCP, not this extension.
 - `admin-go` — the admin program in Go (open source, same repo): the front door that starts the server as its child, serves `/mnemosyne/admin`
-  (LLM, LLM usage, LLM auto, SSO, Audit, License), runs the automatic documentation updates, applies the free/licensed edition (4 free seats, last 10 audit
+  (LLM, LLM usage, LLM auto, SSO, Users, Audit, License), runs the automatic documentation updates, applies the free/licensed edition (4 free seats, last 10 audit
   records, no admin GitLab sign-in without a licence). Module `github.com/lsegroup/mnemosyne/admin-go`; `make test`, `make build`.
 - `bin/` compiled admin program, `release/` one zip per release with `install.sh`, `deploy/make-release.sh` builds it.
 - `nodes/` — the markdown corpus (source of truth). `docs/` — architecture & self-hosting.

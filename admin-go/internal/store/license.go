@@ -117,5 +117,14 @@ func (t *Tokens) ActiveUsers(now time.Time) []string {
 	return out
 }
 
+// ActiveCounts is how many tokens (neither revoked nor expired) every user holds, by lower-case user name.
+func (t *Tokens) ActiveCounts(now time.Time) map[string]int {
+	out := map[string]int{}
+	for _, u := range t.ActiveUsers(now) {
+		out[u]++
+	}
+	return out
+}
+
 // Path is where the sealed file lives.
 func (l *License) Path() string { return l.f.path }

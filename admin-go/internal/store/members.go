@@ -4,6 +4,7 @@ package store
 
 import (
 	"encoding/json"
+	"strings"
 )
 
 // MemberProject is a GitLab project a signed-in person belongs to.
@@ -33,6 +34,25 @@ func NewMembers(path string, encKey []byte) *Members {
 
 // KnownProjects is every GitLab project that signed-in people have told us about, once each (the admin area has no project list of its
 // own): only for a path and a name. An unreadable or missing file simply knows none.
+// ByUser is what the server knows about the people who signed in to the documentation portal, by lower-case user name.
+func (m *Members) ByUser() map[string]Member {
+	m.f.mu.Lock()
+	defer m.f.mu.Unlock()
+	out := map[string]Member{}
+	raw, err := m.f.read()
+	if err != nil || raw == nil {
+		return out
+	}
+	var all map[string]Member
+	if json.Unmarshal(raw, &all) != nil {
+		return out
+	}
+	for name, member := range all {
+		out[strings.ToLower(name)] = member
+	}
+	return out
+}
+
 func (m *Members) KnownProjects() []MemberProject {
 	m.f.mu.Lock()
 	defer m.f.mu.Unlock()

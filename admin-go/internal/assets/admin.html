@@ -156,7 +156,7 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
   <form method="post" action="@@BASE@@/admin/auth/logout"><button class="btn small" type="submit">Sign out</button></form></div>
 </header>
 <div class="layout">
-  <nav class="side" aria-label="Admin sections"><a href="#llm" data-tab="llm" class="active">LLM</a><a href="#usage" data-tab="usage">LLM usage</a><a href="#auto" data-tab="auto">LLM auto</a><a href="#sso" data-tab="sso">SSO</a><a href="#audit" data-tab="audit">Audit</a><a href="#license" data-tab="license">License</a></nav>
+  <nav class="side" aria-label="Admin sections"><a href="#llm" data-tab="llm" class="active">LLM</a><a href="#usage" data-tab="usage">LLM usage</a><a href="#auto" data-tab="auto">LLM auto</a><a href="#sso" data-tab="sso">SSO</a><a href="#users" data-tab="users">Users</a><a href="#audit" data-tab="audit">Audit</a><a href="#license" data-tab="license">License</a></nav>
   <main>
     <section id="tab-llm" class="tab">
       <h2>LLM</h2>
@@ -367,6 +367,23 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
       </div>
     </section>
 
+    <section id="tab-users" class="tab" hidden>
+      <h2>Users</h2>
+      <p class="lead">Who holds the seats of this installation. A person takes a seat the first time they use the documentation portal signed in with GitLab; the first people take the seats up to the limit of the edition and the next person is refused until a seat is freed.</p>
+      <div class="step">
+        <h3>Seats</h3>
+        <p class="sumline" id="usersSummary"></p>
+        <div class="tablewrap"><table class="use"><thead><tr><th>User (GitLab)</th><th>Role</th><th>Seat taken</th><th>Last seen</th><th>Last GitLab sign-in</th><th class="n">Projects</th><th class="n">MCP tokens</th><th></th></tr></thead>
+          <tbody id="usersRows"><tr><td colspan="8" class="muted">Loading…</td></tr></tbody></table></div>
+        <p class="hint2" style="margin:10px 0 0"><span id="usersMsg" class="msg"></span><b>Free this seat</b> is for a person who left: the seat is free at once. The person is not blocked: if they sign in again and a seat is free they take one again. Their personal MCP tokens are not touched; they run out on their own (90 days at most). "Last seen" is when the person was last seen at the front door; "Last GitLab sign-in" is the last time GitLab confirmed them to the server.</p>
+      </div>
+      <div class="step" id="usersRefusedBox" hidden>
+        <h3>Refused since this program started</h3>
+        <p class="sub">People who signed in while every seat was taken. A licence key (Admin → License) raises the limit; freeing a seat lets the next of them in when they come back.</p>
+        <div class="tablewrap"><table class="use"><thead><tr><th>User (GitLab)</th><th>Last refused</th></tr></thead><tbody id="usersRefused"></tbody></table></div>
+      </div>
+    </section>
+
     <section id="tab-audit" class="tab" hidden>
       <h2>Audit</h2>
       <p class="lead">Every sign-in and every change made in this admin area. Secrets are never written to the log.</p>
@@ -434,11 +451,12 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
   }
   // --- tabs (left menu) ---
   function showTab(){
-    var TABS=['llm','usage','auto','sso','audit','license'];
+    var TABS=['llm','usage','auto','sso','users','audit','license'];
     var t=(location.hash||'#llm').slice(1);if(TABS.indexOf(t)<0)t='llm';
     TABS.forEach(function(n){$('tab-'+n).hidden=(n!==t)});
     if(t==='audit')loadAudit();
     if(t==='usage')loadUsage();
+    if(t==='users')loadUsers();
     if(t==='license')loadLicense();
     if(t==='auto')loadAuto(autoLoaded);
     Array.prototype.forEach.call(document.querySelectorAll('.side a'),function(a){a.className=a.getAttribute('data-tab')===t?'active':''});
@@ -657,6 +675,33 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
   var st;$('auditSearch').addEventListener('input',function(){clearTimeout(st);st=setTimeout(function(){auditPage=0;loadAudit()},250)});
   $('auditRefresh').addEventListener('click',function(){loadAudit()});
   setInterval(function(){if(!$('tab-audit').hidden&&auditPage===0&&!$('auditSearch').value)loadAudit()},15000);
+
+  // --- Users tab: who holds the seats ---
+  function utc(ms){return ms?new Date(ms).toISOString().slice(0,16).replace('T',' ')+' UTC':'—'}
+  function loadUsers(){
+    note('usersMsg','');
+    call('GET','/users').then(function(d){
+      EDITION=d.edition;applyEdition();
+      var sm=$('usersSummary');sm.textContent='';
+      span(sm,'Seats in use: ');var b=document.createElement('b');b.textContent=d.used+' of '+(d.limit===null||d.limit===undefined?'any number (the licence has no limit)':d.limit)+(d.edition==='licensed'?' (licensed)':' (free edition: up to '+d.freeSeats+' people, 5 or more need a licence)');sm.appendChild(b);
+      var rows=$('usersRows');rows.textContent='';
+      if(!d.users.length){var e=document.createElement('tr');cell(e,'Nobody has used the documentation portal yet, so no seat is taken.','muted').colSpan=8;rows.appendChild(e)}
+      d.users.forEach(function(u){
+        var tr=document.createElement('tr');
+        cell(tr,u.user);cell(tr,u.admin?'GitLab administrator':'member');cell(tr,utc(u.firstSeen),'nw');cell(tr,utc(u.lastSeen),'nw');cell(tr,utc(u.lastSignIn),'nw');
+        cell(tr,u.projects?String(u.projects):'—','n');cell(tr,String(u.tokens),'n');
+        var act=cell(tr,'','actions');
+        act.appendChild(btn('Free this seat','danger',function(){
+          if(!window.confirm('Free the seat of '+u.user+'?'))return;
+          call('DELETE','/users/'+encodeURIComponent(u.user)).then(function(){loadUsers()}).catch(function(e2){note('usersMsg',e2.message)});
+        }));
+        rows.appendChild(tr);
+      });
+      $('usersRefusedBox').hidden=!(d.refused&&d.refused.length);
+      var rb=$('usersRefused');rb.textContent='';
+      (d.refused||[]).forEach(function(r){var tr=document.createElement('tr');cell(tr,r.user);cell(tr,utc(r.at),'nw');rb.appendChild(tr)});
+    }).catch(function(e){note('usersMsg',e.message)});
+  }
 
   // --- LLM usage tab: the cost center ---
   var usagePage=0,USAGE_PER=10;

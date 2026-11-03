@@ -184,6 +184,7 @@ blacked out in this picture on purpose). Secrets are never written to the log. T
 | **LLM usage** | the cost center: cost per month (TEXT / IMAGES / PICTURES) and every AI job, ten to a page — who started it, project, what each model used, cost |
 | **LLM auto** | keep the documentation up to date by itself: projects, what to create, schedule, a dollar limit per run, and the agreement required before anything runs |
 | **SSO** | the GitLab application for sign-in (licensed edition) |
+| **Users** | the seat register: who holds the seats (GitLab name, role, when the seat was taken, last seen, last GitLab sign-in, projects, MCP tokens), seats in use against the limit, people refused because every seat was taken, and *Free this seat* for a person who left |
 | **Audit** | every sign-in and change (free edition: the last 10 records) |
 | **License** | the edition, the people against the limit, the licence key |
 

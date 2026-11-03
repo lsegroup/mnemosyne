@@ -135,10 +135,13 @@ The code is Apache-2.0; the limits are applied by the admin program (`internal/w
 - **Licensed** (a key confirmed by the licence server, or within its renewal period): as many people as the licence has seats, the whole audit history, GitLab
   sign-in and SSO set-up. The key is entered under Admin → License (or `MNEMOSYNE_LICENSE_KEY` once) and bound to the installation id and the domain.
 
-**Seats.** A sealed register (`MNEMOSYNE_SEATS_FILE`, default `.mnemosyne/seats.enc`) holds the people who use the installation. The front door looks at the
-portal's session cookie (`mnemosyne_session`, verified with the shared signing key): the first people seen take the seats up to the limit; a person without a
-seat gets HTTP 402 (a page, or JSON `seats_exhausted`) and the cookie is cleared; one audit entry per person per hour. Anonymous requests and `/health` are
-never touched.
+**Seats.** A sealed register (`MNEMOSYNE_SEATS_FILE`, default `.mnemosyne/seats.enc`; per person the time the seat was taken and the time the person was last seen, the
+latter written at most once a minute; the first version of the file, user -> time, still loads) holds the people who use the installation. The front door looks at the portal's
+session cookie (`mnemosyne_session`, verified with the shared signing key): the first people seen take the seats up to the limit; a person without a seat gets HTTP 402 (a page, or
+JSON `seats_exhausted`) and the cookie is cleared; one audit entry per person per hour. Anonymous requests and `/health` are never touched. **Admin -> Users** (`GET /admin/api/users`,
+`DELETE /admin/api/users/<name>`) shows the register joined with what the server knows (`members.enc`: GitLab administrator or member, last GitLab confirmation, number of projects;
+`tokens.enc`: active personal MCP tokens) and the people refused since the program started; *Free this seat* removes a person from the register (audit event `seat_release`) without
+blocking them or touching their tokens. There are no local user accounts: the portal signs people in with GitLab only.
 
 **The licence protocol.** A licence server answers `/validate` and `/heartbeat` with an **Ed25519-signed attestation** (product, domain, installation id, a
 nonce, state, seats, licence end, expiry). The program verifies it with a public key compiled in (`internal/license/pubkey.go`, replaceable at build time),

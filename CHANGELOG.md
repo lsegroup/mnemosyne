@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Users: tracking the seats
+- New admin tab **Users**: who holds the seats, with GitLab name, role, when the seat was taken, when the person was last seen, the last GitLab sign-in, projects and active MCP tokens; the seats in use against the limit; the people refused because every seat was taken; and **Free this seat** for a person who left (audited as `seat_release`, the person is not blocked, tokens are not touched).
+- The seat register now also remembers when a person was last seen (written at most once a minute); the first version of the file still loads.
+
 ### Licence history and the hackathon
 - The licence changed twice during the hackathon, and this entry says so plainly: the repository started on 2026-09-07 under the **MIT** licence (commit `31cdd2d`); on 2026-10-31 it was replaced by a **proprietary** notice (`acced84`); on 2026-11-03 it became **Apache-2.0**, with the Go admin program published (`admin-go/`). Releases 0.6.0 and 0.6.1 were published while the notice was proprietary and delivered the admin only as a compiled binary.
 - Hackathon scope (see the README): the Git tag `pre-hackathon` marks the last commit before the kickoff on 2026-10-26 12:00 PM ET; the compare link `pre-hackathon...main` shows everything since.

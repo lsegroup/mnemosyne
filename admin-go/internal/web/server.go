@@ -53,27 +53,28 @@ const (
 
 // Server is the Go admin.
 type Server struct {
-	cfg        config.Config
-	configured bool
-	keys       secrets.Keys
-	providers  *store.Providers
-	settings   *store.Settings
-	audit      *audit.Log
-	usage      *usage.Log
-	secure     bool
-	localUser  string
-	localHash  string
-	canonical  *url.URL
-	ownNames   map[string]bool
-	proxy      http.Handler
-	auto       *autoParts
-	lic        *license.Manager
-	seats      *store.Seats
-	refusedMu  sync.Mutex
-	refused    map[string]time.Time // when a person without a seat was last written to the audit trail
-	mux        *http.ServeMux
-	gitlab     *http.Client
-	now        func() time.Time
+	cfg            config.Config
+	configured     bool
+	keys           secrets.Keys
+	providers      *store.Providers
+	settings       *store.Settings
+	audit          *audit.Log
+	usage          *usage.Log
+	secure         bool
+	localUser      string
+	localHash      string
+	canonical      *url.URL
+	ownNames       map[string]bool
+	proxy          http.Handler
+	auto           *autoParts
+	lic            *license.Manager
+	seats          *store.Seats
+	refusedMu      sync.Mutex
+	refused        map[string]time.Time // when a person without a seat was last refused (shown in the Users tab)
+	refusedAudited map[string]time.Time // when that was last written to the audit trail (once an hour per person)
+	mux            *http.ServeMux
+	gitlab         *http.Client
+	now            func() time.Time
 
 	mu     sync.Mutex
 	misses map[string]miss
@@ -217,6 +218,8 @@ func (s *Server) routes() {
 	m.HandleFunc("POST "+api+"/auto/estimate", s.apiHandler(s.estimateAuto))
 	m.HandleFunc("PUT "+api+"/auto", s.apiHandler(s.saveAuto))
 	m.HandleFunc("PUT "+api+"/auto/switch", s.apiHandler(s.switchAuto))
+	m.HandleFunc("GET "+api+"/users", s.apiHandler(s.getUsers))
+	m.HandleFunc("DELETE "+api+"/users/{user}", s.apiHandler(s.releaseSeat))
 	m.HandleFunc("GET "+api+"/license", s.apiHandler(s.getLicense))
 	m.HandleFunc("POST "+api+"/license/activate", s.apiHandler(s.activateLicense))
 	m.HandleFunc("POST "+api+"/license/check", s.apiHandler(s.checkLicense))
