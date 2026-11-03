@@ -38,7 +38,7 @@ A memory node is a markdown file with YAML frontmatter (`packages/core/src/schem
 | `type` | `decision` \| `status` \| `gotcha` \| `howto` \| `reference` |
 | `status` | `working` \| `broken` \| `in-progress` \| `resolved` \| `n/a` |
 | `project` | groups nodes; also the directory under `nodes/` |
-| `components` | free tags (`waf`, `atl-lb-05`, ...) — indexed for search |
+| `components` | free tags (`waf`, `lb-01`, ...) — indexed for search |
 | `code_refs` | `[{ repo, path, line?, symbol_id? }]`; `symbol_id` lines up with CodeGraph |
 | `links` | `[{ rel, target }]`, `rel` ∈ `depends-on` \| `supersedes` \| `relates-to` \| `caused-by` |
 | `authors`, `observed_at`, `supersedes` | provenance |

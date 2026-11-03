@@ -42,7 +42,7 @@ describe('MnemosyneService end to end', () => {
       type: 'gotcha',
       status: 'resolved',
       project: 'aequitas',
-      components: ['waf', 'atl-lb-05'],
+      components: ['waf', 'lb-01'],
       body: 'Multipart boundary tripped OWASP CRS rule 55. Tuned the rule; uploads work again.',
     });
     expect(a.node.id).toContain('aequitas-');

@@ -7,7 +7,7 @@ title: smm-nodejs media uploads 403 was WAF rule 55, not the app
 type: gotcha
 status: resolved
 project: aequitas
-components: [waf, atl-lb-05, smm-nodejs]
+components: [waf, lb-01, smm-nodejs]
 code_refs:
   - { repo: aequitas, path: rules/55.conf, line: 12 }
 links:
@@ -25,7 +25,7 @@ describe('parseMarkdown', () => {
     expect(node.id).toBe('aequitas-waf-rule-55-false-positive');
     expect(node.type).toBe('gotcha');
     expect(node.status).toBe('resolved');
-    expect(node.components).toEqual(['waf', 'atl-lb-05', 'smm-nodejs']);
+    expect(node.components).toEqual(['waf', 'lb-01', 'smm-nodejs']);
     expect(node.code_refs[0]).toMatchObject({ repo: 'aequitas', path: 'rules/55.conf', line: 12 });
     expect(node.code_refs[0]?.symbol_id).toBeNull();
     expect(node.links[0]).toEqual({ rel: 'caused-by', target: 'waf-default-ruleset-too-strict' });
