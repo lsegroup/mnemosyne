@@ -48,10 +48,15 @@ Git tag [`pre-hackathon`](https://github.com/lsegroup/mnemosyne/tree/pre-hackath
 |  | Baseline (`pre-hackathon`) | Built since kickoff (net, `pre-hackathon` → `main`) |
 |---|---|---|
 | What | the headless MCP/REST server (TypeScript, started 2026-09-07: nine tools, SQLite FTS5 + vector search, git as the source of truth), the core library and the VS Code client | the web portal with GitLab sign-in, the Muse documentation pipeline (article, diagram plan, painted diagram, PDF handbook), the scheduler with agreement and spend limits, LLM usage (cost center), the audit trail, licence and seats, the Go admin program (first written in TypeScript, then rewritten in Go), the install zip |
-@@CLOC@@
+| Real code (TypeScript, Go, JavaScript, HTML; without lockfiles, `nodes/`, docs, generated files, SVG, PDF) | **2,046** lines in 35 files (TypeScript 2,015, JavaScript 31) | **22,068** lines in 133 files at `main` (Go 12,419, TypeScript 8,364, HTML 986, JavaScript 299): **+20,022** lines added, 10 modified |
+| Whole tree, everything `cloc` counts | 12,257 lines (9,811 of them JSON, mostly the lockfile) | 35,356 lines |
 
-The numbers are `cloc` output on the public history (see below how to reproduce them). The admin was first written in TypeScript and then rewritten in Go: the TypeScript
-version was removed from the tree, so the net numbers do not count it twice, but the compare link shows both in its commits.
+The numbers are `cloc` 2.10 output on the public history, counted on `main` at commit `a0376f6` (2026-11-03; later commits change them slightly); the raw outputs are kept in [docs/cloc-pre-hackathon-code.txt](docs/cloc-pre-hackathon-code.txt),
+[docs/cloc-head-code.txt](docs/cloc-head-code.txt) and [docs/cloc-diff-code.txt](docs/cloc-diff-code.txt) (the same for the whole tree: `docs/cloc-*-all.txt`). To reproduce them:
+`git clone https://github.com/lsegroup/mnemosyne && cd mnemosyne && cloc --git pre-hackathon && cloc --git HEAD && cloc --git --diff pre-hackathon HEAD` (add
+`--exclude-dir=node_modules,dist,nodes,docs,bin,release,images --include-lang=TypeScript,Go,JavaScript,HTML` for the real-code count). The admin was first written in TypeScript
+(2026-10-28 onward) and replaced by the Go program on 2026-11-01: the commit that removed the TypeScript admin and its scheduler deleted 3,986 lines, which are **not** in the net
+numbers above, so nothing is counted twice; the compare link shows both versions in its commits.
 
 ## Editions
 

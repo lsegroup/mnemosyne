@@ -1,0 +1,56 @@
+github.com/AlDanial/cloc v 2.10  T=7.85 s (21.0 files/s, 4884.8 lines/s)
+-------------------------------------------------------------------------------
+Language                     files          blank        comment           code
+-------------------------------------------------------------------------------
+Go
+ same                            0              0              0              0
+ modified                        0              0              0              0
+ added                          54           1122            856          12419
+ removed                         0              0              0              0
+JSON
+ same                            0              0              0           9733
+ modified                        5              0              0             21
+ added                          16              0              0           1643
+ removed                         0              0              0              2
+TypeScript
+ same                            0              0            167           1915
+ modified                       29              0              0             11
+ added                          39            581            686           6428
+ removed                         0              0              0              0
+HTML
+ same                            0              0              0              0
+ modified                        0              0              0              0
+ added                           2             28              0            986
+ removed                         0              0              0              0
+Markdown
+ same                            0              0              0            198
+ modified                        4              0              0             35
+ added                           2            122              2            426
+ removed                         0              0              0              7
+Bourne Shell
+ same                            0              0             23             41
+ modified                        1              0              3              5
+ added                           5             37             64            365
+ removed                         0              0              4             15
+JavaScript
+ same                            0              0              0              0
+ modified                        0              0              0              0
+ added                           6             25             26            268
+ removed                         0              0              0              0
+Text
+ same                            0              0              0              0
+ modified                        0              0              0              0
+ added                           1              9              0             31
+ removed                         0              0              0              0
+make
+ same                            0              0              0              0
+ modified                        0              0              0              0
+ added                           1              4              4             10
+ removed                         0              0              0              0
+-------------------------------------------------------------------------------
+SUM:
+ same                            0              0            190          11887
+ modified                       39              0              3             72
+ added                         126           1928           1638          22576
+ removed                         0              0              4             24
+-------------------------------------------------------------------------------
