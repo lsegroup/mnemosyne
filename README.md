@@ -15,6 +15,9 @@ a **30-day trial with everything unlocked**, then free for up to 4 seats and a l
 
 **For judges and evaluators: a fresh install has everything unlocked for 30 days. No licence key, no seat limit, the whole audit history and GitLab sign-in for the admin area.** (The first start asks the licence server for the trial; if that server cannot be reached, the program runs as the free edition, 4 seats and the last 10 audit records, asks again every 30 minutes and unlocks everything as soon as it gets an answer; see [License and seats](#license-and-seats).) After 30 days it reverts to the free edition and keeps running.
 
+<p align="center"><a href="#the-workflow-diagram-painted-by-muse-image-10"><img src="docs/images/painted-diagram-mnemosyne-overview.webp" alt="Workflow diagram of Mnemosyne itself, painted by the Meta image model muse-image-1.0: clients, entry, services, storage and external systems, with straight lines and exactly spelled labels" width="900"></a></p>
+<p align="center"><sub>Mnemosyne documenting itself: this overview was painted by <code>muse-image-1.0</code> from a plan written by <code>muse-spark-1.3-contributor</code>, made by the product on 2026-11-01. <a href="#the-workflow-diagram-painted-by-muse-image-10">All five pictures</a></sub></p>
+
 <!-- TODO(owner): put the four judge screenshots here, in this order: Mnemosyne's own generated wiki page with its flow charts, the PDF handbook
      cover, the project grid, the spend-limit agreement popup. The existing sign-in, admin and audit screenshots stay further down. -->
 
@@ -42,6 +45,22 @@ a **30-day trial with everything unlocked**, then free for up to 4 seats and a l
   6 s per call; 1, 2, 4 and 8 minutes per project). If one project still cannot be reached it is given up on and the run **goes on with the next project**; the run stops only
   after three projects in a row. A fixed address (host → IP, Admin → LLM) is a *fallback*: DNS is asked first and the pinned address is only used when the connection fails; the
   admin shows when the address was last verified and when it last had to stand in. (On 2026-10-31 two runs abandoned 25 and 80 projects to DNS failures before this existed.)
+
+### The workflow diagram, painted by `muse-image-1.0`
+
+The product made these five pictures about itself, unedited, on 2026-11-01 (about $0.0444 to $0.0572 per diagram: one text-model plan call plus $0.01 per picture, see above). The plan
+gives the image model the exact words of every box and arrow and asks for straight horizontal and vertical lines only. The first picture is the overview, the other four are the
+detail pictures of the topics the plan chose. A new run **replaces** all earlier diagrams of the project with its own.
+
+<p align="center"><img src="docs/images/painted-diagram-mnemosyne-overview.webp" alt="Overview: clients, entry, services, storage and external systems" width="880"></p>
+<p align="center">
+<img src="docs/images/painted-diagram-mnemosyne-1.webp" alt="Detail picture 1: request path from browser, VS Code extension and MCP agent through the gateway to the Node server and the search index" width="436">
+<img src="docs/images/painted-diagram-mnemosyne-2.webp" alt="Detail picture 2: nodes corpus, search index, generated docs, git history and backups" width="436">
+</p>
+<p align="center">
+<img src="docs/images/painted-diagram-mnemosyne-3.webp" alt="Detail picture 3: sign-in and security, GitLab SSO, personal tokens, sessions and the licence server" width="436">
+<img src="docs/images/painted-diagram-mnemosyne-4.webp" alt="Detail picture 4: build and deployment, the automatic runs, the Meta provider, GitLab CI and the GitHub mirror" width="436">
+</p>
 
 ## What was built when
 
