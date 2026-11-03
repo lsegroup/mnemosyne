@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -17,7 +18,9 @@ import (
 
 	"github.com/lsegroup/mnemosyne/admin-go/internal/audit"
 	"github.com/lsegroup/mnemosyne/admin-go/internal/config"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/license"
 	"github.com/lsegroup/mnemosyne/admin-go/internal/secrets"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/store"
 )
 
 const testSecret = "a-test-secret-with-enough-length"
@@ -44,6 +47,8 @@ type opts struct {
 	env       map[string]string
 	noSecret  bool
 	localOnly bool
+	// free leaves the harness without a licence (the free edition); by default it has one (25 seats)
+	free bool
 }
 
 func newHarness(t *testing.T, o opts) *harness {
@@ -121,7 +126,6 @@ func newHarness(t *testing.T, o opts) *harness {
 		"MNEMOSYNE_GITLAB_CLIENT_ID":     "cid",
 		"MNEMOSYNE_GITLAB_CLIENT_SECRET": "csecret",
 		"MNEMOSYNE_ALIAS_HOSTS":          "Old-Name.example.test",
-		"MNEMOSYNE_LICENSE_ENFORCE":      "1", // the licence tests exercise the check; the open-source default (off) has its own test
 	}
 	if !o.noSecret {
 		env["MNEMOSYNE_SECRET"] = testSecret
@@ -141,6 +145,9 @@ func newHarness(t *testing.T, o opts) *harness {
 	h.srv, err = New(cfg)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if h.srv.configured && !o.free {
+		h.licence(t) // the harness is the licensed edition unless a test asks for the free one
 	}
 	h.srv.now = func() time.Time { return h.now }
 	h.ts.Config.Handler = h.srv
@@ -722,4 +729,21 @@ func TestTheFilesTheAdminWritesAreSealedLikeTheNodeServersAndSurviveARestart(t *
 	if err != nil || len(list.Providers) != 1 || list.Providers[0].KeyHint != "••••6789" {
 		t.Fatalf("after a restart: %+v, %v", list, err)
 	}
+}
+
+// licence gives the harness a licensed edition: a licence key confirmed by a licence server that signs its answers.
+func (h *harness) licence(t *testing.T) {
+	t.Helper()
+	ls := newLicenceServer(t, time.Now)
+	m, err := license.New(license.Options{
+		Store: store.NewLicense(filepath.Join(h.dir, "lic-harness.enc"), h.srv.keys.Enc), Server: ls.srv.URL, PublicKey: ls.pub, Domain: "127.0.0.1",
+		Version: "test", SeatsUsed: h.srv.seats.Count, FreeWithoutKey: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Activate(context.Background(), ls.goodKey); err != nil {
+		t.Fatal(err)
+	}
+	h.srv.SetLicense(m)
 }

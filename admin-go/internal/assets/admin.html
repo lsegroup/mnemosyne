@@ -83,6 +83,7 @@ input:focus,select:focus{outline:none;border-color:var(--accent)}
 .tablewrap{overflow-x:auto;max-width:100%}
 .sumline{margin:0 0 14px;font-size:14px;line-height:1.7}.sumline b{color:var(--teal);font-weight:600}
 td.nw,th.nw{white-space:nowrap}
+.notice-free{margin:0 0 14px;padding:10px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);font-size:13.5px;color:var(--muted)}.notice-free b{color:var(--text)}
 #usageRows tr.run>td{border-bottom:0}
 #usageRows tr.usage>td{padding:0 8px 14px}
 table.use{width:auto;font-size:13px}table.use th,table.use td{padding:3px 22px 3px 0;border-bottom:0}
@@ -352,6 +353,7 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
       <h2>SSO</h2>
       <p class="lead">Let GitLab users sign in with their GitLab account. Admin access comes from GitLab itself: only a GitLab administrator can open this admin area.</p>
       <div class="step">
+        <p class="notice-free" id="ssoFree" hidden><b>Needs a licence.</b> Signing in to the admin area with GitLab is part of the licensed edition. The free edition signs administrators in with the built-in account (MNEMOSYNE_LOCAL_ADMIN_USER and MNEMOSYNE_LOCAL_ADMIN_PASSWORD); people still sign in to the documentation portal with GitLab, as set up by the environment of the server. <a href="#license">Enter a licence key</a></p>
         <h3>GitLab application</h3>
         <p class="sub">In GitLab create an application (Admin → Applications) with scope <code>read_user</code>, tick <em>Trusted</em> so signed-in users are not asked again, and add these redirect URIs (one per line; the first is the public sign-in, the second the admin sign-in):</p>
         <p class="sub">@@REDIRECTS@@</p>
@@ -369,6 +371,7 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
       <h2>Audit</h2>
       <p class="lead">Every sign-in and every change made in this admin area. Secrets are never written to the log.</p>
       <div class="step">
+        <p class="notice-free" id="auditFree" hidden><b>Free edition: the last 10 records.</b> A licence shows the whole history with paging and search. <a href="#license">Enter a licence key</a></p>
         <div class="row" style="margin-bottom:14px">
           <input id="auditSearch" type="search" placeholder="Search events…" style="flex:1;min-width:220px">
           <button class="btn small" type="button" id="auditRefresh">Refresh</button>
@@ -385,7 +388,7 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
 
     <section id="tab-license" class="tab" hidden>
       <h2>License</h2>
-      <p class="lead" id="licLead">This installation works free for 30 days from its first start. After that it needs a licence key. A licence counts seats: a seat is a person with a GitLab account who uses Mnemosyne, in any role.</p>
+      <p class="lead" id="licLead">Mnemosyne is open source (Apache-2.0) and free for up to 5 people. A licence key lifts the limit and adds the whole Audit history and GitLab sign-in for the admin area. A seat is a person with a GitLab account who uses Mnemosyne, in any role: the first people to sign in take the seats.</p>
       <div class="step">
         <h3>Status</h3>
         <dl class="facts" id="licFacts"><dt>Status</dt><dd>Loading…</dd></dl>
@@ -577,6 +580,15 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
   });
   loadHosts();
 
+  // --- the edition: what the free edition may not do is shown as such ---
+  var EDITION=null;
+  function applyEdition(){
+    var free=EDITION!=='licensed';
+    $('ssoFree').hidden=!free;
+    Array.prototype.forEach.call($('ssoForm').querySelectorAll('input,button'),function(x){x.disabled=free});
+  }
+  function loadEdition(){return call('GET','/license').then(function(l){EDITION=l.edition;applyEdition()}).catch(function(){})}
+
   // --- SSO tab ---
   function loadSso(){return call('GET','/settings').then(function(c){
     $('gitlabUrl').value=c.gitlabUrl;$('clientId').value=c.clientId;
@@ -630,10 +642,11 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
       var pages=Math.max(1,Math.ceil(d.total/AUDIT_PER_PAGE));
       if(auditPage>pages-1){auditPage=pages-1;return loadAudit()}
       rows.textContent='';
+      $('auditFree').hidden=!d.limited;$('auditSearch').hidden=!!d.limited;
       if(!d.events.length){var tr=document.createElement('tr');cell(tr,$('auditSearch').value.trim()?'No matching events.':'No events yet.','muted').colSpan=8;rows.appendChild(tr)}
       d.events.forEach(function(e){rows.appendChild(auditRow(e))});
       $('auditCount').textContent=d.total?((auditPage*AUDIT_PER_PAGE+1)+'–'+(auditPage*AUDIT_PER_PAGE+d.events.length)+' of '+d.total+' events'):'0 events';
-      renderPager(d.total);
+      if(d.limited){auditPage=0;$('auditPager').textContent='';$('auditCount').textContent='The last '+d.events.length+' of '+d.total+' records'}else renderPager(d.total);
     }).catch(function(e){note('auditMsg',e.message)});
   }
   var st;$('auditSearch').addEventListener('input',function(){clearTimeout(st);st=setTimeout(function(){auditPage=0;loadAudit()},250)});
@@ -871,32 +884,29 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
   });
 
   // --- licence ---
-  var LIC_STATES={starting:'Starting',trial:'Free trial',licensed:'Licensed','renewal-grace':'Licence period ended, renewal period',locked:'Locked'};
+  var LIC_STATES={free:'Free',starting:'Starting',trial:'Free trial',licensed:'Licensed','renewal-grace':'Licence period ended, renewal period',locked:'Not confirmed'};
   function licDate(ms){return ms?new Date(ms).toISOString().slice(0,10)+' (UTC)':'-'}
   function licFact(dl,k,v){var dt=document.createElement('dt');dt.textContent=k;var dd=document.createElement('dd');dd.textContent=v;dl.appendChild(dt);dl.appendChild(dd)}
   function renderLicense(s){
+    EDITION=s.edition;applyEdition();
     var dl=$('licFacts');dl.textContent='';
-    // the open-source default: no trial, no key, nothing locks
-    var off=s.enforced===false;
-    $('licCheck').hidden=off;$('licKeyStep').hidden=off;
-    if(off){
-      $('licLead').textContent='Mnemosyne is open source (Apache-2.0). This installation needs no licence key and never locks.';
-      licFact(dl,'Status','Licence check switched off');
-      licFact(dl,'To turn it on','Set MNEMOSYNE_LICENSE_ENFORCE=1 in the environment of this program and restart it. It then works free for 30 days and needs a licence key after that.');
-      return;
+    var lic=s.edition==='licensed';
+    licFact(dl,'Edition',lic?'Licensed':'Free');
+    licFact(dl,'People',s.seatsUsed+' of '+(s.seatLimit===null||s.seatLimit===undefined?'any number (the licence has no limit)':s.seatLimit)+(lic?'':' (free edition)'));
+    licFact(dl,'Audit',lic?'The whole history, with paging and search':'The last '+s.freeAuditRecords+' records');
+    licFact(dl,'GitLab sign-in for the admin area',lic?'Included':'Not included: administrators use the built-in account');
+    if(s.hasKey){
+      if(!lic)licFact(dl,'Licence key','…'+(s.keyHint||'').slice(-4)+' - not confirmed, the free edition limits apply'+(s.reason?' ('+s.reason+')':''));
+      else licFact(dl,'Licence key',s.keyHint);
+      if(s.org)licFact(dl,'Licensed to',s.org);
+      if(s.licenseExpiresAt)licFact(dl,'Licence period ends',licDate(s.licenseExpiresAt)+(s.state==='renewal-grace'?' - in the renewal period':''));
+      licFact(dl,'Last check',s.checkedAt?ago(s.checkedAt):'never');
+      if(s.lastError)licFact(dl,'Last problem',s.lastError);
+      licFact(dl,'Installation',s.instanceId);
+      licFact(dl,'Domain',s.domain);
+      licFact(dl,'Licence server',s.server);
     }
-    licFact(dl,'Status',LIC_STATES[s.state]||s.state);
-    if(s.reason)licFact(dl,'Reason',s.reason);
-    if(s.state==='trial'&&s.trialEndsAt)licFact(dl,'Trial ends',licDate(s.trialEndsAt));
-    if(s.org)licFact(dl,'Licensed to',s.org);
-    if(s.hasKey)licFact(dl,'Licence key',s.keyHint);
-    if(s.licenseExpiresAt)licFact(dl,'Licence period ends',licDate(s.licenseExpiresAt));
-    licFact(dl,'Seats in use',s.seatsUsed+(s.seats===null||s.seats===undefined?' (the licence has no limit)':' of '+s.seats));
-    licFact(dl,'Last check',s.checkedAt?ago(s.checkedAt):'never');
-    if(s.lastError)licFact(dl,'Last problem',s.lastError);
-    licFact(dl,'Installation',s.instanceId);
-    licFact(dl,'Domain',s.domain);
-    licFact(dl,'Licence server',s.server);
+    $('licCheck').hidden=!s.hasKey;
   }
   function licFail(id,e){note(id,/HTTP 404/.test(e.message)?'Licence handling is not part of this server.':e.message,false)}
   function loadLicense(){call('GET','/license').then(renderLicense).catch(function(e){licFail('licMsg',e)})}
@@ -911,5 +921,5 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
     call('POST','/license/activate',{key:k}).then(function(s){$('licKey').value='';renderLicense(s);note('licKeyMsg','The key is accepted.',true)}).catch(function(e2){licFail('licKeyMsg',e2)});
   });
 
-  load();loadSso();
+  load();loadSso();loadEdition();
 })();</script>@@FOOTER@@</body></html>

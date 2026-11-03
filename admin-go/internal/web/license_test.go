@@ -7,14 +7,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/lsegroup/mnemosyne/admin-go/internal/config"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/audit"
 	"github.com/lsegroup/mnemosyne/admin-go/internal/license"
 	"github.com/lsegroup/mnemosyne/admin-go/internal/secrets"
 	"github.com/lsegroup/mnemosyne/admin-go/internal/store"
@@ -70,13 +70,15 @@ type licenceRig struct {
 }
 
 func newLicenceRig(t *testing.T) *licenceRig {
-	h := newHarness(t, withLocal(nil))
+	o := withLocal(nil)
+	o.free = true // the rig brings its own licence manager
+	h := newHarness(t, o)
 	r := &licenceRig{harness: h, now: time.Now()}
 	clock := func() time.Time { r.mu.Lock(); defer r.mu.Unlock(); return r.now }
 	r.ls = newLicenceServer(t, clock)
 	m, err := license.New(license.Options{
 		Store: store.NewLicense(filepath.Join(h.dir, "lic.enc"), h.srv.keys.Enc), Server: r.ls.srv.URL, PublicKey: r.ls.pub, Domain: "127.0.0.1",
-		Version: "test", Now: clock, SeatsUsed: func() int { return 3 },
+		Version: "test", Now: clock, SeatsUsed: h.srv.seats.Count, FreeWithoutKey: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -88,88 +90,165 @@ func newLicenceRig(t *testing.T) *licenceRig {
 
 func (r *licenceRig) advance(d time.Duration) { r.mu.Lock(); r.now = r.now.Add(d); r.mu.Unlock() }
 
-func TestWhenTheLicenceSaysNoOnlyHealthAndTheAdminAreOpen(t *testing.T) {
-	r := newLicenceRig(t)
-	// the licence server is not asked at all (no loop is started): after the first minutes there is nothing that allows the work
-	r.advance(11 * time.Minute)
-
-	page := r.do(call{path: "/p/alpha", headers: map[string]string{"Accept": "text/html"}})
-	eq(t, page.status, 402, "a page")
-	has(t, page.body, "Mnemosyne is locked")
-	has(t, page.body, "trial could not be confirmed")
-	has(t, page.body, "/mnemosyne/admin/#license")
-	has(t, page.header.Get("Content-Type"), "text/html")
-
-	mcp := r.do(call{method: "POST", path: "/mcp", body: `{"jsonrpc":"2.0"}`})
-	eq(t, mcp.status, 402, "MCP")
-	j := mcp.json(t)
-	eq(t, j["error"], "licence_required", "error code")
-	has(t, j["message"].(string), "trial could not be confirmed")
-	rest := r.do(call{path: "/search?q=x"})
-	eq(t, rest.status, 402, "REST")
-
-	r.mu.Lock()
-	reached := len(r.seen)
-	r.mu.Unlock()
-	eq(t, reached, 0, "nothing reached the Node server")
-
-	health := r.do(call{path: "/health"})
-	eq(t, health.status, 200, "health stays open")
-	has(t, health.body, "node says GET /mnemosyne/health")
-	eq(t, r.do(call{path: "/admin/"}).status, 200, "the admin sign-in")
-	eq(t, r.srv.licensed(), false, "the Auto scheduler sees a locked installation")
+// person is a signed-in member of the documentation portal: the cookie the Node server writes.
+func (h *harness) person(t *testing.T, user string) map[string]string {
+	t.Helper()
+	token, err := secrets.SignToken(h.srv.keys.Sign, secrets.Session{U: user, N: user, E: user + "@example.com", Exp: time.Now().Add(time.Hour).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return map[string]string{"Cookie": sessionCookie + "=" + token, "Accept": "text/html"}
 }
 
-func TestAnAdministratorActivatesAKeyAndTheFrontDoorOpens(t *testing.T) {
-	r := newLicenceRig(t)
-	r.advance(11 * time.Minute)
-	cookie, _ := r.localCookie("Admin", "correct horse")
+// ---- the free edition: five people ------------------------------------------------------------------------------------------
 
-	st := r.api(cookie, "GET", "/license", "")
-	eq(t, st.status, 200, "status")
-	j := st.json(t)
-	eq(t, j["state"], "locked", "state")
-	eq(t, j["allowed"], false, "allowed")
-	eq(t, j["domain"], "127.0.0.1", "domain")
-	eq(t, j["hasKey"], false, "no key yet")
+func TestTheFreeEditionHasFiveSeatsAndRefusesTheSixthPerson(t *testing.T) {
+	r := newLicenceRig(t)
+	for _, u := range []string{"alice", "bob", "carol", "dave", "erin"} {
+		got := r.do(call{path: "/p/alpha", headers: r.person(t, u)})
+		eq(t, got.status, 200, u+" has a seat")
+	}
+	eq(t, r.srv.seats.Count(), 5, "five seats taken")
+
+	// the sixth person is refused (and signed out of the portal); the page says why
+	page := r.do(call{path: "/p/alpha", headers: r.person(t, "frank")})
+	eq(t, page.status, 402, "the sixth person")
+	has(t, page.body, "All 5 seats of this installation are taken")
+	has(t, page.body, "free for up to 5 people")
+	has(t, page.header.Get("Set-Cookie"), sessionCookie+"=")
+	has(t, page.header.Get("Set-Cookie"), "Max-Age=0")
+	api := r.do(call{method: "POST", path: "/mcp", body: "{}", headers: map[string]string{"Cookie": r.person(t, "frank")["Cookie"]}})
+	eq(t, api.status, 402, "MCP of that person")
+	eq(t, api.json(t)["error"], "seats_exhausted", "error code")
+	eq(t, r.srv.seats.Count(), 5, "no sixth seat")
+
+	// the five keep working, anonymous requests and the health answer are never touched
+	eq(t, r.do(call{path: "/p/alpha", headers: r.person(t, "alice")}).status, 200, "alice still works")
+	eq(t, r.do(call{path: "/login"}).status, 200, "the sign-in page")
+	eq(t, r.do(call{path: "/health"}).status, 200, "health")
+	eq(t, r.do(call{path: "/admin/"}).status, 200, "the admin area")
+
+	// one audit entry for the refused person, however often they try
+	for i := 0; i < 3; i++ {
+		r.do(call{path: "/p/alpha", headers: r.person(t, "frank")})
+	}
+	cookie, _ := r.localCookie("Admin", "correct horse")
+	trail := r.api(cookie, "GET", "/audit", "").body
+	eq(t, strings.Count(trail, "Sign-in refused: all 5 seats are taken"), 1, "one audit entry")
+
+	// a seat can be freed
+	r.srv.seats.Release("bob")
+	eq(t, r.do(call{path: "/p/alpha", headers: r.person(t, "frank")}).status, 200, "frank takes bob's seat")
+}
+
+func TestALicenceLiftsTheLimitToItsSeats(t *testing.T) {
+	r := newLicenceRig(t)
+	cookie, _ := r.localCookie("Admin", "correct horse")
+	for _, u := range []string{"a", "b", "c", "d", "e"} {
+		r.do(call{path: "/p/alpha", headers: r.person(t, u)})
+	}
+	eq(t, r.do(call{path: "/p/alpha", headers: r.person(t, "f")}).status, 402, "refused without a licence")
+
+	st := r.api(cookie, "GET", "/license", "").json(t)
+	eq(t, st["edition"], "free", "edition")
+	eq(t, st["seatLimit"], any(float64(5)), "limit")
+	eq(t, st["seatsUsed"], any(float64(5)), "seats used")
+	eq(t, st["hasKey"], false, "no key")
+	eq(t, len(r.ls.requests), 0, "the licence server is not asked without a key")
 
 	bad := r.api(cookie, "POST", "/license/activate", `{"key":"LSE-WRONGKEY-123456"}`)
 	eq(t, bad.status, 400, "wrong key")
 	eq(t, bad.json(t)["error"], "Invalid license key.", "the licence server's words")
 	eq(t, r.api(cookie, "POST", "/license/activate", `{"key":"x"}`).status, 400, "not a key")
-	eq(t, r.do(call{path: "/p/alpha", headers: map[string]string{"Accept": "text/html"}}).status, 402, "still locked")
+	eq(t, r.do(call{path: "/p/alpha", headers: r.person(t, "f")}).status, 402, "still refused")
 
 	good := r.api(cookie, "POST", "/license/activate", `{"key":"LSE-GOODKEY-123456"}`)
 	eq(t, good.status, 200, "good key: "+good.body)
 	g := good.json(t)
-	eq(t, g["state"], "licensed", "state")
+	eq(t, g["edition"], "licensed", "edition")
 	eq(t, g["org"], "Acme Corp", "organisation")
-	eq(t, g["seats"], any(float64(25)), "seats licensed")
-	eq(t, g["seatsUsed"], any(float64(3)), "seats used")
+	eq(t, g["seatLimit"], any(float64(25)), "the seats of the licence")
 	eq(t, g["keyHint"], "…3456", "only the end of the key is shown")
 	if strings.Contains(good.body, "GOODKEY") {
 		t.Error("the key itself must never be sent back")
 	}
-	r.ls.mu.Lock()
-	asked := r.ls.requests[len(r.ls.requests)-1]
-	r.ls.mu.Unlock()
-	eq(t, asked["seats_used"], any(float64(3)), "the seats in use are reported with every contact")
+	asked := r.ls.last()
+	eq(t, asked["seats_used"], any(float64(5)), "the seats in use are reported with every contact")
 	eq(t, asked["product"], "mnemosyne", "product")
 
-	open := r.do(call{path: "/p/alpha"})
-	eq(t, open.status, 200, "open again")
-	has(t, open.body, "node says GET /mnemosyne/p/alpha")
-	eq(t, r.srv.licensed(), true, "Auto may run again")
-
-	// a manual check asks the server again; the audit trail names the person
+	eq(t, r.do(call{path: "/p/alpha", headers: r.person(t, "f")}).status, 200, "the sixth person works now")
 	chk := r.api(cookie, "POST", "/license/check", "")
 	eq(t, chk.status, 200, "check")
-	eq(t, chk.json(t)["state"], "licensed", "state after the check")
-	trail := r.api(cookie, "GET", "/audit", "")
-	has(t, trail.body, "license_activate")
-	has(t, trail.body, "Licence key …3456 activated")
-	has(t, trail.body, "Licence key refused: Invalid license key.")
+	eq(t, chk.json(t)["edition"], "licensed", "edition after the check")
+	trail := r.api(cookie, "GET", "/audit", "").body
+	has(t, trail, "Licence key …3456 activated")
+	has(t, trail, "Licence key refused: Invalid license key.")
 }
+
+func TestALicenceThatRunsOutFallsBackToTheFreeEditionAndNeverLocks(t *testing.T) {
+	r := newLicenceRig(t)
+	cookie, _ := r.localCookie("Admin", "correct horse")
+	r.api(cookie, "POST", "/license/activate", `{"key":"LSE-GOODKEY-123456"}`)
+	eq(t, r.srv.edition().Licensed, true, "licensed")
+	// the last answer of the licence server runs out (7 days) and the server cannot be reached
+	r.ls.srv.Close()
+	r.advance(8 * 24 * time.Hour)
+	eq(t, r.srv.edition().Licensed, false, "the free edition again")
+	eq(t, r.do(call{path: "/p/alpha", headers: r.person(t, "alice")}).status, 200, "the portal still works for the first five")
+	st := r.api(cookie, "GET", "/license", "").json(t)
+	eq(t, st["edition"], "free", "edition")
+	eq(t, st["hasKey"], true, "the key is still there")
+}
+
+// ---- the free edition: audit and SSO ------------------------------------------------------------------------------------------
+
+func TestTheFreeEditionShowsTheLastTenAuditRecordsOnly(t *testing.T) {
+	r := newLicenceRig(t)
+	cookie, _ := r.localCookie("Admin", "correct horse")
+	for i := 0; i < 25; i++ {
+		r.srv.audit.Write(audit.Input{Event: "update", EntityType: "test", EntityName: "n" + strings.Repeat("x", i%3), User: "t", Description: "record " + strconv.Itoa(i)})
+	}
+	free := r.api(cookie, "GET", "/audit?offset=10&limit=100&q=record", "").json(t)
+	eq(t, free["limited"], any(true), "limited")
+	eq(t, len(free["events"].([]any)), 10, "ten records, whatever is asked")
+	eq(t, free["freeLimit"], any(float64(10)), "the limit")
+	page := r.do(call{path: "/admin/", cookie: cookie}).body
+	has(t, page, `id="auditFree"`)
+	has(t, page, "Free edition: the last 10 records.")
+
+	r.api(cookie, "POST", "/license/activate", `{"key":"LSE-GOODKEY-123456"}`)
+	full := r.api(cookie, "GET", "/audit?offset=10&limit=20&q=record", "").json(t)
+	eq(t, full["limited"], any(false), "not limited")
+	eq(t, len(full["events"].([]any)), 15, "the paged search works: 25 records matched, the page starts at the 11th")
+}
+
+func TestTheFreeEditionHasNoGitLabSignInForTheAdminAreaAndNoSSOSetup(t *testing.T) {
+	r := newLicenceRig(t)
+	cookie, _ := r.localCookie("Admin", "correct horse")
+
+	// the built-in account works; the GitLab button is not offered and the GitLab sign-in leads nowhere
+	login := r.do(call{path: "/admin/"}).body
+	has(t, login, "Sign in</button>")
+	lacks(t, login, "Sign in with GitLab")
+	eq(t, r.do(call{path: "/admin/auth/login"}).status, 302, "no GitLab redirect")
+	eq(t, r.do(call{path: "/admin/auth/login"}).header.Get("Location"), "/mnemosyne/admin/", "back to the sign-in")
+
+	// the SSO set-up is refused and the tab says so
+	put := r.api(cookie, "PUT", "/settings", `{"gitlabUrl":"https://gl.example.org","clientId":"x","clientSecret":"a-long-secret-value-0123456789"}`)
+	eq(t, put.status, 402, "set-up needs a licence")
+	has(t, put.body, "needs a licence")
+	page := r.do(call{path: "/admin/", cookie: cookie}).body
+	has(t, page, `id="ssoFree"`)
+
+	// with a licence both work
+	r.api(cookie, "POST", "/license/activate", `{"key":"LSE-GOODKEY-123456"}`)
+	has(t, r.do(call{path: "/admin/"}).body, "Sign in with GitLab")
+	eq(t, r.do(call{path: "/admin/auth/login"}).status, 302, "the GitLab redirect")
+	has(t, r.do(call{path: "/admin/auth/login"}).header.Get("Location"), "/oauth/authorize")
+	eq(t, r.api(cookie, "PUT", "/settings", `{"gitlabUrl":"https://gl.example.org","clientId":"x","clientSecret":"a-long-secret-value-0123456789"}`).status, 200, "set-up works")
+}
+
+// ---- the rest of the licence handling ---------------------------------------------------------------------------------------
 
 func TestTheLicenceAPIIsForAdministratorsOnly(t *testing.T) {
 	r := newLicenceRig(t)
@@ -192,9 +271,9 @@ func TestAnUnreachableLicenceServerIsReportedNotHidden(t *testing.T) {
 	got := r.api(cookie, "POST", "/license/activate", `{"key":"LSE-GOODKEY-123456"}`)
 	eq(t, got.status, 502, "status")
 	has(t, got.json(t)["error"].(string), "licence server could not be reached")
+	// without a key a check has nothing to ask
 	chk := r.api(cookie, "POST", "/license/check", "")
 	eq(t, chk.status, 200, "a check reports instead of failing")
-	has(t, chk.json(t)["lastError"].(string), "could not be reached")
 }
 
 func TestAnUnconfiguredInstallationServesNothingButHealthAndTheAdmin(t *testing.T) {
@@ -204,90 +283,20 @@ func TestAnUnconfiguredInstallationServesNothingButHealthAndTheAdmin(t *testing.
 	eq(t, r.status, 402, "mcp")
 	has(t, r.json(t)["message"].(string), "MNEMOSYNE_SECRET")
 	eq(t, h.do(call{path: "/health"}).status, 200, "health")
-	eq(t, h.srv.licensed(), false, "locked")
-}
-
-func TestSeatsAreThePeopleWhoSignedInLastYearOrHoldAnActiveToken(t *testing.T) {
-	h := newHarness(t, opts{})
-	enc := h.srv.keys.Enc
-	now := time.Now()
-	ms := func(d time.Duration) int64 { return now.Add(d).UnixMilli() }
-	write := func(path string, v any) {
-		raw, _ := json.Marshal(v)
-		sealed, err := secrets.Seal(enc, string(raw))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(sealed), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	day := 24 * time.Hour
-	members, tokens := filepath.Join(h.dir, "m.enc"), filepath.Join(h.dir, "t.enc")
-	write(members, map[string]any{
-		"Alice": map[string]any{"at": ms(-3 * day), "admin": false},
-		"bob":   map[string]any{"at": ms(-400 * day), "admin": false}, // last seen more than a year ago
-		"carol": map[string]any{"at": ms(-30 * day), "admin": true},
-	})
-	write(tokens, []map[string]any{
-		{"user": "carol", "expiresAt": ms(10 * day)},                      // already a seat through the sign-in: one seat
-		{"user": "Dave", "expiresAt": ms(5 * day)},                        // only an MCP person
-		{"user": "erin", "expiresAt": ms(5 * day), "revokedAt": ms(-day)}, // revoked
-		{"user": "frank", "expiresAt": ms(-day)},                          // expired
-	})
-	got := seatsUsed(store.NewMembers(members, enc), store.NewTokens(tokens, enc), now)
-	eq(t, got, 3, "alice, carol and dave")
-	eq(t, seatsUsed(store.NewMembers(filepath.Join(h.dir, "none.enc"), enc), store.NewTokens(filepath.Join(h.dir, "none2.enc"), enc), now), 0, "no files, no seats")
 }
 
 func TestTheLicensedDomainIsTheHostOfThePublicURLUnlessOneIsSet(t *testing.T) {
 	// the host of MNEMOSYNE_PUBLIC_URL (the harness serves on 127.0.0.1), not the name of the machine
-	h := newHarness(t, withLocal(nil))
+	o := withLocal(nil)
+	o.free = true // the harness would bring its own licence manager
+	h := newHarness(t, o)
 	eq(t, h.srv.lic.Status().Domain, "127.0.0.1", "domain from the public URL")
 
 	// MNEMOSYNE_LICENSE_DOMAIN wins, however it is written
 	for _, written := range []string{"lumanet.info", " Lumanet.INFO ", "https://lumanet.info:40000/x"} {
-		h := newHarness(t, withLocal(map[string]string{"MNEMOSYNE_LICENSE_DOMAIN": written}))
+		o := withLocal(map[string]string{"MNEMOSYNE_LICENSE_DOMAIN": written})
+		o.free = true
+		h := newHarness(t, o)
 		eq(t, h.srv.lic.Status().Domain, "lumanet.info", "domain set as "+written)
 	}
-}
-
-// Owner decision 2026-11-03: Mnemosyne is open source (Apache-2.0); the licence check is OFF unless MNEMOSYNE_LICENSE_ENFORCE is set.
-func TestTheOpenSourceDefaultNeverLocksAndNeverAsksForAKey(t *testing.T) {
-	r := newLicenceRig(t)
-	r.advance(11 * time.Minute)
-	eq(t, r.do(call{path: "/p/alpha", headers: map[string]string{"Accept": "text/html"}}).status, 402, "locked while the check is on")
-
-	r.srv.cfg.LicenseEnforce = false // the default of an installation that sets nothing
-	cookie, _ := r.localCookie("Admin", "correct horse")
-	eq(t, r.do(call{path: "/p/alpha", headers: map[string]string{"Accept": "text/html"}}).status, 200, "the portal is open")
-	eq(t, r.do(call{method: "POST", path: "/mcp", body: `{"jsonrpc":"2.0"}`}).status, 200, "MCP is open")
-	if !r.srv.licensed() {
-		t.Error("licensed() must be true while the check is off (the Auto scheduler works)")
-	}
-
-	// the License tab says so and offers no key; the endpoints that would change a licence are refused
-	st := r.api(cookie, "GET", "/license", "").json(t)
-	eq(t, st["enforced"], any(false), "not enforced")
-	eq(t, r.api(cookie, "POST", "/license/activate", `{"key":"LSE-X"}`).status, 409, "activate")
-	eq(t, r.api(cookie, "POST", "/license/check", "").status, 409, "check")
-	page := r.do(call{path: "/admin/", cookie: cookie}).body
-	has(t, page, "Mnemosyne is open source (Apache-2.0)")
-	has(t, page, "MNEMOSYNE_LICENSE_ENFORCE=1")
-}
-
-// An installation that sets nothing is not enforced by default.
-func TestWithoutTheSettingTheLicenceCheckIsOff(t *testing.T) {
-	cfg, err := config.Load(func(k string) string { return "" }, t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	eq(t, cfg.LicenseEnforce, false, "default")
-	cfg, _ = config.Load(func(k string) string {
-		if k == "MNEMOSYNE_LICENSE_ENFORCE" {
-			return "1"
-		}
-		return ""
-	}, t.TempDir())
-	eq(t, cfg.LicenseEnforce, true, "switched on")
 }

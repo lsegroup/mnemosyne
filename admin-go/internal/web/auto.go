@@ -98,7 +98,7 @@ func (s *Server) startAuto() {
 			s.logUsage(project, kind, by+" (scheduled)", began, s.now(), out, nil, "")
 			return out, nil
 		},
-		Busy: func() bool { return ap.lock.HeldBy("person", s.now()) || !s.licensed() },
+		Busy: func() bool { return ap.lock.HeldBy("person", s.now()) },
 		Hold: func(on bool) {
 			if on {
 				ap.lock.Hold("auto", s.now())

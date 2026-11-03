@@ -97,6 +97,9 @@ type Options struct {
 	SeatsUsed func() int
 	// EnvKey is a key from the environment, taken up when no key is stored yet.
 	EnvKey string
+	// FreeWithoutKey: an installation without a licence key is the free edition. It starts no trial and never contacts the licence server; the
+	// server is only asked once a key has been entered.
+	FreeWithoutKey bool
 	// OnEvent is told about changes worth an audit entry (kind: license_state, license_activate).
 	OnEvent func(kind, detail string)
 
@@ -186,6 +189,8 @@ type verdict struct {
 func (m *Manager) verdict(now time.Time) verdict {
 	p, unix := m.cur, now.Unix()
 	switch {
+	case p == nil && m.o.FreeWithoutKey && m.st.Key == "":
+		return verdict{true, "free", ""}
 	case p == nil:
 		if now.Sub(m.started) < startGrace {
 			return verdict{true, "starting", ""}
@@ -228,7 +233,7 @@ func (m *Manager) Allowed() (bool, string) {
 // Status is what the admin page shows. Times are milliseconds since 1970 (like the rest of the admin API), 0 = none.
 type Status struct {
 	Product          string `json:"product"`
-	State            string `json:"state"` // starting | trial | licensed | renewal-grace | locked
+	State            string `json:"state"` // free | starting | trial | licensed | renewal-grace | locked
 	Allowed          bool   `json:"allowed"`
 	Reason           string `json:"reason,omitempty"`
 	Org              string `json:"org,omitempty"`
@@ -371,6 +376,9 @@ func (m *Manager) CheckNow(ctx context.Context) error {
 	m.mu.RLock()
 	key := m.st.Key
 	m.mu.RUnlock()
+	if key == "" && m.o.FreeWithoutKey {
+		return nil
+	}
 	path := "/ping"
 	if key != "" {
 		path = "/heartbeat"

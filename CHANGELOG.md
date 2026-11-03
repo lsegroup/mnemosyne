@@ -2,9 +2,11 @@
 
 ## Unreleased
 
-### Open source
-- Mnemosyne is now open source under the Apache License 2.0 (`LICENSE`, `NOTICE`), including the Go admin program: its source is in `admin-go/` (Go module `github.com/lsegroup/mnemosyne/admin-go`) and published with the rest of the repository.
-- The licence check in the admin program (30-day trial, key, seats, lock) is switched off by default: an installation never locks and never contacts a licence server. `MNEMOSYNE_LICENSE_ENFORCE=1` turns it on; the License tab says which state it is in.
+### Open source, free edition and licensed edition
+- Mnemosyne is open source under the Apache License 2.0 (`LICENSE`, `NOTICE`), including the Go admin program: its source is in `admin-go/` (Go module `github.com/lsegroup/mnemosyne/admin-go`) and published with the rest of the repository.
+- **Free edition** (no licence key): up to 5 people - the first to sign in to the documentation portal take the seats, the 6th is refused and signed out -, the Audit tab shows the last 10 records (no paging, no search), administrators sign in to the admin area with the built-in account (no GitLab sign-in for the admin area, no SSO set-up). It never contacts a licence server.
+- **Licensed edition** (a key entered under License and confirmed by the licence server): as many people as the licence has seats, the whole Audit history with paging and search, GitLab sign-in for the admin area. A licence that runs out or cannot be confirmed falls back to the free edition; nothing locks any more and there is no trial.
+- The License tab shows the edition, the people in use against the limit and what the edition includes.
 
 ### LLM usage: the cost center of the AI
 - New admin tab **LLM usage**: the cost per month (jobs, calls, tokens, TEXT / IMAGES / PICTURES, total) and below it every AI job, ten to a page, newest first - who started it (the person who pressed the button, or the automatic schedule and who agreed to it), the project, what each model used (calls, tokens in and out, reasoning tokens, cost, AI time), the result and any warning.

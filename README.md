@@ -88,8 +88,9 @@ See [docs/architecture.md](docs/architecture.md) and [docs/self-hosting.md](docs
 
 The admin (`/mnemosyne/admin`: sign-in, LLM, LLM usage, LLM auto, SSO, Audit, License) is a separate program written in Go; its source is in
 [`admin-go/`](admin-go/) (build it with `cd admin-go && make build`) and a compiled, static binary of each release (no runtime to install) is in
-`bin/`. It runs in front of this server and starts it. The licence check in it (30-day trial, key, seats) is switched off by default; set
-`MNEMOSYNE_LICENSE_ENFORCE=1` to turn it on.
+`bin/`. It runs in front of this server and starts it. Mnemosyne is free for up to 5 people (the first people to sign in take the seats); in the
+free edition the Audit tab shows the last 10 records and administrators sign in with the built-in account. A licence key lifts the limit and adds the
+whole Audit history (paging and search) and GitLab sign-in for the admin area. The code is Apache-2.0 either way.
 
 | file | platform |
 |---|---|
@@ -109,5 +110,5 @@ MNEMOSYNE_NODE_CMD="node /opt/mnemosyne/packages/server/dist/bin/mnemosyne.js se
 
 ## License
 
-Open source under the [Apache License 2.0](LICENSE). © 2026 GCD Investment Group, sold under the LSE Group Corporation brand. See
-<https://lumanet.info/mnemosyne> for the product and commercial support.
+Open source under the [Apache License 2.0](LICENSE). © 2026 GCD Investment Group, sold under the LSE Group Corporation brand. Free for up to
+5 people; a licence (see <https://lumanet.info/mnemosyne>) lifts the limit and adds the full Audit history and GitLab sign-in for the admin area.

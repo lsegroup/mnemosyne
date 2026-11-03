@@ -52,14 +52,13 @@ type Config struct {
 	AIDailyLimit  int
 
 	// The licence: its sealed state file, the licence server, and a key given in the environment (taken up once, when none is stored).
-	LicenseFile   string
+	LicenseFile string
+	// SeatsFile is the register of the people who hold a seat (the first to sign in, up to 5 without a licence).
+	SeatsFile     string
 	LicenseServer string
 	LicenseKey    string
 	// LicenseDomain is the domain this installation is licensed for (the licence server shows it); empty = the host of the public URL.
 	LicenseDomain string
-	// LicenseEnforce switches the licence check on (30-day trial, key, seats, lock). This program is open source (Apache-2.0): the check is OFF unless
-	// MNEMOSYNE_LICENSE_ENFORCE is set, so an installation never locks and never contacts the licence server.
-	LicenseEnforce bool
 	// Version is the version of this program (set by main).
 	Version string
 
@@ -162,11 +161,10 @@ func Load(get func(string) string, cwd string) (Config, error) {
 		AutoFile:      file("MNEMOSYNE_AUTO_FILE", "auto.json"),
 		AIDailyLimit:  intOf(get("MNEMOSYNE_AI_DAILY_LIMIT"), 20),
 
-		LicenseFile:    file("MNEMOSYNE_LICENSE_FILE", "license.enc"),
-		LicenseServer:  strings.TrimRight(get("MNEMOSYNE_LICENSE_SERVER"), "/"),
-		LicenseKey:     strings.TrimSpace(get("MNEMOSYNE_LICENSE_KEY")),
-		LicenseDomain:  licenseDomain(get("MNEMOSYNE_LICENSE_DOMAIN")),
-		LicenseEnforce: boolOf(get("MNEMOSYNE_LICENSE_ENFORCE")),
+		LicenseFile:   file("MNEMOSYNE_LICENSE_FILE", "license.enc"),
+		LicenseServer: strings.TrimRight(get("MNEMOSYNE_LICENSE_SERVER"), "/"),
+		LicenseKey:    strings.TrimSpace(get("MNEMOSYNE_LICENSE_KEY")),
+		LicenseDomain: licenseDomain(get("MNEMOSYNE_LICENSE_DOMAIN")),
 
 		Listen:   pick("MNEMOSYNE_ADMIN_LISTEN", "127.0.0.1:40001"),
 		Upstream: strings.TrimRight(pick("MNEMOSYNE_UPSTREAM", "http://127.0.0.1:40002"), "/"),

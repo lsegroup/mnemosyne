@@ -66,6 +66,9 @@ type Server struct {
 	proxy      http.Handler
 	auto       *autoParts
 	lic        *license.Manager
+	seats      *store.Seats
+	refusedMu  sync.Mutex
+	refused    map[string]time.Time // when a person without a seat was last written to the audit trail
 	mux        *http.ServeMux
 	gitlab     *http.Client
 	now        func() time.Time
@@ -401,7 +404,7 @@ func footer() string {
 }
 
 func (s *Server) loginPage(w http.ResponseWriter, r *http.Request, errKey string) {
-	eff := s.effective()
+	eff := s.adminEffective()
 	base := html.EscapeString(s.cfg.BasePath)
 	var action string
 	if s.configured && (eff.sso || eff.localActive) {
@@ -424,6 +427,8 @@ func (s *Server) loginPage(w http.ResponseWriter, r *http.Request, errKey string
 		} else {
 			action = local + sso
 		}
+	} else if s.configured && !s.edition().Licensed {
+		action = `<div class="notice">The free edition signs administrators in with the built-in account: set MNEMOSYNE_LOCAL_ADMIN_USER and MNEMOSYNE_LOCAL_ADMIN_PASSWORD on this server. Signing in to the admin area with GitLab needs a licence.</div>`
 	} else {
 		action = `<div class="notice">Sign-in is not configured on this server yet.</div>`
 	}
@@ -522,7 +527,7 @@ func (s *Server) ssoLogin(w http.ResponseWriter, r *http.Request) {
 	if s.canonicalRedirect(w, r) {
 		return
 	}
-	eff := s.effective()
+	eff := s.adminEffective()
 	if !s.configured || !eff.sso {
 		http.Redirect(w, r, s.adminBase()+"/", http.StatusFound)
 		return
@@ -564,7 +569,7 @@ func (s *Server) ssoCallback(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, s.adminBase()+"/", http.StatusFound)
 		return
 	}
-	eff := s.effective()
+	eff := s.adminEffective()
 	if !eff.sso {
 		s.failSSO(w, r, "nosso", "")
 		return

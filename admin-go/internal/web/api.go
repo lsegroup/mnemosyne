@@ -378,6 +378,9 @@ func (s *Server) getSettings(_ http.ResponseWriter, _ *http.Request, _ string) (
 }
 
 func (s *Server) putSettings(_ http.ResponseWriter, r *http.Request, who string) (any, error) {
+	if !s.edition().Licensed {
+		return nil, &httpError{http.StatusPaymentRequired, "Setting up GitLab SSO for the admin area needs a licence. The free edition signs administrators in with the built-in account."}
+	}
 	in, err := body(r)
 	if err != nil {
 		return nil, err
@@ -416,12 +419,20 @@ func (s *Server) getAudit(_ http.ResponseWriter, r *http.Request, _ string) (any
 	q := r.URL.Query()
 	offset, _ := strconv.Atoi(q.Get("offset"))
 	limit, _ := strconv.Atoi(q.Get("limit"))
-	events, total, err := s.audit.List(q.Get("q"), offset, limit)
+	search := q.Get("q")
+	limited := !s.edition().Licensed
+	if limited { // the free edition shows the last FreeAuditRecords records: no paging, no search
+		offset, limit, search = 0, FreeAuditRecords, ""
+	}
+	events, total, err := s.audit.List(search, offset, limit)
 	if err != nil {
 		return nil, err
 	}
 	if events == nil {
 		events = []audit.Event{}
 	}
-	return map[string]any{"events": events, "total": total}, nil
+	if limited && len(events) > FreeAuditRecords {
+		events = events[:FreeAuditRecords]
+	}
+	return map[string]any{"events": events, "total": total, "limited": limited, "freeLimit": FreeAuditRecords}, nil
 }

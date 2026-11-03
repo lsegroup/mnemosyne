@@ -109,7 +109,7 @@ proxy through the existing web server rather than opening a port.
 
 ## Run — the admin program in front of the server
 
-The admin (`/mnemosyne/admin`) is the Go program in `admin-go/`: take the compiled one in `bin/` (checksums in `bin/SHA256SUMS`) or build it yourself with `cd admin-go && make build` (Go 1.27). Its licence check is off by default; `MNEMOSYNE_LICENSE_ENFORCE=1` turns it on. It becomes the front door:
+The admin (`/mnemosyne/admin`) is the Go program in `admin-go/`: take the compiled one in `bin/` (checksums in `bin/SHA256SUMS`) or build it yourself with `cd admin-go && make build` (Go 1.27). It is free for up to 5 people; without a licence key the Audit tab shows the last 10 records and administrators sign in with the built-in account (`MNEMOSYNE_LOCAL_ADMIN_USER` and `MNEMOSYNE_LOCAL_ADMIN_PASSWORD`, or `..._PASSWORD_HASH`). A licence key (Admin -> License) lifts the limits. The licence server is only asked once a key has been entered. It becomes the front door:
 it listens where the server listened (`127.0.0.1:40001`), serves `/mnemosyne/admin` itself, starts the server on `127.0.0.1:40002` and passes
 everything else on to it. A reverse proxy in front keeps sending `/mnemosyne/` to `127.0.0.1:40001`, so nothing changes for people or MCP clients.
 It reads the same environment file as the server. Install it and swap the unit:
