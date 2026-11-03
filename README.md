@@ -74,7 +74,7 @@ One code base (Apache-2.0), two editions. The limits are applied by the admin pr
 The code is **Apache-2.0** (see [LICENSE](LICENSE), [NOTICE](NOTICE)); use, change and redistribute it as the licence says. Running a licensed edition needs a licence key
 from the licence server.
 
-- **Price:** a yearly licence per seat, under $10 per seat per month. Licences and support: <https://lumanet.info/mnemosyne>.
+- **Price:** **$8.25 per seat per month, billed annually** as an annual contract agreement: **$99 per seat per year**, for 5 or more seats. Buy online: <https://lumanet.info/shop/lse-mnemosyne-licence-per-seat-annual-contract-20>; licences and support: <https://lumanet.info/mnemosyne>.
 - **Open core, honestly:** the limits above are in the source of the admin program (`admin-go/internal/web/license.go`), which is Apache-2.0: anyone may build and change their own
   copy. What a licence buys is a key that the official licence server issues and validates online, the official binaries and support. The licence server is not in this repository.
 - **What an unlicensed install does** (verified in the code and its tests):
