@@ -395,8 +395,8 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
           <span class="muted" id="auditCount"></span><span class="muted" id="auditTz"></span>
         </div>
         <div class="tablewrap">
-          <table class="audit"><thead><tr><th>Date / Time</th><th>Event</th><th>Entity Type</th><th>Name / ID</th><th>User</th><th>IP Address</th><th>Changes</th><th>Description</th></tr></thead>
-            <tbody id="auditRows"><tr><td colspan="8" class="muted">Loading…</td></tr></tbody></table>
+          <table class="audit"><thead><tr><th>Date / Time</th><th>Event</th><th>Entity Type</th><th>Name / ID</th><th>User</th><th>Changes</th><th>Description</th></tr></thead>
+            <tbody id="auditRows"><tr><td colspan="7" class="muted">Loading…</td></tr></tbody></table>
         </div>
         <div class="pager" id="auditPager"></div>
         <div class="row" style="margin-top:8px"><span id="auditMsg" class="msg"></span></div>
@@ -637,7 +637,7 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
     cell(tr,new Date(e.time).toLocaleString(),'t');
     var ev=cell(tr,'');var b=document.createElement('span');b.className='ev '+e.event;b.textContent=e.event.replace('_',' ');ev.appendChild(b);
     cell(tr,e.entityType);cell(tr,e.entityName+(e.entityId&&e.entityId!==e.entityName?' ('+e.entityId.slice(0,8)+')':''));
-    cell(tr,e.user);cell(tr,e.ip);changeCell(cell(tr,'','chg'),e.changes);cell(tr,e.description,'desc');
+    var who=cell(tr,e.user);if(e.ip)who.title='IP address '+e.ip;changeCell(cell(tr,'','chg'),e.changes);cell(tr,e.description,'desc');
     return tr;
   }
   function pageBtn(label,page,cur,off){
@@ -666,7 +666,7 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
       if(auditPage>pages-1){auditPage=pages-1;return loadAudit()}
       rows.textContent='';
       $('auditFree').hidden=!d.limited;$('auditSearch').hidden=!!d.limited;
-      if(!d.events.length){var tr=document.createElement('tr');cell(tr,$('auditSearch').value.trim()?'No matching events.':'No events yet.','muted').colSpan=8;rows.appendChild(tr)}
+      if(!d.events.length){var tr=document.createElement('tr');cell(tr,$('auditSearch').value.trim()?'No matching events.':'No events yet.','muted').colSpan=7;rows.appendChild(tr)}
       d.events.forEach(function(e){rows.appendChild(auditRow(e))});
       $('auditCount').textContent=d.total?((auditPage*AUDIT_PER_PAGE+1)+'–'+(auditPage*AUDIT_PER_PAGE+d.events.length)+' of '+d.total+' events'):'0 events';
       if(d.limited){auditPage=0;$('auditPager').textContent='';$('auditCount').textContent='The last '+d.events.length+' of '+d.total+' records'}else renderPager(d.total);
