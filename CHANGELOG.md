@@ -75,7 +75,7 @@ First release. Mnemosyne is a self-hosted AI team memory: a git-backed graph of 
 ### Web portal
 - Sign in with GitLab; people see the documentation of the GitLab projects they belong to. A local admin account and GitLab SSO are set up from the admin page, and sessions survive restarts.
 - Project pages with an AI-written article, a set of architecture diagrams and a PDF handbook.
-- The diagrams are drawn by Mnemosyne itself from a plan the text model writes (an overview plus detail pictures), so every label is spelled exactly; the PDF uses the same vector drawing.
+- The text model writes a plan for the diagrams (an overview plus detail pictures) and every label is spelled exactly from that plan. In this first release Mnemosyne drew the plan itself as SVG (the PDF used the same vector drawing); since 2026-11-01 an image model paints it when one is chosen (see "The image model paints the workflow diagram" above), and the SVG drawing remains the fallback.
 - A "Mnemosyne Wiki" link can be put into every GitLab project by CI.
 - Every page ends with a line such as "2026 © LSE Group Corporation | Version 0.6".
 

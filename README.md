@@ -13,7 +13,7 @@ up to date on a schedule by Meta's Muse models, with a spend limit and an agreem
 Open source under the [Apache License 2.0](LICENSE) · owned by GCD Investment Group, offered by LSE Group Corporation ·
 a **30-day trial with everything unlocked**, then free for up to 4 seats and a licence from 5 seats ([License and seats](#license-and-seats)) · product site: <https://lumanet.info/mnemosyne>
 
-**For judges and evaluators: a fresh install has everything unlocked for 30 days. No licence key, no seat limit, the whole audit history and GitLab sign-in for the admin area.** (The first start asks the licence server for the trial; see [License and seats](#license-and-seats).) After 30 days it reverts to the free edition and keeps running.
+**For judges and evaluators: a fresh install has everything unlocked for 30 days. No licence key, no seat limit, the whole audit history and GitLab sign-in for the admin area.** (The first start asks the licence server for the trial; if that server cannot be reached, the program runs as the free edition, 4 seats and the last 10 audit records, asks again every 30 minutes and unlocks everything as soon as it gets an answer; see [License and seats](#license-and-seats).) After 30 days it reverts to the free edition and keeps running.
 
 <!-- TODO(owner): put the four judge screenshots here, in this order: Mnemosyne's own generated wiki page with its flow charts, the PDF handbook
      cover, the project grid, the spend-limit agreement popup. The existing sign-in, admin and audit screenshots stay further down. -->
@@ -29,10 +29,12 @@ a **30-day trial with everything unlocked**, then free for up to 4 seats and a l
   plan call; *PICTURES* is the image model, billed per picture.
 - **Provider:** the default is Meta Model API (OpenAI-compatible). Any OpenAI-compatible or Anthropic-format provider can be used; the model per job, the limits, the
   sampling and the prompts are set in the admin.
-- **Real run numbers** (admin Runs table, the three scheduled runs of 2026-10-31, text models only): 176 calls, 1,071,918 tokens in, 2,021,569 out, **$0.5115 at list
+- **Real run numbers, two separate figures.** The $0.5115 below covers the **text models only** (the three scheduled runs of 2026-10-31 happened before the image model was
+  used). The image model is counted on top, per picture: see the last two sentences of this item. Text runs (admin Runs table): 176 calls, 1,071,918 tokens in, 2,021,569 out, **$0.5115 at list
   price** (text $0.2238, charts $0.2877). Cost is always counted as reported tokens × the list price of the model; the providers report tokens, not money.
-  Since 2026-11-01 the workflow diagram is painted by `muse-image-1.0` at about $0.01 per picture: two examples from the cost center are $0.0444 (one plan call and four
-  pictures) and $0.0572 (one plan call and five pictures).
+  Since 2026-11-01 the workflow diagram is painted by `muse-image-1.0`, counted at the list price of $0.01 per picture (a fixed price in the code, because the provider reports
+  no tokens for a picture, so it is not a figure read from a bill). The four diagrams made that way on 2026-11-01 (cost center, LLM usage tab) used 19 pictures, **$0.19**, plus
+  four plan calls of the text model, **$0.0198**: $0.0444 (one plan call and four pictures) up to $0.0572 (one plan call and five pictures) per diagram.
 - **Spend controls:** before an automatic schedule is saved, an agreement popup shows the estimate and the worst case (for the 92 projects on 2026-10-31: about **$0.57**
   now, at most **$2.01**; with the image model since 2026-11-01: about $0.11 now, at most $6.56) and the highest amount a month can cost; nothing runs without that one-time
   agreement; a **dollar limit per run** stops the run before a call that could pass it. Details in [docs/architecture.md](docs/architecture.md).
@@ -95,7 +97,7 @@ from the licence server.
 - **When the licence server is unreachable:** the last good attestation stays in force until it expires (7 days: `TOKEN_TTL_DAYS` of the licence server); the program asks every
   12 hours and retries every 30 minutes. After that, or if the licence server says no (revoked, expired), the installation **reverts to the free edition** and keeps running — no data is touched; a licence that is within its renewal period after it ran out counts as licensed. There is **no offline licence** in the code today.
   A system clock set back is noticed. The trial is counted by the licence server from the first time it saw the installation's address or domain, so deleting local files does not restart it.
-- **For judges and evaluators:** no key is needed. A fresh install is inside its 30-day trial, so the audit history, GitLab sign-in for the admin area and any number of seats are all there. (An installation that was started more than 30 days ago, or one that cannot reach the licence server, shows the free edition.)
+- **For judges and evaluators:** no key is needed. A fresh install is inside its 30-day trial, so the audit history, GitLab sign-in for the admin area and any number of seats are all there. (An installation that was started more than 30 days ago shows the free edition. One that cannot reach the licence server at all, for example behind a network that blocks it, also runs as the free edition and asks again every 30 minutes; the 30 days begin when the licence server first answers.)
 
 ## What it does
 
