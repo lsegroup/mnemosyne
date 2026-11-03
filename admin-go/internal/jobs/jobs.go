@@ -12,7 +12,7 @@ import (
 	"strings"
 	"unicode/utf16"
 
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/assets"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/assets"
 )
 
 // Role is a job a model can be assigned to.

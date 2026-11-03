@@ -13,7 +13,7 @@ import (
 	"time"
 	_ "time/tzdata" // the time zones of the schedule, also on a server without a zone database
 
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/engine"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/engine"
 )
 
 // DayNames are the weekdays, Sunday first (the numbers of a schedule).

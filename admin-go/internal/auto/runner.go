@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/audit"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/engine"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/audit"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/engine"
 )
 
 // Deps is everything the runner needs from the rest of the program.

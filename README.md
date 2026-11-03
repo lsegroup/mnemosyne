@@ -86,9 +86,10 @@ See [docs/architecture.md](docs/architecture.md) and [docs/self-hosting.md](docs
 
 ## The admin program
 
-The admin (`/mnemosyne/admin`: sign-in, LLM, SSO, Audit, Auto, License) is a separate program written in Go, delivered as a compiled,
-static binary (no runtime to install). It runs in front of this server and starts it. Only the compiled program is published in `bin/`; its
-source is not, which is why GitHub's language statistics, which count source files, show TypeScript and not Go.
+The admin (`/mnemosyne/admin`: sign-in, LLM, LLM usage, LLM auto, SSO, Audit, License) is a separate program written in Go; its source is in
+[`admin-go/`](admin-go/) (build it with `cd admin-go && make build`) and a compiled, static binary of each release (no runtime to install) is in
+`bin/`. It runs in front of this server and starts it. The licence check in it (30-day trial, key, seats) is switched off by default; set
+`MNEMOSYNE_LICENSE_ENFORCE=1` to turn it on.
 
 | file | platform |
 |---|---|
@@ -108,6 +109,5 @@ MNEMOSYNE_NODE_CMD="node /opt/mnemosyne/packages/server/dist/bin/mnemosyne.js se
 
 ## License
 
-Proprietary, commercial software. © 2026 GCD Investment Group, sold under the LSE Group Corporation
-brand. Not open source and not free; use requires a licence agreement or a written offer from
-LSE Group Corporation, see [LICENSE](LICENSE) and <https://lumanet.info/mnemosyne>.
+Open source under the [Apache License 2.0](LICENSE). © 2026 GCD Investment Group, sold under the LSE Group Corporation brand. See
+<https://lumanet.info/mnemosyne> for the product and commercial support.

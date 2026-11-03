@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Self-hosted AI team-memory: a git-backed graph of memory nodes, served over MCP + REST.",
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "Apache-2.0",
   "workspaces": [
     "packages/core",
     "packages/server",

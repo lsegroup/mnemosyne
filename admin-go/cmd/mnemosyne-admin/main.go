@@ -15,9 +15,9 @@ import (
 	"syscall"
 	"time"
 
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/config"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/supervisor"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/web"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/config"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/supervisor"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/web"
 )
 
 // version is set at build time (-ldflags "-X main.version=...").

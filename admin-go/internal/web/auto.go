@@ -9,13 +9,13 @@ import (
 	"sync"
 	"time"
 
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/aibusy"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/audit"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/auto"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/engine"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/jobs"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/secrets"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/store"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/aibusy"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/audit"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/auto"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/engine"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/jobs"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/secrets"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/store"
 )
 
 const consentTTL = 600

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/jobs"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/jobs"
 )
 
 // Provider API formats.

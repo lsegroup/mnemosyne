@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/jobs"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/jobs"
 )
 
 // GitLabSettings is the SSO application saved in the admin page.

@@ -9,10 +9,10 @@ import (
 	"strconv"
 	"strings"
 
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/audit"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/jobs"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/llm"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/store"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/audit"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/jobs"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/llm"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/store"
 )
 
 // ---- LLM providers --------------------------------------------------------------------------------------------------

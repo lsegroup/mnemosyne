@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/engine"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/golden"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/jobs"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/engine"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/golden"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/jobs"
 )
 
 // nodeAuto is what the old Node implementation of the scheduler answered for these cases. The Node repository no longer has that code:

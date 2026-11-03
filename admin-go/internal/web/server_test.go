@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/audit"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/config"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/secrets"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/audit"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/config"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/secrets"
 )
 
 const testSecret = "a-test-secret-with-enough-length"
@@ -49,7 +49,7 @@ type opts struct {
 func newHarness(t *testing.T, o opts) *harness {
 	t.Helper()
 	h := &harness{t: t, dir: t.TempDir(), now: time.Now(), users: map[string]gitlabUser{
-		"admin-code": {Username: "store", Name: "Lumanet2012", Email: "store@example.com", State: "active", IsAdmin: true},
+		"admin-code": {Username: "store", Name: "Example Admin", Email: "store@example.com", State: "active", IsAdmin: true},
 		"dev-code":   {Username: "dev", Name: "Some Dev", Email: "dev@example.com", State: "active"},
 	}}
 
@@ -121,6 +121,7 @@ func newHarness(t *testing.T, o opts) *harness {
 		"MNEMOSYNE_GITLAB_CLIENT_ID":     "cid",
 		"MNEMOSYNE_GITLAB_CLIENT_SECRET": "csecret",
 		"MNEMOSYNE_ALIAS_HOSTS":          "Old-Name.example.test",
+		"MNEMOSYNE_LICENSE_ENFORCE":      "1", // the licence tests exercise the check; the open-source default (off) has its own test
 	}
 	if !o.noSecret {
 		env["MNEMOSYNE_SECRET"] = testSecret
@@ -373,11 +374,11 @@ func TestGitLabAdministratorsSignInWithPKCE(t *testing.T) {
 	eq(t, cb.status, 302, "callback status")
 	eq(t, cb.header.Get("Location"), "/mnemosyne/admin/", "callback destination")
 	page := h.do(call{path: "/admin/", cookie: cookie})
-	has(t, page.body, "Lumanet2012")
+	has(t, page.body, "Example Admin")
 	has(t, page.body, "@store")
 	has(t, page.body, "GitLab administrator")
 	has(t, page.body, `href="/mnemosyne/profile">Profile</a>`)
-	has(t, page.body, `<span class="avatar" aria-hidden="true">L</span>`)
+	has(t, page.body, `<span class="avatar" aria-hidden="true">EA</span>`)
 
 	// the session is what the Node server writes and reads
 	c, _ := h.do(call{path: "/admin/", cookie: cookie}), 0
@@ -388,7 +389,7 @@ func TestGitLabAdministratorsSignInWithPKCE(t *testing.T) {
 		t.Fatal("the session cookie does not verify")
 	}
 	eq(t, sess.U, "store", "username")
-	eq(t, sess.N, "Lumanet2012", "name")
+	eq(t, sess.N, "Example Admin", "name")
 	eq(t, sess.E, "store@example.com", "e-mail")
 	eq(t, sess.L, false, "not a local session")
 	eq(t, sess.Exp, h.now.Unix()+8*3600, "lives eight hours")

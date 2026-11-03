@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/jobs"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/jobs"
 )
 
 func nodeRun(t *testing.T, args ...string) []byte {

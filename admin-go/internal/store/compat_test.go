@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/jobs"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/secrets"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/jobs"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/secrets"
 )
 
 const secret = "a-test-secret-with-enough-length"

@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/golden"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/jobs"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/store"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/golden"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/jobs"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/store"
 )
 
 // The image model must be told exactly what the Node server tells it: the plan and the words come from the Node build (packages/server/test/

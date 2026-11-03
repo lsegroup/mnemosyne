@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/audit"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/jobs"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/license"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/store"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/audit"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/jobs"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/license"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/store"
 )
 
 // A seat is a person with a GitLab account who uses this installation, in any role: somebody who signed in to the documentation
@@ -67,7 +67,7 @@ func (s *Server) SetLicense(m *license.Manager) { s.lic = m }
 
 // StartLicense lets the licence manager talk to the licence server (first contact at once, then every 12 hours).
 func (s *Server) StartLicense(ctx context.Context) {
-	if s.lic != nil {
+	if s.lic != nil && s.cfg.LicenseEnforce {
 		s.lic.Start(ctx)
 	}
 }
@@ -75,6 +75,9 @@ func (s *Server) StartLicense(ctx context.Context) {
 // licensed is the single question: may this installation do its work now? (Also used by the Auto scheduler: a locked installation
 // spends no money on AI.)
 func (s *Server) licensed() bool {
+	if !s.cfg.LicenseEnforce {
+		return true // the open-source default: nothing is ever locked
+	}
 	if s.lic == nil {
 		return false
 	}
@@ -87,7 +90,7 @@ func (s *Server) licensed() bool {
 func (s *Server) gate(next http.Handler) http.Handler {
 	health := s.cfg.BasePath + "/health"
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == health {
+		if r.URL.Path == health || !s.cfg.LicenseEnforce {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -125,14 +128,26 @@ func (s *Server) needLicense() error {
 	return nil
 }
 
+// licenseOff is what the licence endpoints answer while the check is switched off (the open-source default).
+var errLicenseOff = &httpError{http.StatusConflict, "The licence check is switched off in this installation (open source). Set MNEMOSYNE_LICENSE_ENFORCE=1 to turn it on."}
+
 func (s *Server) getLicense(_ http.ResponseWriter, _ *http.Request, _ string) (any, error) {
+	if !s.cfg.LicenseEnforce {
+		return map[string]any{"enforced": false}, nil
+	}
 	if err := s.needLicense(); err != nil {
 		return nil, err
 	}
-	return s.lic.Status(), nil
+	return struct {
+		license.Status
+		Enforced bool `json:"enforced"`
+	}{s.lic.Status(), true}, nil
 }
 
 func (s *Server) activateLicense(_ http.ResponseWriter, r *http.Request, who string) (any, error) {
+	if !s.cfg.LicenseEnforce {
+		return nil, errLicenseOff
+	}
 	if err := s.needLicense(); err != nil {
 		return nil, err
 	}
@@ -151,15 +166,24 @@ func (s *Server) activateLicense(_ http.ResponseWriter, r *http.Request, who str
 		return nil, &httpError{http.StatusBadGateway, err.Error()}
 	}
 	s.rec(r, audit.Input{Event: "license_activate", EntityType: "license", EntityName: license.Product, User: who, Description: "Licence key " + st.KeyHint + " activated (" + st.State + ")"})
-	return st, nil
+	return struct {
+		license.Status
+		Enforced bool `json:"enforced"`
+	}{st, true}, nil
 }
 
 func (s *Server) checkLicense(_ http.ResponseWriter, r *http.Request, who string) (any, error) {
+	if !s.cfg.LicenseEnforce {
+		return nil, errLicenseOff
+	}
 	if err := s.needLicense(); err != nil {
 		return nil, err
 	}
 	// an unreachable licence server is not an error of this call: the answer says so (lastError)
 	_ = s.lic.CheckNow(r.Context())
 	s.rec(r, audit.Input{Event: "license_check", EntityType: "license", EntityName: license.Product, User: who, Description: "Licence checked with the licence server"})
-	return s.lic.Status(), nil
+	return struct {
+		license.Status
+		Enforced bool `json:"enforced"`
+	}{s.lic.Status(), true}, nil
 }

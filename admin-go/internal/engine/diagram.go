@@ -11,7 +11,7 @@ import (
 	"sync"
 	"unicode/utf16"
 
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/assets"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/assets"
 )
 
 // The architecture diagram of a project. The AI never draws it: the text model reads the article and writes a PLAN (columns of boxes

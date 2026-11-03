@@ -22,15 +22,15 @@ import (
 	"sync"
 	"time"
 
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/assets"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/audit"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/config"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/jobs"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/license"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/llm"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/secrets"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/store"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/usage"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/assets"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/audit"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/config"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/jobs"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/license"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/llm"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/secrets"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/store"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/usage"
 )
 
 const (

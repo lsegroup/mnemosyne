@@ -23,14 +23,14 @@
   "session": {
     "payload": {
       "u": "store",
-      "n": "Lumanet2012",
+      "n": "Example Admin",
       "e": "store@example.com",
       "exp": 4102444800
     },
-    "token": "eyJ1Ijoic3RvcmUiLCJuIjoiTHVtYW5ldDIwMTIiLCJlIjoic3RvcmVAZXhhbXBsZS5jb20iLCJleHAiOjQxMDI0NDQ4MDB9.J1uatDPw2zDERzFkXmn25XRHzrNY72G6wr9gFRyAZjU"
+    "token": "eyJ1Ijoic3RvcmUiLCJuIjoiRXhhbXBsZSBBZG1pbiIsImUiOiJzdG9yZUBleGFtcGxlLmNvbSIsImV4cCI6NDEwMjQ0NDgwMH0.KPkAM1ZM8YpVsK6KtEx_bjWYAJO1WuAsm59O_9gUic4"
   },
-  "expired": "eyJ1Ijoic3RvcmUiLCJuIjoiTHVtYW5ldDIwMTIiLCJlIjoic3RvcmVAZXhhbXBsZS5jb20iLCJleHAiOjk0NjY4NDgwMH0.1SgBVIuabm1NLgaJIy74beffOR-PL2G9GNF1vAVhRMc",
-  "tamperedBody": "eyJ1IjoiYXR0YWNrZXIiLCJuIjoiTHVtYW5ldDIwMTIiLCJlIjoic3RvcmVAZXhhbXBsZS5jb20iLCJleHAiOjQxMDI0NDQ4MDB9.J1uatDPw2zDERzFkXmn25XRHzrNY72G6wr9gFRyAZjU",
+  "expired": "eyJ1Ijoic3RvcmUiLCJuIjoiRXhhbXBsZSBBZG1pbiIsImUiOiJzdG9yZUBleGFtcGxlLmNvbSIsImV4cCI6OTQ2Njg0ODAwfQ.7vF5_78CrtCnUCZ6Ser0jmE5iDttVO1tXI1DJ0LO-eM",
+  "tamperedBody": "eyJ1IjoiYXR0YWNrZXIiLCJuIjoiRXhhbXBsZSBBZG1pbiIsImUiOiJzdG9yZUBleGFtcGxlLmNvbSIsImV4cCI6NDEwMjQ0NDgwMH0.KPkAM1ZM8YpVsK6KtEx_bjWYAJO1WuAsm59O_9gUic4",
   "noExp": "eyJ1Ijoic3RvcmUifQ.DEXzm-C6zORq5hDmjdgq6DfWXA8PN1TcUC3lNDkKJck",
   "password": {
     "plain": "correct horse battery staple",

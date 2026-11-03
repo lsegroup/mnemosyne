@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/auto"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/engine"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/auto"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/engine"
 )
 
 const article = `A product description paragraph.

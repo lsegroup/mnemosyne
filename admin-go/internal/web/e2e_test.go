@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/config"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/supervisor"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/config"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/supervisor"
 )
 
 func freePort(t *testing.T) string {

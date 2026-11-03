@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"time"
 
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/auto"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/engine"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/usage"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/auto"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/engine"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/usage"
 )
 
 // usageWhat is the label of a kind of call in the cost center.

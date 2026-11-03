@@ -24,7 +24,7 @@ import (
 	"sync"
 	"time"
 
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/store"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/store"
 )
 
 const (

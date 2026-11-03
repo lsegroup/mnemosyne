@@ -1,4 +1,4 @@
-module gitlab.globalclouddata.org/gcd-group/mnemosyne-admin
+module github.com/lsegroup/mnemosyne/admin-go
 
 go 1.26.0
 

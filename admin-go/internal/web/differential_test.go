@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/golden"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/golden"
 )
 
 var (

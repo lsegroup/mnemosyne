@@ -385,13 +385,13 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
 
     <section id="tab-license" class="tab" hidden>
       <h2>License</h2>
-      <p class="lead">This installation works free for 30 days from its first start. After that it needs a licence key. A licence counts seats: a seat is a person with a GitLab account who uses Mnemosyne, in any role.</p>
+      <p class="lead" id="licLead">This installation works free for 30 days from its first start. After that it needs a licence key. A licence counts seats: a seat is a person with a GitLab account who uses Mnemosyne, in any role.</p>
       <div class="step">
         <h3>Status</h3>
         <dl class="facts" id="licFacts"><dt>Status</dt><dd>Loading…</dd></dl>
         <div class="row" style="margin-top:14px"><button class="btn small" type="button" id="licCheck">Check now</button><span class="msg" id="licMsg"></span></div>
       </div>
-      <div class="step">
+      <div class="step" id="licKeyStep">
         <h3>Licence key</h3>
         <p class="sub">Enter the key you received. The first time it is used it is bound to this installation.</p>
         <form id="licForm" class="grid" autocomplete="off">
@@ -876,6 +876,15 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
   function licFact(dl,k,v){var dt=document.createElement('dt');dt.textContent=k;var dd=document.createElement('dd');dd.textContent=v;dl.appendChild(dt);dl.appendChild(dd)}
   function renderLicense(s){
     var dl=$('licFacts');dl.textContent='';
+    // the open-source default: no trial, no key, nothing locks
+    var off=s.enforced===false;
+    $('licCheck').hidden=off;$('licKeyStep').hidden=off;
+    if(off){
+      $('licLead').textContent='Mnemosyne is open source (Apache-2.0). This installation needs no licence key and never locks.';
+      licFact(dl,'Status','Licence check switched off');
+      licFact(dl,'To turn it on','Set MNEMOSYNE_LICENSE_ENFORCE=1 in the environment of this program and restart it. It then works free for 30 days and needs a licence key after that.');
+      return;
+    }
     licFact(dl,'Status',LIC_STATES[s.state]||s.state);
     if(s.reason)licFact(dl,'Reason',s.reason);
     if(s.state==='trial'&&s.trialEndsAt)licFact(dl,'Trial ends',licDate(s.trialEndsAt));

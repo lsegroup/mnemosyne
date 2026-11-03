@@ -4,8 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/engine"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/jobs"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/engine"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/jobs"
 )
 
 // ModelKey is the one fingerprint of the model for TEXT (it also plans the charts) and everything that decides what a call can cost:

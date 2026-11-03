@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/auto"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/auto"
 )
 
 func (r *autoRig) usageJSON(t *testing.T, query string) map[string]any {

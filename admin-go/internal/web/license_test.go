@@ -14,9 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/license"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/secrets"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/store"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/config"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/license"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/secrets"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/store"
 )
 
 // licenceServer is a licence server that signs its answers: it says "trial" to a ping and "licensed, 25 seats" to the key goodKey.
@@ -249,4 +250,44 @@ func TestTheLicensedDomainIsTheHostOfThePublicURLUnlessOneIsSet(t *testing.T) {
 		h := newHarness(t, withLocal(map[string]string{"MNEMOSYNE_LICENSE_DOMAIN": written}))
 		eq(t, h.srv.lic.Status().Domain, "lumanet.info", "domain set as "+written)
 	}
+}
+
+// Owner decision 2026-11-03: Mnemosyne is open source (Apache-2.0); the licence check is OFF unless MNEMOSYNE_LICENSE_ENFORCE is set.
+func TestTheOpenSourceDefaultNeverLocksAndNeverAsksForAKey(t *testing.T) {
+	r := newLicenceRig(t)
+	r.advance(11 * time.Minute)
+	eq(t, r.do(call{path: "/p/alpha", headers: map[string]string{"Accept": "text/html"}}).status, 402, "locked while the check is on")
+
+	r.srv.cfg.LicenseEnforce = false // the default of an installation that sets nothing
+	cookie, _ := r.localCookie("Admin", "correct horse")
+	eq(t, r.do(call{path: "/p/alpha", headers: map[string]string{"Accept": "text/html"}}).status, 200, "the portal is open")
+	eq(t, r.do(call{method: "POST", path: "/mcp", body: `{"jsonrpc":"2.0"}`}).status, 200, "MCP is open")
+	if !r.srv.licensed() {
+		t.Error("licensed() must be true while the check is off (the Auto scheduler works)")
+	}
+
+	// the License tab says so and offers no key; the endpoints that would change a licence are refused
+	st := r.api(cookie, "GET", "/license", "").json(t)
+	eq(t, st["enforced"], any(false), "not enforced")
+	eq(t, r.api(cookie, "POST", "/license/activate", `{"key":"LSE-X"}`).status, 409, "activate")
+	eq(t, r.api(cookie, "POST", "/license/check", "").status, 409, "check")
+	page := r.do(call{path: "/admin/", cookie: cookie}).body
+	has(t, page, "Mnemosyne is open source (Apache-2.0)")
+	has(t, page, "MNEMOSYNE_LICENSE_ENFORCE=1")
+}
+
+// An installation that sets nothing is not enforced by default.
+func TestWithoutTheSettingTheLicenceCheckIsOff(t *testing.T) {
+	cfg, err := config.Load(func(k string) string { return "" }, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	eq(t, cfg.LicenseEnforce, false, "default")
+	cfg, _ = config.Load(func(k string) string {
+		if k == "MNEMOSYNE_LICENSE_ENFORCE" {
+			return "1"
+		}
+		return ""
+	}, t.TempDir())
+	eq(t, cfg.LicenseEnforce, true, "switched on")
 }

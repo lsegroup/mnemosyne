@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/auto"
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/jobs"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/auto"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/jobs"
 )
 
 // useImageModel chooses the image model for the Images job (Admin -> LLM), the way the page does.

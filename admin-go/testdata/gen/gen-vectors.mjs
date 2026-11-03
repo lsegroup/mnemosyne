@@ -12,7 +12,7 @@ const keys = s.deriveKeys(SECRET);
 const FAR = 4102444800; // 2100-01-01
 const PAST = 946684800; // 2000-01-01
 
-const session = { u: 'store', n: 'Lumanet2012', e: 'store@example.com', exp: FAR };
+const session = { u: 'store', n: 'Example Admin', e: 'store@example.com', exp: FAR };
 const token = s.signToken(keys.sign, session);
 const [body, sig] = token.split('.');
 

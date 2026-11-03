@@ -134,7 +134,7 @@ func TestVerifiesTheTokensNodeSigned(t *testing.T) {
 	if !VerifyToken(k.Sign, v.Session.Token, now, &s) {
 		t.Fatal("rejected the token Node signed")
 	}
-	if s != v.Session.Payload || s.U != "store" || s.N != "Lumanet2012" {
+	if s != v.Session.Payload || s.U != "store" || s.N != "Example Admin" {
 		t.Errorf("payload %+v", s)
 	}
 	var drop Session
@@ -211,12 +211,12 @@ func TestNodeAcceptsWhatGoWrites(t *testing.T) {
 	secret := "a-test-secret-with-enough-length"
 	k, _ := DeriveKeys(secret)
 	hash, _ := HashPassword("correct horse battery staple")
-	token, _ := SignToken(k.Sign, Session{U: "store", N: "Lumanet2012", E: "store@example.com", L: true, Exp: 4102444800})
+	token, _ := SignToken(k.Sign, Session{U: "store", N: "Example Admin", E: "store@example.com", L: true, Exp: 4102444800})
 	expired, _ := SignToken(k.Sign, Session{U: "store", Exp: 946684800})
 	out := map[string]any{
 		"secret": secret, "encKeyHex": hex.EncodeToString(k.Enc), "signKeyHex": hex.EncodeToString(k.Sign),
 		"sealed":  []map[string]string{},
-		"session": Session{U: "store", N: "Lumanet2012", E: "store@example.com", L: true, Exp: 4102444800}, "token": token, "expired": expired,
+		"session": Session{U: "store", N: "Example Admin", E: "store@example.com", L: true, Exp: 4102444800}, "token": token, "expired": expired,
 		"password": map[string]string{"plain": "correct horse battery staple", "hash": hash},
 	}
 	var sealed []map[string]string

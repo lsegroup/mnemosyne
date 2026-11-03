@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"gitlab.globalclouddata.org/gcd-group/mnemosyne-admin/internal/secrets"
+	"github.com/lsegroup/mnemosyne/admin-go/internal/secrets"
 )
 
 // sealedFile is a file holding one sealed JSON document. Writes are serialised (read-modify-write cycles cannot lose updates) and
