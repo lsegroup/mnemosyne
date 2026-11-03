@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### 30-day trial restored
+- Company policy: everything runs for the first 30 days without any licence. At its first start the program asks the licence server for the trial (domain, a random installation id, version, seats in use and a nonce; never notes or project content). During the trial there is no seat limit, the Audit tab shows the whole history and GitLab sign-in for the admin area works. After the 30 days (or while the licence server cannot be reached) it reverts to the free edition and keeps running - 4 seats, the last 10 audit records, no admin GitLab sign-in; people who already hold a seat keep it and keep working, nobody new is admitted above the limit. The License tab shows the days left and warns while no built-in admin account is set up. This replaces the earlier entry below that said there is no trial.
+
 ### Users: tracking the seats
 - New admin tab **Users**: who holds the seats, with GitLab name, role, when the seat was taken, when the person was last seen, the last GitLab sign-in, projects and active MCP tokens; the seats in use against the limit; the people refused because every seat was taken; and **Free this seat** for a person who left (audited as `seat_release`, the person is not blocked, tokens are not touched).
 - The seat register now also remembers when a person was last seen (written at most once a minute); the first version of the file still loads.
@@ -23,8 +26,8 @@
 
 ### Open source, free edition and licensed edition
 - Mnemosyne is open source under the Apache License 2.0 (`LICENSE`, `NOTICE`), including the Go admin program: its source is in `admin-go/` (Go module `github.com/lsegroup/mnemosyne/admin-go`) and published with the rest of the repository.
-- **Free edition** (no licence key): up to 4 people (5 or more seats need a licence) - the first to sign in to the documentation portal take the seats, the 5th is refused and signed out -, the Audit tab shows the last 10 records (no paging, no search), administrators sign in to the admin area with the built-in account (no GitLab sign-in for the admin area, no SSO set-up). It never contacts a licence server.
-- **Licensed edition** (a key entered under License and confirmed by the licence server): as many people as the licence has seats, the whole Audit history with paging and search, GitLab sign-in for the admin area. A licence that runs out or cannot be confirmed falls back to the free edition; nothing locks any more and there is no trial.
+- **Free edition** (no licence key): up to 4 people (5 or more seats need a licence) - the first to sign in to the documentation portal take the seats, the 5th is refused and signed out -, the Audit tab shows the last 10 records (no paging, no search), administrators sign in to the admin area with the built-in account (no GitLab sign-in for the admin area, no SSO set-up). After the 30-day trial (see above) it asks the licence server only when a key has been entered.
+- **Licensed edition** (a key entered under License and confirmed by the licence server): as many people as the licence has seats, the whole Audit history with paging and search, GitLab sign-in for the admin area. A licence that runs out or cannot be confirmed falls back to the free edition; nothing locks any more.
 - The License tab shows the edition, the people in use against the limit and what the edition includes.
 
 ### LLM usage: the cost center of the AI

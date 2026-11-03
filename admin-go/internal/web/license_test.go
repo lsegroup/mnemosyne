@@ -3,6 +3,7 @@
 package web
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
@@ -26,11 +27,13 @@ import (
 
 // licenceServer is a licence server that signs its answers: it says "trial" to a ping and "licensed, 25 seats" to the key goodKey.
 type licenceServer struct {
-	srv      *httptest.Server
-	pub      ed25519.PublicKey
-	goodKey  string
-	mu       sync.Mutex
-	requests []map[string]any
+	srv     *httptest.Server
+	pub     ed25519.PublicKey
+	goodKey string
+	// trialOver: the licence server says the 30 days are over
+	trialOver bool
+	mu        sync.Mutex
+	requests  []map[string]any
 }
 
 func newLicenceServer(t *testing.T, now func() time.Time) *licenceServer {
@@ -44,6 +47,8 @@ func newLicenceServer(t *testing.T, now func() time.Time) *licenceServer {
 		ls.mu.Unlock()
 		p := map[string]any{"v": 1, "product": req["product"], "domain": req["domain"], "db_uuid": req["db_uuid"], "nonce": req["nonce"], "issued": now().Unix(), "expires": now().Add(7 * 24 * time.Hour).Unix()}
 		switch {
+		case r.URL.Path == "/ping" && ls.trialOver:
+			p["state"], p["valid"], p["message"] = "trial-expired", false, "The 30-day trial has ended. A licence key is needed."
 		case r.URL.Path == "/ping":
 			p["state"], p["valid"], p["trial_ends"] = "trial", true, now().Add(30*24*time.Hour).Unix()
 		case req["key"] == ls.goodKey:
@@ -327,4 +332,87 @@ func TestTheSeatRegisterIsKeptInAFileNextToTheOtherData(t *testing.T) {
 	if _, err := os.Stat(r.srv.cfg.SeatsFile); err != nil {
 		t.Errorf("the register was not written: %v", err)
 	}
+}
+
+// Company policy: everything runs for the first 30 days without a licence. The licence server grants the trial; afterwards it is the free edition.
+func TestTheFirstThirtyDaysAreATrialWithEverythingUnlocked(t *testing.T) {
+	r := newLicenceRig(t)
+	cookie, _ := r.localCookie("Admin", "correct horse")
+	eq(t, r.srv.edition().Licensed, false, "before the first contact: the free edition, not a lock")
+
+	// the first contact (the program does it at start): no key, the licence server answers with the trial
+	if err := r.m.CheckNow(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	asked := r.ls.last()
+	if _, has := asked["key"]; has {
+		t.Error("no key is sent in a trial ping")
+	}
+	eq(t, asked["product"], "mnemosyne", "product")
+
+	st := r.api(cookie, "GET", "/license", "").json(t)
+	eq(t, st["state"], "trial", "state")
+	eq(t, st["edition"], "licensed", "a trial unlocks everything")
+	eq(t, st["trial"], any(true), "it is the trial")
+	eq(t, st["seatLimit"], nil, "no seat limit")
+	if st["trialEndsAt"].(float64) == 0 {
+		t.Error("the end of the trial is shown")
+	}
+	eq(t, st["hasKey"], false, "no key")
+	eq(t, st["localAdmin"], true, "the harness has a built-in admin")
+
+	// more than four people, the whole audit history, GitLab sign-in for the admin
+	for _, u := range []string{"a", "b", "c", "d", "e", "f"} {
+		eq(t, r.do(call{path: "/p/alpha", headers: r.person(t, u)}).status, 200, u+" has a seat in the trial")
+	}
+	for i := 0; i < 15; i++ {
+		r.srv.audit.Write(audit.Input{Event: "update", EntityType: "test", EntityName: "n", User: "t", Description: "record " + strconv.Itoa(i)})
+	}
+	full := r.api(cookie, "GET", "/audit?offset=5&limit=20&q=record", "").json(t)
+	eq(t, full["limited"], any(false), "the whole history")
+	has(t, r.do(call{path: "/admin/"}).body, "Sign in with GitLab")
+	u := r.api(cookie, "GET", "/users", "").json(t)
+	eq(t, u["trial"], any(true), "the Users tab knows it is the trial")
+	page := r.do(call{path: "/admin/", cookie: cookie}).body
+	has(t, page, "30-day trial - ")
+	has(t, page, "left (everything unlocked, no seat limit)") // days left are counted in the page from the end of the trial
+	has(t, page, "reverts to the free edition and keeps running")
+	has(t, page, "No built-in admin account is set up")
+}
+
+func TestWhenTheTrialEndsTheFreeEditionApplies(t *testing.T) {
+	r := newLicenceRig(t)
+	cookie, _ := r.localCookie("Admin", "correct horse")
+	if err := r.m.CheckNow(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range []string{"a", "b", "c", "d", "e", "f"} {
+		r.do(call{path: "/p/alpha", headers: r.person(t, u)})
+	}
+	eq(t, r.srv.seats.Count(), 6, "six seats during the trial")
+
+	// the 30 days are over: the licence server says so at the next contact
+	r.ls.mu.Lock()
+	r.ls.trialOver = true
+	r.ls.mu.Unlock()
+	r.advance(12 * time.Hour)
+	_ = r.m.CheckNow(context.Background())
+	eq(t, r.srv.edition().Licensed, false, "the free edition")
+	st := r.api(cookie, "GET", "/license", "").json(t)
+	eq(t, st["edition"], "free", "edition")
+	eq(t, st["trial"], any(false), "no trial")
+
+	// nothing locks: the six who hold seats keep working, nobody new gets one, the audit page is limited again
+	eq(t, r.do(call{path: "/p/alpha", headers: r.person(t, "a")}).status, 200, "a seat holder still works")
+	eq(t, r.do(call{path: "/p/alpha", headers: r.person(t, "g")}).status, 402, "no new seat above the free limit")
+	eq(t, r.do(call{path: "/health"}).status, 200, "health")
+	lim := r.api(cookie, "GET", "/audit", "").json(t)
+	eq(t, lim["limited"], any(true), "limited again")
+	lacks(t, r.do(call{path: "/admin/"}).body, "Sign in with GitLab")
+
+	// a licence key still unlocks it for good
+	good := r.api(cookie, "POST", "/license/activate", `{"key":"LSE-GOODKEY-123456"}`)
+	eq(t, good.status, 200, "activate: "+good.body)
+	eq(t, r.api(cookie, "GET", "/license", "").json(t)["edition"], any("licensed"), "licensed")
+	eq(t, r.do(call{path: "/p/alpha", headers: r.person(t, "g")}).status, 200, "the seventh person works now")
 }

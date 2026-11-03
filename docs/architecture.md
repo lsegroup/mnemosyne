@@ -129,9 +129,9 @@ runs run in the **admin program** (`internal/engine`). The two engines are ports
 
 The code is Apache-2.0; the limits are applied by the admin program (`internal/web/license.go`).
 
-- **Free** (no licence key, or a key that cannot be confirmed): `FreeSeats = 4` people (5 or more seats need a licence), the Audit API returns the last `FreeAuditRecords = 10` records whatever
-  is asked, the admin area signs in with the built-in account only (GitLab sign-in for the admin area and the SSO set-up are refused), and the licence server
-  is never contacted.
+- **Trial** (the first 30 days of an installation, granted by the licence server at the first contact): everything of the licensed edition with no seat limit. The licence server answers `trial` (with the end of the 30 days) or `trial-expired`; the trial is counted from the first time the server saw the installation's address or domain, so local files cannot restart it. At the end the installation **reverts to the free edition** and keeps running: people who already hold a seat keep it and keep working, nobody new is admitted above the limit, the Audit API shows the last 10 records, GitLab sign-in for the admin area stops (the built-in account stays). The install id and the last signed answer are kept in `license.enc`; the License tab shows the days left.
+- **Free** (no licence key, or a key that cannot be confirmed, after the trial or while the licence server cannot be reached): `FreeSeats = 4` people (5 or more seats need a licence), the Audit API returns the last `FreeAuditRecords = 10` records whatever
+  is asked, the admin area signs in with the built-in account only (GitLab sign-in for the admin area and the SSO set-up are refused), and the licence server is only asked for the trial.
 - **Licensed** (a key confirmed by the licence server, or within its renewal period): as many people as the licence has seats, the whole audit history, GitLab
   sign-in and SSO set-up. The key is entered under Admin → License (or `MNEMOSYNE_LICENSE_KEY` once) and bound to the installation id and the domain.
 

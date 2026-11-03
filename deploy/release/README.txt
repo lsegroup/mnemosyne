@@ -31,7 +31,8 @@ Then
   3. Sign people in to the documentation portal with GitLab: see docs/self-hosting.md (MNEMOSYNE_GITLAB_*).
 
 Free and licensed
-  Free for up to 4 people (5 or more seats need a licence); the Audit tab shows the last 10 records; administrators sign in with the built-in account.
+  The first 30 days are a trial: everything unlocked, no seat limit, no licence needed (the program asks the licence server for it at the first start).
+  After that: free for up to 4 people (5 or more seats need a licence); the Audit tab shows the last 10 records; administrators sign in with the built-in account.
   A licence key (Admin -> License) lifts the limit and adds the whole Audit history and GitLab sign-in for the admin area.
   https://lumanet.info/mnemosyne
 

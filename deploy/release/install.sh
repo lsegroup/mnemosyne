@@ -221,4 +221,4 @@ echo "  Health:       curl http://${LISTEN/0.0.0.0/127.0.0.1}/mnemosyne/health"
 echo "  Logs:         journalctl -u mnemosyne -f"
 echo
 echo "  Next: put a reverse proxy with TLS in front of ${LISTEN}, then add your AI provider under Admin -> LLM"
-echo "  (free for up to 4 people; a licence key lifts the limit - see README.txt)."
+echo "  (the first 30 days are a trial with everything unlocked; then free for up to 4 people, a licence key lifts the limit - see README.txt)."

@@ -11,7 +11,9 @@ that Mnemosyne turns into documentation for every project of your GitLab server:
 up to date on a schedule by Meta's Muse models, with a spend limit and an agreement before anything is spent.
 
 Open source under the [Apache License 2.0](LICENSE) · owned by GCD Investment Group, offered by LSE Group Corporation ·
-free for up to 4 seats, a licence from 5 seats ([License and seats](#license-and-seats)) · product site: <https://lumanet.info/mnemosyne>
+a **30-day trial with everything unlocked**, then free for up to 4 seats and a licence from 5 seats ([License and seats](#license-and-seats)) · product site: <https://lumanet.info/mnemosyne>
+
+**For judges and evaluators: a fresh install has everything unlocked for 30 days. No licence key, no seat limit, the whole audit history and GitLab sign-in for the admin area.** (The first start asks the licence server for the trial; see [License and seats](#license-and-seats).) After 30 days it reverts to the free edition and keeps running.
 
 <!-- TODO(owner): put the four judge screenshots here, in this order: Mnemosyne's own generated wiki page with its flow charts, the PDF handbook
      cover, the project grid, the spend-limit agreement popup. The existing sign-in, admin and audit screenshots stay further down. -->
@@ -60,7 +62,7 @@ numbers above, so nothing is counted twice; the compare link shows both versions
 
 ## Editions
 
-One code base (Apache-2.0), two editions. The limits are applied by the admin program (`admin-go/`); a licence key (Admin → License) lifts them.
+One code base (Apache-2.0), two editions, and a trial. The limits are applied by the admin program (`admin-go/`); a licence key (Admin → License) lifts them. **The first 30 days of every installation are a trial: everything runs, with no seat limit, the whole audit history and GitLab sign-in for the admin area, without any licence.** After 30 days it **reverts to the free edition** and keeps running (what changes: see *What changes on day 31* below).
 
 | | Free (no key) | Licensed |
 |---|---|---|
@@ -77,23 +79,23 @@ from the licence server.
 - **Price:** **$8.25 per seat per month, billed annually** as an annual contract agreement: **$99 per seat per year**, for 5 or more seats. Buy online: <https://lumanet.info/shop/lse-mnemosyne-licence-per-seat-annual-contract-20>; licences and support: <https://lumanet.info/mnemosyne>.
 - **Open core, honestly:** the limits above are in the source of the admin program (`admin-go/internal/web/license.go`), which is Apache-2.0: anyone may build and change their own
   copy. What a licence buys is a key that the official licence server issues and validates online, the official binaries and support. The licence server is not in this repository.
-- **What an unlicensed install does** (verified in the code and its tests):
+- **The 30-day trial:** the first 30 days of every installation have all features and no limits, without a key. The 30 days are counted by the licence server from the first time it saw the installation's address or domain (the installation id and the last answer are kept in the sealed file `license.enc`), so deleting local files does not restart them. The admin's License tab shows the days left and what changes afterwards.
+- **What changes on day 31** (it reverts to the free edition and keeps running; nothing is shut down, deleted or made read-only): **seats** - the people who already hold a seat keep it and keep working normally, even beyond the fourth; nobody new is admitted until seats are freed below 4 (Admin → Users → *Free this seat*) or a licence key is entered; **audit** - the Audit tab shows the last 10 records (the log keeps recording everything, and the whole history is back with a licence); **admin sign-in** - GitLab sign-in for the admin area stops and administrators sign in with the built-in account, so set `MNEMOSYNE_LOCAL_ADMIN_USER` and `MNEMOSYNE_LOCAL_ADMIN_PASSWORD` before the trial ends (the License tab warns while none is set).
+- **What an installation without a licence does after the trial** (verified in the code and its tests):
   - *Sign-in:* people sign in to the documentation portal with GitLab as usual; the first four take the seats. Administrators sign in to the admin area with the built-in
     account (`MNEMOSYNE_LOCAL_ADMIN_USER` and `MNEMOSYNE_LOCAL_ADMIN_PASSWORD`, or `..._PASSWORD_HASH`); GitLab sign-in for the admin area and the SSO set-up are refused
     ("Setting up GitLab SSO for the admin area needs a licence...").
   - *Audit page:* the last 10 records only, whatever is asked; no paging, no search, with a note that a licence shows the whole history.
   - *At the limit:* the fifth person gets HTTP 402 and a page saying *"All 4 seats of this installation are taken. Mnemosyne is free for up to 4 people; a licence key lifts the
     limit."*, and is signed out of the portal. The four who hold seats keep working; anonymous requests and `/health` are never touched. One audit entry per refused person per hour.
-  - *Licence server:* never contacted without a key.
-- **What the licence check sends** (`admin-go/internal/license/license.go`, `call`): to the licence server only `product`, `domain` (the host of the public URL), `db_uuid` (a random
+  - *Licence server:* asked for the 30-day trial at the first start (see below); after the trial, only when a key has been entered. During the 30-day trial everything above is unlocked, with no seat limit.
+- **What the licence check sends** (`admin-go/internal/license/license.go`, `call`) - for the trial ping as well as for a licence - to the licence server only `product`, `domain` (the host of the public URL), `db_uuid` (a random
   id made at first start), `version`, `seats_used` (a number), a random `nonce` and the licence `key`. **Notes, project names and documentation are never sent.** The answer is an
   Ed25519-signed attestation, verified with a public key compiled into the program.
 - **When the licence server is unreachable:** the last good attestation stays in force until it expires (7 days: `TOKEN_TTL_DAYS` of the licence server); the program asks every
-  12 hours and retries every 30 minutes. After that, or if the licence server says no (revoked, expired), the installation works as the **free edition** — nothing locks and
-  no data is touched; a licence that is within its renewal period after it ran out counts as licensed. There is **no offline licence** in the code today.
-  A system clock set back is noticed.
-- **For judges and evaluators:** the audit history and SSO are licensed features, so a plain clone shows the limited audit page. An evaluation licence key is available from the
-  maintainers (see <https://lumanet.info/mnemosyne>); enter it under Admin → License. <!-- TODO(owner): the process or key for judges is yours to supply; nothing is created here. -->
+  12 hours and retries every 30 minutes. After that, or if the licence server says no (revoked, expired), the installation **reverts to the free edition** and keeps running — no data is touched; a licence that is within its renewal period after it ran out counts as licensed. There is **no offline licence** in the code today.
+  A system clock set back is noticed. The trial is counted by the licence server from the first time it saw the installation's address or domain, so deleting local files does not restart it.
+- **For judges and evaluators:** no key is needed. A fresh install is inside its 30-day trial, so the audit history, GitLab sign-in for the admin area and any number of seats are all there. (An installation that was started more than 30 days ago, or one that cannot reach the licence server, shows the free edition.)
 
 ## What it does
 

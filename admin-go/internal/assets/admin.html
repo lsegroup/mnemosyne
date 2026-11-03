@@ -405,7 +405,7 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
 
     <section id="tab-license" class="tab" hidden>
       <h2>License</h2>
-      <p class="lead" id="licLead">Mnemosyne is open source (Apache-2.0) and free for up to 4 people (5 or more seats need a licence). A licence key lifts the limit and adds the whole Audit history and GitLab sign-in for the admin area. A seat is a person with a GitLab account who uses Mnemosyne, in any role: the first people to sign in take the seats.</p>
+      <p class="lead" id="licLead">Mnemosyne is open source (Apache-2.0). The first 30 days are a trial with everything unlocked and no limits; after that it is free for up to 4 people (5 or more seats need a licence). A licence key lifts the limit for good and adds the whole Audit history and GitLab sign-in for the admin area. A seat is a person with a GitLab account who uses Mnemosyne, in any role: the first people to sign in take the seats.</p>
       <div class="step">
         <h3>Status</h3>
         <dl class="facts" id="licFacts"><dt>Status</dt><dd>Loading…</dd></dl>
@@ -683,7 +683,7 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
     call('GET','/users').then(function(d){
       EDITION=d.edition;applyEdition();
       var sm=$('usersSummary');sm.textContent='';
-      span(sm,'Seats in use: ');var b=document.createElement('b');b.textContent=d.used+' of '+(d.limit===null||d.limit===undefined?'any number (the licence has no limit)':d.limit)+(d.edition==='licensed'?' (licensed)':' (free edition: up to '+d.freeSeats+' people, 5 or more need a licence)');sm.appendChild(b);
+      span(sm,'Seats in use: ');var b=document.createElement('b');b.textContent=d.used+' of '+(d.limit===null||d.limit===undefined?'any number (the licence has no limit)':d.limit)+(d.edition==='licensed'?(d.trial?' (30-day trial)':' (licensed)'):' (free edition: up to '+d.freeSeats+' people, 5 or more need a licence)');sm.appendChild(b);
       var rows=$('usersRows');rows.textContent='';
       if(!d.users.length){var e=document.createElement('tr');cell(e,'Nobody has used the documentation portal yet, so no seat is taken.','muted').colSpan=8;rows.appendChild(e)}
       d.users.forEach(function(u){
@@ -941,7 +941,13 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
     EDITION=s.edition;applyEdition();
     var dl=$('licFacts');dl.textContent='';
     var lic=s.edition==='licensed';
-    licFact(dl,'Edition',lic?'Licensed':'Free');
+    var left=s.trial&&s.trialEndsAt?Math.max(0,Math.ceil((s.trialEndsAt-Date.now())/86400000)):0;
+    licFact(dl,'Edition',s.trial?'30-day trial - '+left+(left===1?' day':' days')+' left (everything unlocked, no seat limit)':(lic?'Licensed':'Free'));
+    if(s.trial&&s.trialEndsAt){
+      licFact(dl,'Trial ends',licDate(s.trialEndsAt));
+      licFact(dl,'Then','It reverts to the free edition and keeps running: up to '+s.freeSeats+' seats (people who already hold a seat keep it), the last '+s.freeAuditRecords+' audit records, no GitLab sign-in for the admin area. A licence key keeps everything.');
+      if(!s.localAdmin)licFact(dl,'Before it ends','No built-in admin account is set up: after the trial administrators can only sign in with it. Set MNEMOSYNE_LOCAL_ADMIN_USER and MNEMOSYNE_LOCAL_ADMIN_PASSWORD on the server.');
+    }
     licFact(dl,'People',s.seatsUsed+' of '+(s.seatLimit===null||s.seatLimit===undefined?'any number (the licence has no limit)':s.seatLimit)+(lic?'':' (free edition)'));
     licFact(dl,'Audit',lic?'The whole history, with paging and search':'The last '+s.freeAuditRecords+' records');
     licFact(dl,'GitLab sign-in for the admin area',lic?'Included':'Not included: administrators use the built-in account');

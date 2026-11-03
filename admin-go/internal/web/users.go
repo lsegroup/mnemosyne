@@ -61,6 +61,7 @@ func (s *Server) getUsers(_ http.ResponseWriter, _ *http.Request, _ string) (any
 	out := map[string]any{"edition": "free", "used": len(rows), "users": rows, "refused": refused, "freeSeats": FreeSeats}
 	if s.edition().Licensed {
 		out["edition"] = "licensed"
+		out["trial"] = s.lic.Status().State == "trial"
 	}
 	if limit >= 0 {
 		out["limit"] = limit

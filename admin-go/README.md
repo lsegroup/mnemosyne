@@ -5,10 +5,10 @@ it serves everything behind `/mnemosyne/admin` (sign-in with a built-in account 
 License tabs), runs the automatic documentation updates, and passes every other request to the Node server, which it starts and keeps running
 itself. It reads and writes the same files and cookies as the Node server, so nothing has to be migrated.
 
-Two editions, one code base (Apache-2.0):
+The **first 30 days are a trial** with the licensed features and no seat limit (granted by the licence server at the first start). Then two editions, one code base (Apache-2.0):
 
 - **free** - up to 4 people (the first to sign in take the seats; the 5th is refused), the Audit tab shows the last 10 records (no paging, no search),
-  administrators sign in with the built-in account (no GitLab sign-in for the admin area, no SSO set-up). It never contacts a licence server.
+  administrators sign in with the built-in account (no GitLab sign-in for the admin area, no SSO set-up). It asks the licence server for the 30-day trial at the first start and nothing else.
 - **licensed** - a licence key (Admin -> License) confirmed by the licence server: as many people as the licence has seats, the whole Audit history
   with paging and search, GitLab sign-in for the admin area. A licence that runs out falls back to the free edition; nothing ever locks.
 

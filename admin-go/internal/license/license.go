@@ -99,8 +99,9 @@ type Options struct {
 	SeatsUsed func() int
 	// EnvKey is a key from the environment, taken up when no key is stored yet.
 	EnvKey string
-	// FreeWithoutKey: an installation without a licence key is the free edition. It starts no trial and never contacts the licence server; the
-	// server is only asked once a key has been entered.
+	// FreeWithoutKey: an installation that nobody has given a verdict yet is the free edition, not a locked one. Without a key the licence server is
+	// asked for the 30-day trial (once at the first start, then every 12 hours while the trial lasts); it answers "trial" (everything is
+	// unlocked for 30 days) or "trial-expired" (the free edition). A licence server that cannot be reached leaves the free edition in force.
 	FreeWithoutKey bool
 	// OnEvent is told about changes worth an audit entry (kind: license_state, license_activate).
 	OnEvent func(kind, detail string)
@@ -378,9 +379,6 @@ func (m *Manager) CheckNow(ctx context.Context) error {
 	m.mu.RLock()
 	key := m.st.Key
 	m.mu.RUnlock()
-	if key == "" && m.o.FreeWithoutKey {
-		return nil
-	}
 	path := "/ping"
 	if key != "" {
 		path = "/heartbeat"

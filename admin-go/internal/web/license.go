@@ -25,6 +25,9 @@ import (
 //	free      up to FreeSeats people, the Audit tab shows the last FreeAuditRecords records only (no paging, no search), administrators sign
 //	          in to the admin area with the built-in account (no GitLab SSO for the admin area, no SSO tab)
 //	licensed  as many people as the licence has seats, the whole Audit history, GitLab SSO for the admin area
+//
+// The first 30 days of an installation are a TRIAL with the licensed edition's features and no seat limit (the licence server grants it; see
+// internal/license). When it ends, or when the licence server cannot be reached, the free edition is in force; nothing ever locks.
 const (
 	// FreeSeats is how many people use the free edition: up to 4; the 5th seat needs a licence.
 	FreeSeats = 4
@@ -47,7 +50,8 @@ func (s *Server) edition() edition {
 		return edition{}
 	}
 	st := s.lic.Status()
-	if st.Allowed && (st.State == "licensed" || st.State == "renewal-grace") {
+	// a licence, its renewal period and the 30-day trial unlock everything; the trial has no seat limit (the licence server sends none)
+	if st.Allowed && (st.State == "licensed" || st.State == "renewal-grace" || st.State == "trial") {
 		return edition{Licensed: true, Seats: st.Seats}
 	}
 	return edition{}
@@ -207,8 +211,12 @@ func (s *Server) needLicense() error {
 // licenseView is the licence status with what the edition allows, as the License tab shows it.
 type licenseView struct {
 	license.Status
-	// Edition is "free" or "licensed".
+	// Edition is "free" or "licensed" (a trial counts as licensed: it unlocks everything).
 	Edition string `json:"edition"`
+	// Trial: the licensed features are on because of the 30-day trial, not because of a licence key.
+	Trial bool `json:"trial"`
+	// LocalAdmin: a built-in admin account is set up. After the trial administrators can only sign in to the admin with it.
+	LocalAdmin bool `json:"localAdmin"`
 	// SeatLimit is how many people may use the installation now (nil = no limit).
 	SeatLimit *int `json:"seatLimit"`
 	// FreeSeats and FreeAuditRecords are the limits of the free edition.
@@ -217,13 +225,14 @@ type licenseView struct {
 }
 
 func (s *Server) licenseView() licenseView {
-	v := licenseView{Status: s.lic.Status(), Edition: "free", FreeSeats: FreeSeats, FreeAuditRecords: FreeAuditRecords}
+	v := licenseView{Status: s.lic.Status(), Edition: "free", FreeSeats: FreeSeats, FreeAuditRecords: FreeAuditRecords, LocalAdmin: s.localHash != ""}
 	limit := s.seatLimit()
 	if limit >= 0 {
 		v.SeatLimit = &limit
 	}
 	if s.edition().Licensed {
 		v.Edition = "licensed"
+		v.Trial = v.State == "trial"
 	}
 	return v
 }
