@@ -79,14 +79,19 @@ elif sudo test -f /etc/mnemosyne.env; then
 fi
 rm -f /tmp/mnemosyne-portal.env
 
+DEPLOY_TOKEN="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
 {
   cat <<EOF
 MNEMOSYNE_REPO=$INSTALL_DIR
 MNEMOSYNE_HTTP_HOST=127.0.0.1
 MNEMOSYNE_HTTP_PORT=$HTTP_PORT
 MNEMOSYNE_BASE_PATH=/mnemosyne
-# No MNEMOSYNE_BEARER_TOKEN: internal network only, matches the sibling
-# CodeGraph MCP server on this same box, which also runs unauthenticated.
+# Tokens are mandatory (owner decision 2026-11-06): every MCP and REST call needs a personal token (mnm_..., issued in the profile of
+# the portal); a call without one gets HTTP 401. This file is written from scratch by every deploy, so the switch has to be here or a
+# deploy would silently turn it off. The shared token is made fresh by every deploy, lives only in this root-only file and is used
+# once, by the reindex below (a deploy has no personal token).
+MNEMOSYNE_REQUIRE_TOKEN=1
+MNEMOSYNE_BEARER_TOKEN=$DEPLOY_TOKEN
 MNEMOSYNE_EMBED_BACKEND=hash
 MNEMOSYNE_EMBED_DIM=256
 MNEMOSYNE_GIT_PUSH=false
@@ -127,7 +132,7 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 curl -sf -X POST "http://127.0.0.1:${HTTP_PORT}/mnemosyne/reindex" \
-  -H "Content-Type: application/json" -d '{}' && echo
+  -H "Authorization: Bearer ${DEPLOY_TOKEN}" -H "Content-Type: application/json" -d '{}' && echo
 
 echo "✓ mnemosyne service active. Local health check:"
 curl -sf "http://127.0.0.1:${HTTP_PORT}/mnemosyne/health" && echo
