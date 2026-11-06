@@ -22,6 +22,43 @@ type Portal struct {
 	GitLab *GitLabSettings `json:"gitlab,omitempty"`
 	// SSOLiveAt is the epoch second of the first successful GitLab admin sign-in: SSO is proven live from then on.
 	SSOLiveAt int64 `json:"ssoLiveAt,omitempty"`
+	// Generate is who may start the AI jobs (documentation, workflow diagram) on the project pages: one switch per level (GenerateLevels).
+	// A level that is not in the map has its default (DefaultGenerate); the Node server reads the same map.
+	Generate map[string]bool `json:"generate,omitempty"`
+}
+
+// GenerateLevels are the levels a switch exists for, in the order the admin page shows them: GitLab administrators, then the access
+// level a person has on the GitLab project of the notes (owner is the highest).
+var GenerateLevels = []string{"admin", "owner", "maintainer", "developer", "reporter", "guest"}
+
+// DefaultGenerate is what nothing saved means: administrators and project owners may generate, nobody else.
+func DefaultGenerate() map[string]bool {
+	return map[string]bool{"admin": true, "owner": true, "maintainer": false, "developer": false, "reporter": false, "guest": false}
+}
+
+// GenerateRoles is the saved switches over the defaults, one entry for every level.
+func (p Portal) GenerateRoles() map[string]bool {
+	out := DefaultGenerate()
+	for _, k := range GenerateLevels {
+		if v, ok := p.Generate[k]; ok {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// ApplyGenerateInput validates the access form (one true/false for every level) and applies it.
+func ApplyGenerateInput(p *Portal, in map[string]any) error {
+	next := map[string]bool{}
+	for _, k := range GenerateLevels {
+		v, ok := in[k].(bool)
+		if !ok {
+			return jobs.Invalid("%s must be true or false", k)
+		}
+		next[k] = v
+	}
+	p.Generate = next
+	return nil
 }
 
 // Settings is the sealed portal settings file.

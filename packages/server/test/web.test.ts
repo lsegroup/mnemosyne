@@ -17,6 +17,7 @@ import { deriveKeys, open, seal, signToken, verifyToken } from '../src/secrets.j
 import { createWebPortal } from '../src/web.js';
 import { renderMarkdown } from '../src/markdown.js';
 import { matchProject, redact } from '../src/docs.js';
+import { SettingsStore } from '../src/settings-store.js';
 
 const SECRET = 'a-test-secret-with-enough-length';
 // Fake credentials for the masking tests, assembled at runtime so no credential-shaped text sits in the source
@@ -153,6 +154,7 @@ describe('web portal', () => {
   const gitlabUsers: Record<string, object> = {
     'admin-code': { username: 'store', name: 'Store Admin', email: 'store@lumanet.info', state: 'active', is_admin: true },
     'dev-code': { username: 'dev', name: 'Some Dev', email: 'dev@example.com', state: 'active' },
+    'owner-code': { username: 'boss', name: 'Project Owner', email: 'boss@example.com', state: 'active' },
     'scope-code': { username: 'noscope', name: 'No Scope', email: 'ns@example.com', state: 'active' },
   };
 
@@ -194,9 +196,11 @@ describe('web portal', () => {
           json(
             200,
             t === 'dev-code'
-              ? [{ id: 1, name: 'Alpha', path: 'alpha', path_with_namespace: 'grp/alpha', web_url: 'https://gl.example/grp/alpha' },
-                  { id: 2, name: 'Zeta', path: 'zeta', path_with_namespace: 'grp/zeta', web_url: 'https://gl.example/grp/zeta' }]
-              : [],
+              ? [{ id: 1, name: 'Alpha', path: 'alpha', path_with_namespace: 'grp/alpha', web_url: 'https://gl.example/grp/alpha', permissions: { project_access: { access_level: 30 }, group_access: null } },
+                  { id: 2, name: 'Zeta', path: 'zeta', path_with_namespace: 'grp/zeta', web_url: 'https://gl.example/grp/zeta', permissions: { project_access: { access_level: 20 }, group_access: null } }]
+              : t === 'owner-code'
+                ? [{ id: 1, name: 'Alpha', path: 'alpha', path_with_namespace: 'grp/alpha', web_url: 'https://gl.example/grp/alpha', permissions: { project_access: null, group_access: { access_level: 50 } } }]
+                : [],
           );
       } else if (req.url === '/api/v4/user') {
         const t = (req.headers.authorization ?? '').replace('Bearer ', '');
@@ -638,6 +642,37 @@ describe('web portal', () => {
       expect((await api(dev, '/estimate?kind=wiki')).status).toBe(404); // admin-only: looks like a missing page
       expect((await api(dev, '/generate', 'POST', { kind: 'wiki', token: 'x' })).status).toBe(404);
       expect(calls.chat + calls.image).toBe(0);
+    });
+
+    it('who may generate follows the levels switched on in Admin -> Access: administrators and owners by default, nobody else until a switch is turned on', async () => {
+      const settings = new SettingsStore(webCfg.web.settingsFile, deriveKeys(SECRET).enc);
+      const admin = cookiesOf(await signIn('admin-code'));
+      const boss = cookiesOf(await signIn('owner-code')); // owner through the group (access level 50)
+      const dev = cookiesOf(await signIn('dev-code')); // developer (30) on alpha
+      const may = async (cookie: string) => (await api(cookie, '/estimate?kind=wiki')).status === 200;
+      const buttons = async (cookie: string) => (await (await fetch(`${base}/p/alpha`, { headers: { cookie } })).text()).includes('data-ai="wiki"');
+      try {
+        // nothing saved: administrators and owners, nobody else; the page shows the buttons to exactly those people
+        expect([await may(admin), await may(boss), await may(dev)]).toEqual([true, true, false]);
+        expect([await buttons(admin), await buttons(boss), await buttons(dev)]).toEqual([true, true, false]);
+        // the access level of the person is kept (the higher of project and group access)
+        const kept = JSON.parse(open(deriveKeys(SECRET).enc, (await readFile(webCfg.web.membersFile, 'utf8')).trim())) as Record<string, { projects: { level?: number }[] }>;
+        expect(kept['boss']!.projects[0]!.level).toBe(50);
+        expect(kept['dev']!.projects[0]!.level).toBe(30);
+
+        // developers on, owners off
+        await settings.update((s) => void (s.generate = { developer: true, owner: false }));
+        expect([await may(admin), await may(boss), await may(dev)]).toEqual([true, false, true]);
+        // administrators off: a GitLab administrator who holds no level on the project is refused too
+        await settings.update((s) => void (s.generate = { admin: false, developer: true, owner: false }));
+        expect([await may(admin), await may(boss), await may(dev)]).toEqual([false, false, true]);
+        // the refusal also covers starting a run, which never reaches the AI
+        expect((await api(boss, '/generate', 'POST', { kind: 'wiki', token: 'x' })).status).toBe(404);
+        expect(calls.chat + calls.image).toBe(0);
+      } finally {
+        await settings.update((s) => void delete s.generate);
+      }
+      expect([await may(admin), await may(boss), await may(dev)]).toEqual([true, true, false]);
     });
 
     it('never calls the AI without a valid agreement; a used or foreign agreement is refused', async () => {

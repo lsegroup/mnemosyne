@@ -7,7 +7,7 @@ import type { MnemosyneConfig } from './config.js';
 import { MIN_SECRET_LENGTH, deriveKeys, signToken, verifyToken, type DerivedKeys } from './secrets.js';
 import { ProviderStore, ProviderValidationError } from './provider-store.js';
 import { AuditLog, clientIp, type AuditInput } from './audit.js';
-import { SettingsStore, type GitLabSettings, type PortalSettings } from './settings-store.js';
+import { SettingsStore, type GitLabSettings, type PortalSettings, generateRoles, mayGenerate } from './settings-store.js';
 import { docsNotFound, homePage, loginPage, nodePage, notesPage, profilePage, projectHome, type ProjectCard } from './web-pages.js';
 import { MAX_TOKEN_DAYS, TokenError, TokenStore } from './token-store.js';
 import { aiLockFile, aiLockHeldBy, holdAiLock, releaseAiLock } from './ai-lock.js';
@@ -372,6 +372,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   // Re-check GitLab (still active? still administrator? which projects?) with the stored refresh token, on the
   // server, with no browser round trip. Only when this fails does the person have to sign in again.
   const refreshing = new Map<string, Promise<boolean>>();
+  const levelTried = new Map<string, number>();
   const refreshMember = (username: string): Promise<boolean> => {
     const running = refreshing.get(username);
     if (running) return running;
@@ -410,7 +411,15 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   const freshSession = async (req: Request) => {
     const ds = docsSession(req);
     if (!ds) return null;
-    if (Date.now() - ds.m.at < MEMBER_FRESH_MS) return ds;
+    if (Date.now() - ds.m.at < MEMBER_FRESH_MS) {
+      // an entry saved before the access levels were kept: learn them now (at most every 10 minutes per person), it decides who may generate
+      const lastTry = levelTried.get(ds.s.u) ?? 0;
+      if (ds.m.refresh && ds.m.projects?.some((p) => p.level === undefined) && Date.now() - lastTry > 10 * 60 * 1000) {
+        levelTried.set(ds.s.u, Date.now());
+        if (await refreshMember(ds.s.u)) return docsSession(req) ?? ds;
+      }
+      return ds;
+    }
     if (await refreshMember(ds.s.u)) return docsSession(req);
     // refresh failed: keep working on the old answer only if GitLab could not be reached, else sign out
     const m = members.get(ds.s.u);
@@ -501,7 +510,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
 
   // --------------------------------------------------------------------------
   // Project area. The project page is blank until documentation has been generated. Generating
-  // (AI, costs money) is for GitLab administrators only and needs an explicit agreement every time:
+  // (AI, costs money) is for the levels switched on in Admin -> Access (default: GitLab administrators and project owners) and needs an explicit agreement every time:
   // the server only hands out a one-time consent token together with the cost estimate, and refuses
   // to start without it. A daily cap and "one AI job at a time" bound the spending.
   // --------------------------------------------------------------------------
@@ -512,7 +521,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   const CONSENT_TTL_S = 600;
 
   /** Signed-in reader of an existing project they may see; otherwise answers and returns null. */
-  const gate = async (req: Request, res: Response, adminOnly = false) => {
+  const gate = async (req: Request, res: Response, adminOnly: boolean | 'generate' = false) => {
     const ds = await freshSession(req);
     if (!ds || !nodeIndex || !docStore) {
       res.redirect(`${basePath}/`);
@@ -535,8 +544,11 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
       return null;
     };
     if (!canRead(ds.m, project)) return refuse('Project documentation refused (not a member of the matching GitLab project)');
-    if (adminOnly && !ds.m.admin) return refuse('Administrator-only page refused');
     const gl = ds.m.projects ? matchProject(project, ds.m.projects) : null;
+    if (adminOnly === 'generate') {
+      // AI jobs cost money: only the levels switched on in Admin -> Access (default: GitLab administrators and project owners)
+      if (!mayGenerate(generateRoles((await settings?.get()) ?? {}), ds.m, gl?.level)) return refuse('AI generation refused: this person\'s level is not allowed to generate (Admin -> Access)');
+    } else if (adminOnly && !ds.m.admin) return refuse('Administrator-only page refused');
     // a GitLab project nobody has written notes for yet still gets its (blank) page
     if (!(await nodeIndex.inProject(project)).length && !gl) {
       notFound(res, ds, 'This page does not exist, or you do not have access to it.');
@@ -656,6 +668,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
         project,
         subtitle: g.subtitle,
         isAdmin: ds.m.admin,
+        canGenerate: mayGenerate(generateRoles((await settings?.get()) ?? {}), ds.m, g.gl?.level),
         wiki,
         history: changeHistory(await nodeIndex!.inProject(project)),
         glUrl: g.gl?.webUrl ?? null,
@@ -797,7 +810,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   };
 
   router.get('/p/:project/api/estimate', async (req, res) => {
-    const g = await gate(req, res, true);
+    const g = await gate(req, res, 'generate');
     if (!g || !docsApiOk(req, res)) return;
     const kind = req.query.kind === 'diagram' ? 'diagram' : req.query.kind === 'wiki' ? 'wiki' : null;
     if (!kind) return void fail400(res, 'unknown kind');
@@ -952,7 +965,7 @@ export function createWebPortal(cfg: MnemosyneConfig): WebPortal {
   };
 
   router.post('/p/:project/api/generate', async (req, res) => {
-    const g = await gate(req, res, true);
+    const g = await gate(req, res, 'generate');
     if (!g || !docsApiOk(req, res)) return;
     const kind = req.body?.kind === 'diagram' ? 'diagram' : req.body?.kind === 'wiki' ? 'wiki' : null;
     if (!kind) return void fail400(res, 'unknown kind');

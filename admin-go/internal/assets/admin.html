@@ -156,7 +156,7 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
   <form method="post" action="@@BASE@@/admin/auth/logout"><button class="btn small" type="submit">Sign out</button></form></div>
 </header>
 <div class="layout">
-  <nav class="side" aria-label="Admin sections"><a href="#llm" data-tab="llm" class="active">LLM</a><a href="#usage" data-tab="usage">LLM usage</a><a href="#auto" data-tab="auto">LLM auto</a><a href="#sso" data-tab="sso">SSO</a><a href="#users" data-tab="users">Users</a><a href="#audit" data-tab="audit">Audit</a><a href="#license" data-tab="license">License</a></nav>
+  <nav class="side" aria-label="Admin sections"><a href="#llm" data-tab="llm" class="active">LLM</a><a href="#usage" data-tab="usage">LLM usage</a><a href="#auto" data-tab="auto">LLM auto</a><a href="#sso" data-tab="sso">SSO</a><a href="#access" data-tab="access">Access</a><a href="#users" data-tab="users">Users</a><a href="#audit" data-tab="audit">Audit</a><a href="#license" data-tab="license">License</a></nav>
   <main>
     <section id="tab-llm" class="tab">
       <h2>LLM</h2>
@@ -367,6 +367,18 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
       </div>
     </section>
 
+    <section id="tab-access" class="tab" hidden>
+      <h2>Access</h2>
+      <p class="lead">Who may start the AI jobs on the project pages: write the documentation and create the workflow diagram (text and pictures). Every job still shows its estimated cost and needs an explicit agreement, and the daily limit applies to everybody.</p>
+      <div class="step">
+        <h3>Who may generate</h3>
+        <p class="sub">A person's level is the access they have on the GitLab project the notes belong to (the higher of their project and group access); it is read from GitLab when they sign in. With nothing saved, GitLab administrators and owners may generate, nobody else. A new setting is used at once; a change of someone's GitLab access shows up within 12 hours or at their next sign-in.</p>
+        <div class="what" id="accessList"></div>
+        <div class="row full"><button class="btn primary" type="button" id="accessSave">Save</button><button class="btn" type="button" id="accessReset">Back to the default</button><span id="accessMsg" class="msg"></span></div>
+        <p class="hint2" style="margin:12px 0 0">Not on this list, and not changeable: this admin area and the scheduler (LLM auto) are for GitLab administrators only, and the source notes of a project stay visible to administrators only.</p>
+      </div>
+    </section>
+
     <section id="tab-users" class="tab" hidden>
       <h2>Users</h2>
       <p class="lead">Who holds the seats of this installation. A person takes a seat the first time they use the documentation portal signed in with GitLab; the first people take the seats up to the limit of the edition and the next person is refused until a seat is freed.</p>
@@ -451,12 +463,13 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
   }
   // --- tabs (left menu) ---
   function showTab(){
-    var TABS=['llm','usage','auto','sso','users','audit','license'];
+    var TABS=['llm','usage','auto','sso','access','users','audit','license'];
     var t=(location.hash||'#llm').slice(1);if(TABS.indexOf(t)<0)t='llm';
     TABS.forEach(function(n){$('tab-'+n).hidden=(n!==t)});
     if(t==='audit')loadAudit();
     if(t==='usage')loadUsage();
     if(t==='users')loadUsers();
+    if(t==='access')loadAccess();
     if(t==='license')loadLicense();
     if(t==='auto')loadAuto(autoLoaded);
     Array.prototype.forEach.call(document.querySelectorAll('.side a'),function(a){a.className=a.getAttribute('data-tab')===t?'active':''});
@@ -622,6 +635,28 @@ input.cbx:checked:after{content:"";position:absolute;left:5px;top:1px;width:5px;
     ev.preventDefault();note('ssoMsg','');
     call('PUT','/settings',{gitlabUrl:$('gitlabUrl').value,clientId:$('clientId').value,clientSecret:$('clientSecret').value})
       .then(function(){note('ssoMsg','Saved.',true);return loadSso()}).catch(function(e){note('ssoMsg',e.message)});
+  });
+
+  // --- Access tab: who may start the AI jobs on the project pages ---
+  var ACCESS_DEFAULTS={};
+  function accessBox(l){
+    var lab=document.createElement('label');lab.className='opt'+(l.on?' on':'');
+    var cb=document.createElement('input');cb.type='checkbox';cb.className='cbx';cb.checked=l.on;cb.setAttribute('data-level',l.key);
+    cb.addEventListener('change',function(){lab.className='opt'+(cb.checked?' on':'')});
+    var span=document.createElement('span'),b=document.createElement('b'),d=document.createElement('span');
+    b.textContent=l.label;d.className='d';d.textContent=l.hint;span.appendChild(b);span.appendChild(d);lab.appendChild(cb);lab.appendChild(span);return lab;
+  }
+  function loadAccess(){return call('GET','/access').then(function(c){
+    ACCESS_DEFAULTS=c.defaults||{};var box=$('accessList');box.textContent='';
+    c.levels.forEach(function(l){box.appendChild(accessBox(l))});note('accessMsg','');
+  }).catch(function(e){note('accessMsg',e.message)})}
+  $('accessSave').addEventListener('click',function(){
+    var body={};Array.prototype.forEach.call(document.querySelectorAll('#accessList input[data-level]'),function(cb){body[cb.getAttribute('data-level')]=cb.checked});
+    note('accessMsg','');call('PUT','/access',body).then(function(){note('accessMsg','Saved.',true);return loadAccess()}).catch(function(e){note('accessMsg',e.message)});
+  });
+  $('accessReset').addEventListener('click',function(){
+    Array.prototype.forEach.call(document.querySelectorAll('#accessList input[data-level]'),function(cb){cb.checked=!!ACCESS_DEFAULTS[cb.getAttribute('data-level')];cb.dispatchEvent(new Event('change'))});
+    note('accessMsg','Default restored: press Save to keep it.',true);
   });
 
   // --- Audit tab ---

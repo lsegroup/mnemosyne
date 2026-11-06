@@ -432,6 +432,8 @@ export interface ProjectHomeView {
   project: string;
   subtitle: string;
   isAdmin: boolean;
+  /** May this person start the AI jobs here (Admin -> Access: GitLab administrator, project owner, ...)? */
+  canGenerate: boolean;
   /** Text and image models are chosen in Admin → LLM; the buttons explain what is missing. */
   wiki: { meta: DocMeta; html: string; toc: { level: number; text: string; id: string }[] } | null;
   /** The newest notes (built by the server, not the AI). */
@@ -535,7 +537,7 @@ export function projectHome(v: ProjectHomeView): string {
     ? `<aside class="side"><div class="card"><h3>${esc(v.project)}</h3>${
         v.diagram
           ? `<a class="pic" id="pic" href="${base}/p/${enc}/diagram/${esc(v.diagram.id)}" target="_blank" rel="noopener"><img src="${base}/p/${enc}/diagram/${esc(v.diagram.id)}" alt="Workflow diagram of ${esc(v.project)}"></a><p class="cap">Workflow diagram · click to enlarge<br>created ${esc(when(v.diagram.generatedAt))} by ${esc(v.diagram.model)}</p>${(v.diagram.pictures ?? []).length ? `<div class="subs"><p class="cap">Detail pictures · click to enlarge</p>${(v.diagram.pictures ?? []).map((p, i) => `<a class="pic sub" href="${base}/p/${enc}/diagram/${esc(v.diagram!.id)}/${i + 1}" target="_blank" rel="noopener"><img src="${base}/p/${enc}/diagram/${esc(v.diagram!.id)}/${i + 1}" alt="${esc(p.name)} diagram of ${esc(v.project)}"><span>${esc(p.name)}</span></a>`).join('')}</div>` : ''}${vers(v.diagramVersions, `${base}/p/${enc}/diagram/`, 'diagrams')}`
-          : `<div class="noimg">Workflow diagram<br>not created yet${v.isAdmin ? '<br>Use “Create workflow diagram” above.' : ''}</div>`
+          : `<div class="noimg">Workflow diagram<br>not created yet${v.canGenerate ? '<br>Use “Create workflow diagram” above.' : ''}</div>`
       }<dl><dt>Documentation</dt><dd>${esc(when(v.wiki.meta.generatedAt))}</dd><dt>Written by</dt><dd>${esc(v.wiki.meta.model)}</dd><dt>Source notes</dt><dd>${v.wiki.meta.noteCount ?? '?'} notes</dd><dt>Latest note</dt><dd>${esc(v.history[0]?.date ?? 'unknown')} UTC</dd>${v.glUrl ? `<dt>GitLab project</dt><dd><a href="${esc(v.glUrl)}" rel="noopener noreferrer">${esc(v.glUrl.replace(/^https?:\/\//, ''))}</a></dd>` : ''}</dl></div>${contents}</aside>`
     : '';
 
@@ -544,7 +546,7 @@ export function projectHome(v: ProjectHomeView): string {
 ${v.wikiVersions.length > 1 ? `<p class="versions">Other versions: ${v.wikiVersions.slice(0, 8).map((m, i) => (m.id === v.wiki!.meta.id ? `<b>${esc(when(m.generatedAt))}</b>` : `<a href="${base}/p/${enc}?v=${esc(m.id)}">${esc(when(m.generatedAt))}${i === 0 ? ' (latest)' : ''}</a>`)).join(' · ')}</p>` : ''}
 <div class="wp"><div class="main"><article>${card}${v.wiki.html}</article>${hist}</div></div>
 ${v.diagram ? `<div id="lightbox" hidden><img alt="Workflow diagram of ${esc(v.project)}"></div>` : ''}`
-    : `<div class="blank"><strong>No documentation has been generated yet</strong><span>${v.isAdmin ? 'Use “Generate documentation” to write the project page from all its notes.' : 'An administrator can generate it from the project notes.'}</span></div>`;
+    : `<div class="blank"><strong>No documentation has been generated yet</strong><span>${v.canGenerate ? 'Use “Generate documentation” to write the project page from all its notes.' : 'A project owner or an administrator can generate it from the project notes.'}</span></div>`;
 
   const pdfLine = v.pdf
     ? `<p class="versions">Project PDF · created <b>${esc(when(v.pdf.generatedAt))}</b> · <a href="${base}/p/${enc}/pdf/${esc(v.pdf.id)}">Download PDF</a>${vers(v.pdfVersions, `${base}/p/${enc}/pdf/`, 'PDFs').replace(/^<p class="versions">/, ' · ').replace(/<\/p>$/, '')}</p>`
@@ -554,7 +556,7 @@ ${v.diagram ? `<div id="lightbox" hidden><img alt="Workflow diagram of ${esc(v.p
 <h1>${esc(v.project)}</h1>
 <p class="lead">${esc(v.subtitle)}</p>
 <div class="actions">
-  ${v.isAdmin ? `<button class="btn primary ai" type="button" data-ai="wiki"${v.busy ? ' disabled' : ''}>${has ? 'Regenerate documentation' : 'Generate documentation'}</button>
+  ${v.canGenerate ? `<button class="btn primary ai" type="button" data-ai="wiki"${v.busy ? ' disabled' : ''}>${has ? 'Regenerate documentation' : 'Generate documentation'}</button>
   <button class="btn ai" type="button" data-ai="diagram"${has && !v.busy ? '' : ' disabled'} title="${has ? '' : 'Generate the documentation first'}">Create workflow diagram</button>` : ''}
   <button class="btn" type="button" id="pdfBtn"${has && !v.busy ? '' : ' disabled'} title="${has ? '' : 'Becomes active once the documentation exists'}">Create project PDF</button>
   ${v.isAdmin ? `<a class="btn" href="${base}/p/${enc}/notes">Source notes</a>` : ''}

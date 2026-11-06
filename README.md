@@ -124,7 +124,7 @@ from the licence server.
   (semantic), fused with RRF — no search daemon, tens of MB resident.
 - **Interfaces:** one core behind MCP over stdio, MCP over Streamable HTTP, and plain REST. Nine tools: `search_memory` · `get_node` · `get_node_history` · `create_node` ·
   `update_node` · `link_nodes` · `link_node_to_code` · `neighbors` · `reindex`.
-- **Corporate wiki:** people sign in with GitLab and see the documentation of the projects they belong to. An administrator generates (or schedules) the article for a project
+- **Corporate wiki:** people sign in with GitLab and see the documentation of the projects they belong to. Whoever is allowed to (GitLab administrators and project owners by default, a switch per level under Admin → Access) generates the article for a project, and an administrator can also schedule it,
   from all of its notes, the workflow diagram, and a PDF handbook with cover, index and the diagram pages. A new diagram run replaces every earlier diagram of the project.
 - **LLM usage:** the cost center — every AI job, who started it, what each model used, what it cost, per month.
 - **Personal MCP tokens:** every person can issue their own token (1 to 90 days, shown once, revocable) from their profile.
@@ -188,7 +188,7 @@ diagram in the card at the top right, and a button for the PDF handbook.
 
 Administrators connect an AI provider: (1) enter the provider and its API key (stored encrypted, never shown again), (2) fetch the models that key can really use (this only reads the
 model list and costs nothing), (3) choose one model each for text, images and the PDF job, and set limits, sampling, reasoning effort and the prompts of every job, including the editable
-*Instruction for the picture*. Nothing in Mnemosyne calls a model unless an administrator presses a button and agrees to the estimated cost in a popup.
+*Instruction for the picture*. Nothing in Mnemosyne calls a model unless a person who is allowed to (GitLab administrators and project owners by default; Admin → Access grants or revokes it per level) presses a button and agrees to the estimated cost in a popup. The scheduler (LLM auto) and the admin area are for GitLab administrators only.
 
 ### 4. Admin: audit trail
 

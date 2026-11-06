@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Who may generate documentation and pictures: a switch per level
+- New admin tab **Access**: one check box per level for starting the AI jobs on the project pages (write the documentation, create the workflow diagram, with its pictures): GitLab administrators, owners, maintainers, developers, reporters and guests. With nothing saved, **administrators and owners** may, nobody else. Before, only GitLab administrators could, so a person who owns a project could not build its page. Every job still shows its estimated cost and needs the person's agreement, and the daily limit applies to everybody.
+- A person's level is the access they hold on the GitLab project of the notes (the higher of project and group access), read from GitLab at sign-in and at the 12-hourly re-check; people who signed in before this version get it at their next check. The server checks the switches on every estimate and every start, not only in the buttons; the project page shows the buttons to exactly the people who may. A change is in the audit trail with what changed (`- owner: true` / `+ developer: true`).
+- Unchanged and still for GitLab administrators only: the admin area, the scheduler (LLM auto) and the source notes of a project.
+
 ## 0.6.2 — 2026-11-06
 
 Bearer token enforcement is fixed on the reference instance; everything that was unreleased since 0.6.1 ships with it.

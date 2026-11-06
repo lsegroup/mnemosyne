@@ -14,7 +14,7 @@ export interface MemberEntry {
   /** Epoch ms of the last successful check against GitLab. */
   at: number;
   admin: boolean;
-  projects: { id: number; name: string; path: string; fullPath: string; webUrl: string }[] | null;
+  projects: { id: number; name: string; path: string; fullPath: string; webUrl: string; level?: number }[] | null;
   /** GitLab refresh token (rotated on every use). Absent = the next check needs a browser sign-in. */
   refresh?: string;
 }

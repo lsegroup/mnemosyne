@@ -211,6 +211,8 @@ func (s *Server) routes() {
 	m.HandleFunc("PUT "+api+"/llm/assignments", s.apiHandler(s.putAssignments))
 	m.HandleFunc("GET "+api+"/settings", s.apiHandler(s.getSettings))
 	m.HandleFunc("PUT "+api+"/settings", s.apiHandler(s.putSettings))
+	m.HandleFunc("GET "+api+"/access", s.apiHandler(s.getAccess))
+	m.HandleFunc("PUT "+api+"/access", s.apiHandler(s.putAccess))
 	m.HandleFunc("GET "+api+"/audit", s.apiHandler(s.getAudit))
 	m.HandleFunc("GET "+api+"/usage", s.apiHandler(s.getUsage))
 	m.HandleFunc("GET "+api+"/auto", s.apiHandler(s.getAuto))

@@ -12,6 +12,8 @@ export interface GitLabProject {
   path: string;
   fullPath: string;
   webUrl: string;
+  /** The person's GitLab access level on this project (the higher of project and group access; 50 = owner). Absent in entries saved before 0.6.3. */
+  level?: number;
 }
 
 export { slug };
@@ -28,10 +30,17 @@ export function matchProject(notesProject: string, projects: GitLabProject[]): G
 
 /** The projects this GitLab user belongs to, read with their own access token (scope `read_api`). */
 export async function fetchMemberships(gitlabUrl: string, token: string): Promise<GitLabProject[] | null> {
-  type Row = { id: number; name: string; path: string; path_with_namespace: string; web_url: string };
+  type Row = {
+    id: number;
+    name: string;
+    path: string;
+    path_with_namespace: string;
+    web_url: string;
+    permissions?: { project_access?: { access_level?: number } | null; group_access?: { access_level?: number } | null };
+  };
   const get = async (page: number): Promise<Response | null> => {
     try {
-      return await fetch(`${gitlabUrl}/api/v4/projects?membership=true&simple=true&per_page=100&page=${page}`, {
+      return await fetch(`${gitlabUrl}/api/v4/projects?membership=true&per_page=100&page=${page}`, {
         headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
         signal: AbortSignal.timeout(10_000),
       });
@@ -51,7 +60,15 @@ export async function fetchMemberships(gitlabUrl: string, token: string): Promis
       return r?.ok ? ((await r.json()) as Row[]) : [];
     }),
   );
-  return [...rows, ...rest.flat()].map((r) => ({ id: r.id, name: r.name, path: r.path, fullPath: r.path_with_namespace, webUrl: r.web_url }));
+  // the full project record (not `simple`) carries the person's access level, which decides who may generate documentation
+  return [...rows, ...rest.flat()].map((r) => ({
+    id: r.id,
+    name: r.name,
+    path: r.path,
+    fullPath: r.path_with_namespace,
+    webUrl: r.web_url,
+    level: Math.max(r.permissions?.project_access?.access_level ?? 0, r.permissions?.group_access?.access_level ?? 0),
+  }));
 }
 
 /** Mask anything that looks like a credential before a note is shown in a browser. */
