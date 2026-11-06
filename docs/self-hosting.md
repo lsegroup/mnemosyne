@@ -14,7 +14,7 @@
 docs and `bin/SHA256SUMS`. On a server with Node.js 20+, npm, git and curl:
 
 ```bash
-unzip mnemosyne_0.6.1.zip && cd mnemosyne_0.6.1
+unzip mnemosyne_0.6.2.zip && cd mnemosyne_0.6.2
 sudo ./install.sh --public-url https://mnemosyne.example.com --listen 127.0.0.1:40001     # ./install.sh --help lists every option
 ```
 

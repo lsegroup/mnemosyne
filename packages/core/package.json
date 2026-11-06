@@ -1,6 +1,6 @@
 {
   "name": "@mnemosyne/core",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "mnemosyne core: memory-node schema, markdown (de)serialization, search/embedder/LLM interfaces, graph traversal, rank fusion.",
   "license": "Apache-2.0",
   "type": "module",

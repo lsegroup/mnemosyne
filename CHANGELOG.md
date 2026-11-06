@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.6.2 — 2026-11-06
+
+Bearer token enforcement is fixed on the reference instance; everything that was unreleased since 0.6.1 ships with it.
+
+### Fixed: bearer token enforcement
+- The reference instance accepted MCP and REST calls with no token at all: `MNEMOSYNE_REQUIRE_TOKEN` was not set there, so a call without a token was let through (the documented default). It is set now: every MCP and REST call needs a valid personal token (`Authorization: Bearer mnm_...`, issued in the profile of the portal) and gets HTTP 401 without one; only `/health` and the portal sign-in stay open. Checked on the running instance: no token, a made-up `mnm_` token and a random string are all refused with 401, a valid personal token is let in with 200.
+- The token check itself in the server did not change (it is covered by `mcp-token-auth.test.ts`): an expired or revoked personal token is always refused with its reason; a string that does not start with `mnm_` counts as "no token". For your own installation, set `MNEMOSYNE_REQUIRE_TOKEN=1` in the settings file when every client should have to identify itself (see `docs/self-hosting.md`); every client then needs its token in its configuration, for example `"headers": {"Authorization": "Bearer mnm_..."}` in `.mcp.json`.
 
 ### 30-day trial restored
 - Company policy: everything runs for the first 30 days without any licence. At its first start the program asks the licence server for the trial (domain, a random installation id, version, seats in use and a nonce; never notes or project content). During the trial there is no seat limit, the Audit tab shows the whole history and GitLab sign-in for the admin area works. After the 30 days (or while the licence server cannot be reached) it reverts to the free edition and keeps running - 4 seats, the last 10 audit records, no admin GitLab sign-in; people who already hold a seat keep it and keep working, nobody new is admitted above the limit. The License tab shows the days left and warns while no built-in admin account is set up. This replaces the earlier entry below that said there is no trial.
